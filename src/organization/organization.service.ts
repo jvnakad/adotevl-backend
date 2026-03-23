@@ -36,4 +36,9 @@ export class OrganizationService {
   async findByCnpj(cnpj: string) {
     return this.organizationRepository.findOne({ where: { cnpj } });
   }
+
+  async update(id: string, dto: Partial<CreateOrganizationDto>) {
+    await this.organizationRepository.update(id, dto);
+    return this.organizationRepository.findOne({ where: { id } });
+  }
 }

@@ -33,36 +33,15 @@ npm run start:dev
 
 A API estará disponível em `http://localhost:3000`.
 
-## Rotas disponíveis
+## Documentação das rotas
 
-### Auth
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| POST | `/auth/login` | Autenticação com e-mail e senha. Retorna JWT. |
+Com o servidor rodando, acesse a documentação interativa completa em:
 
-### Organizações
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| POST | `/organizations` | Cria uma organização |
-| GET | `/organizations` | Lista todas as organizações |
-| GET | `/organizations/:id` | Busca organização por ID |
-| PATCH | `/organizations/:id` | Atualiza organização |
+```
+http://localhost:3000/docs
+```
 
-### Perfis
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| POST | `/profiles` | Cria um perfil |
-| GET | `/profiles` | Lista todos os perfis |
-| GET | `/profiles/:id` | Busca perfil por ID |
-| DELETE | `/profiles/:id` | Remove um perfil |
-
-### Usuários
-| Método | Rota | Descrição |
-|--------|------|-----------|
-| POST | `/users` | Cria um usuário |
-| GET | `/users` | Lista todos os usuários |
-| GET | `/users/:id` | Busca usuário por ID |
-| PATCH | `/users/confirm/:code` | Confirma conta via código |
+O Swagger lista todas as rotas disponíveis, parâmetros esperados e permite testar os endpoints diretamente pelo navegador.
 
 ## Observações
 

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Param, Body } from '@nestjs/common';
 import { OrganizationService } from './organization.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 
@@ -19,5 +19,10 @@ export class OrganizationController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.organizationService.findOne(id);
+  }
+
+  @Patch(':id')
+  update(@Param('id') id: string, @Body() dto: any) {
+    return this.organizationService.update(id, dto);
   }
 }

@@ -9,6 +9,7 @@ import { ProfileModule } from './profile/profile.module';
 import { Profile } from './profile/profile.entity';
 import { UserModule } from './user/user.module';
 import { User } from './user/user.entity';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { User } from './user/user.entity';
     OrganizationModule,
     ProfileModule,
     UserModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

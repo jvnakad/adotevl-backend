@@ -10,6 +10,8 @@ import { Profile } from './profile/profile.entity';
 import { UserModule } from './user/user.module';
 import { User } from './user/user.entity';
 import { AuthModule } from './auth/auth.module';
+import { PetModule } from './pet/pet.module';
+import { Pet } from './pet/pet.entity';
 
 @Module({
   imports: [
@@ -17,7 +19,7 @@ import { AuthModule } from './auth/auth.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User],
+      entities: [Organization, Profile, User, Pet],
       synchronize: true,
       ssl: { rejectUnauthorized: false },
     }),
@@ -25,6 +27,7 @@ import { AuthModule } from './auth/auth.module';
     ProfileModule,
     UserModule,
     AuthModule,
+    PetModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -14,6 +14,8 @@ import { PetModule } from './pet/pet.module';
 import { Pet } from './pet/pet.entity';
 import { MedicalRecordModule } from './medical-record/medical-record.module';
 import { MedicalRecord } from './medical-record/medical-record.entity';
+import { TeamModule } from './team/team.module';
+import { Team } from './team/team.entity';
 
 @Module({
   imports: [
@@ -21,7 +23,7 @@ import { MedicalRecord } from './medical-record/medical-record.entity';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, MedicalRecord],
+      entities: [Organization, Profile, User, Pet, MedicalRecord, Team],
       synchronize: true,
       ssl: { rejectUnauthorized: false },
     }),
@@ -31,6 +33,7 @@ import { MedicalRecord } from './medical-record/medical-record.entity';
     AuthModule,
     PetModule,
     MedicalRecordModule,
+    TeamModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -17,8 +17,8 @@ export class CampaignController {
   @Post()
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Criar campanha', description: 'Perfis permitidos: ADMIN' })
-  create(@Body() dto: CreateCampaignDto) {
-    return this.campaignService.create(dto);
+  create(@Body() dto: CreateCampaignDto, @Request() req) {
+    return this.campaignService.create(dto, req.user.id);
   }
 
   @Get()
@@ -38,7 +38,7 @@ export class CampaignController {
   @Put(':id')
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Atualizar campanha', description: 'Perfis permitidos: ADMIN' })
-  update(@Param('id') id: string, @Body() dto: Partial<CreateCampaignDto>) {
-    return this.campaignService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: Partial<CreateCampaignDto>, @Request() req) {
+    return this.campaignService.update(id, dto, req.user.id);
   }
 }

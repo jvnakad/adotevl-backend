@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -17,8 +17,8 @@ export class OrganizationController {
 
   @Post()
   @ApiOperation({ summary: 'Criar organização', description: 'Perfis permitidos: ADMIN' })
-  create(@Body() dto: CreateOrganizationDto) {
-    return this.organizationService.create(dto);
+  create(@Body() dto: CreateOrganizationDto, @Request() req) {
+    return this.organizationService.create(dto, req.user.id);
   }
 
   @Get()

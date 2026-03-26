@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PaginationDto } from '../common/pagination.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -17,8 +17,8 @@ export class PetController {
   @Post()
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({ summary: 'Cadastrar pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
-  create(@Body() dto: CreatePetDto) {
-    return this.petService.create(dto);
+  create(@Body() dto: CreatePetDto, @Request() req) {
+    return this.petService.create(dto, req.user.id);
   }
 
   @Get()
@@ -38,7 +38,7 @@ export class PetController {
   @Put(':id')
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({ summary: 'Atualizar pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
-  update(@Param('id') id: string, @Body() dto: Partial<CreatePetDto>) {
-    return this.petService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: Partial<CreatePetDto>, @Request() req) {
+    return this.petService.update(id, dto, req.user.id);
   }
 }

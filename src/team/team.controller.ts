@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -17,8 +17,8 @@ export class TeamController {
 
   @Post()
   @ApiOperation({ summary: 'Criar equipe', description: 'Perfis permitidos: ADMIN' })
-  create(@Body() dto: CreateTeamDto) {
-    return this.teamService.create(dto);
+  create(@Body() dto: CreateTeamDto, @Request() req) {
+    return this.teamService.create(dto, req.user.id);
   }
 
   @Get()
@@ -35,7 +35,7 @@ export class TeamController {
 
   @Put(':id')
   @ApiOperation({ summary: 'Atualizar equipe', description: 'Perfis permitidos: ADMIN' })
-  update(@Param('id') id: string, @Body() dto: Partial<CreateTeamDto>) {
-    return this.teamService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: Partial<CreateTeamDto>, @Request() req) {
+    return this.teamService.update(id, dto, req.user.id);
   }
 }

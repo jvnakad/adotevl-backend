@@ -29,6 +29,7 @@ import { BankAccountModule } from './bank-account/bank-account.module';
 import { BankAccount } from './bank-account/bank-account.entity';
 import { OrganizationAddressModule } from './organization-address/organization-address.module';
 import { OrganizationAddress } from './organization-address/organization-address.entity';
+import { MailModule } from './mail/mail.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { OrganizationAddress } from './organization-address/organization-address
     PartnerModule,
     BankAccountModule,
     OrganizationAddressModule,
+    MailModule,
   ],
   controllers: [AppController],
   providers: [AppService],

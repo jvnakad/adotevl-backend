@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -17,8 +17,8 @@ export class VolunteerController {
 
   @Post()
   @ApiOperation({ summary: 'Cadastrar voluntário', description: 'Perfis permitidos: ADMIN' })
-  create(@Body() dto: CreateVolunteerDto) {
-    return this.volunteerService.create(dto);
+  create(@Body() dto: CreateVolunteerDto, @Request() req) {
+    return this.volunteerService.create(dto, req.user.id);
   }
 
   @Get()
@@ -36,7 +36,7 @@ export class VolunteerController {
 
   @Put(':id')
   @ApiOperation({ summary: 'Atualizar voluntário', description: 'Perfis permitidos: ADMIN' })
-  update(@Param('id') id: string, @Body() dto: Partial<CreateVolunteerDto>) {
-    return this.volunteerService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: Partial<CreateVolunteerDto>, @Request() req) {
+    return this.volunteerService.update(id, dto, req.user.id);
   }
 }

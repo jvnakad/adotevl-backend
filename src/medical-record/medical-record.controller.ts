@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -17,8 +17,8 @@ export class MedicalRecordController {
 
   @Post()
   @ApiOperation({ summary: 'Registrar consulta médica', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
-  create(@Body() dto: CreateMedicalRecordDto) {
-    return this.medicalRecordService.create(dto);
+  create(@Body() dto: CreateMedicalRecordDto, @Request() req) {
+    return this.medicalRecordService.create(dto, req.user.id);
   }
 
   @Get('pet/:petId')

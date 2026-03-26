@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Team } from './team.entity';
 import { CreateTeamDto } from './dto/create-team.dto';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class TeamService {
@@ -16,11 +18,9 @@ export class TeamService {
     return this.teamRepository.save(team);
   }
 
-  async findAll(organizationId?: string) {
-    if (organizationId) {
-      return this.teamRepository.find({ where: { organizationId, isActive: true } });
-    }
-    return this.teamRepository.find({ where: { isActive: true } });
+  async findAll(pagination: PaginationDto, organizationId?: string) {
+    const where = organizationId ? { organizationId, isActive: true } : { isActive: true };
+    return paginate(this.teamRepository, pagination, where);
   }
 
   async findOne(id: string) {

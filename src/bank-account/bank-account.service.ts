@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BankAccount } from './bank-account.entity';
 import { CreateBankAccountDto } from './dto/create-bank-account.dto';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class BankAccountService {
@@ -16,11 +18,9 @@ export class BankAccountService {
     return this.bankAccountRepository.save(bankAccount);
   }
 
-  async findAll(organizationId?: string) {
-    if (organizationId) {
-      return this.bankAccountRepository.find({ where: { organizationId } });
-    }
-    return this.bankAccountRepository.find();
+  async findAll(pagination: PaginationDto, organizationId?: string) {
+    const where = organizationId ? { organizationId } : undefined;
+    return paginate(this.bankAccountRepository, pagination, where);
   }
 
   async findOne(id: string) {

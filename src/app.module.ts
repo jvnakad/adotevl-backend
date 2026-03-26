@@ -18,6 +18,8 @@ import { TeamModule } from './team/team.module';
 import { Team } from './team/team.entity';
 import { VolunteerModule } from './volunteer/volunteer.module';
 import { Volunteer } from './volunteer/volunteer.entity';
+import { CampaignModule } from './campaign/campaign.module';
+import { Campaign } from './campaign/campaign.entity';
 
 @Module({
   imports: [
@@ -25,7 +27,7 @@ import { Volunteer } from './volunteer/volunteer.entity';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, MedicalRecord, Team, Volunteer],
+      entities: [Organization, Profile, User, Pet, MedicalRecord, Team, Volunteer, Campaign],
       synchronize: true,
       ssl: { rejectUnauthorized: false },
     }),
@@ -37,6 +39,7 @@ import { Volunteer } from './volunteer/volunteer.entity';
     MedicalRecordModule,
     TeamModule,
     VolunteerModule,
+    CampaignModule,
   ],
   controllers: [AppController],
   providers: [AppService],

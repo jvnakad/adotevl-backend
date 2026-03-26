@@ -12,6 +12,7 @@ import { User } from './user.entity';
 import { Profile } from '../profile/profile.entity';
 import { Organization } from '../organization/organization.entity';
 import { CreateUserDto } from './dto/create-user.dto';
+import { MailService } from '../mail/mail.service';
 
 @Injectable()
 export class UserService {
@@ -22,6 +23,7 @@ export class UserService {
     private readonly profileRepository: Repository<Profile>,
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
+    private readonly mailService: MailService,
   ) {}
 
   async create(dto: CreateUserDto, createdBy: string = null) {
@@ -71,7 +73,9 @@ export class UserService {
       updatedBy: createdBy,
     });
 
-    return this.userRepository.save(user);
+    const saved = await this.userRepository.save(user);
+    await this.mailService.sendConfirmationEmail(saved.email, saved.fullName, saved.confirmationCode);
+    return saved;
   }
 
   async confirmAccount(confirmationCode: string) {

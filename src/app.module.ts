@@ -25,6 +25,8 @@ import { FinancialEntry } from './financial/financial-entry.entity';
 import { FinancialExpense } from './financial/financial-expense.entity';
 import { PartnerModule } from './partner/partner.module';
 import { Partner } from './partner/partner.entity';
+import { BankAccountModule } from './bank-account/bank-account.module';
+import { BankAccount } from './bank-account/bank-account.entity';
 
 @Module({
   imports: [
@@ -32,7 +34,7 @@ import { Partner } from './partner/partner.entity';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner],
+      entities: [Organization, Profile, User, Pet, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount],
       synchronize: true,
       ssl: { rejectUnauthorized: false },
     }),
@@ -47,6 +49,7 @@ import { Partner } from './partner/partner.entity';
     CampaignModule,
     FinancialModule,
     PartnerModule,
+    BankAccountModule,
   ],
   controllers: [AppController],
   providers: [AppService],

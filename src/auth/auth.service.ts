@@ -1,6 +1,7 @@
 import {
   Injectable,
   UnauthorizedException,
+  NotFoundException,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
@@ -47,5 +48,12 @@ export class AuthService {
         organizationId: user.organizationId,
       },
     };
+  }
+
+  async me(userId: string) {
+    const user = await this.userService.findOne(userId);
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    const { password, confirmationCode, ...result } = user;
+    return result;
   }
 }

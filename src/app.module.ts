@@ -27,6 +27,8 @@ import { PartnerModule } from './partner/partner.module';
 import { Partner } from './partner/partner.entity';
 import { BankAccountModule } from './bank-account/bank-account.module';
 import { BankAccount } from './bank-account/bank-account.entity';
+import { OrganizationAddressModule } from './organization-address/organization-address.module';
+import { OrganizationAddress } from './organization-address/organization-address.entity';
 
 @Module({
   imports: [
@@ -34,7 +36,7 @@ import { BankAccount } from './bank-account/bank-account.entity';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount],
+      entities: [Organization, Profile, User, Pet, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress],
       synchronize: true,
       ssl: { rejectUnauthorized: false },
     }),
@@ -50,6 +52,7 @@ import { BankAccount } from './bank-account/bank-account.entity';
     FinancialModule,
     PartnerModule,
     BankAccountModule,
+    OrganizationAddressModule,
   ],
   controllers: [AppController],
   providers: [AppService],

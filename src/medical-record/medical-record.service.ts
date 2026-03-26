@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MedicalRecord } from './medical-record.entity';
 import { CreateMedicalRecordDto } from './dto/create-medical-record.dto';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class MedicalRecordService {
@@ -16,8 +18,8 @@ export class MedicalRecordService {
     return this.medicalRecordRepository.save(record);
   }
 
-  async findByPet(petId: string) {
-    return this.medicalRecordRepository.find({ where: { petId, isActive: true } });
+  async findByPet(petId: string, pagination: PaginationDto) {
+    return paginate(this.medicalRecordRepository, pagination, { petId, isActive: true });
   }
 
   async findOne(id: string) {

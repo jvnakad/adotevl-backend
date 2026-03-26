@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Campaign } from './campaign.entity';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class CampaignService {
@@ -16,11 +18,9 @@ export class CampaignService {
     return this.campaignRepository.save(campaign);
   }
 
-  async findAll(organizationId?: string) {
-    if (organizationId) {
-      return this.campaignRepository.find({ where: { organizationId, isActive: true } });
-    }
-    return this.campaignRepository.find({ where: { isActive: true } });
+  async findAll(pagination: PaginationDto, organizationId?: string) {
+    const where = organizationId ? { organizationId, isActive: true } : { isActive: true };
+    return paginate(this.campaignRepository, pagination, where);
   }
 
   async findOne(id: string) {

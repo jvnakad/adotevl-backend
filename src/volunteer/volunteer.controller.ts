@@ -1,10 +1,11 @@
-import { Controller, Post, Get, Put, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { VolunteerService } from './volunteer.service';
 import { CreateVolunteerDto } from './dto/create-volunteer.dto';
+import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Voluntários')
 @ApiBearerAuth()
@@ -22,8 +23,8 @@ export class VolunteerController {
 
   @Get()
   @ApiOperation({ summary: 'Listar voluntários', description: 'Perfis permitidos: ADMIN' })
-  findAll() {
-    return this.volunteerService.findAll();
+  findAll(@Query() pagination: PaginationDto) {
+    return this.volunteerService.findAll(pagination);
   }
 
   @Get(':id')

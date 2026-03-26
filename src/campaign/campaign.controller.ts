@@ -5,6 +5,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { CampaignService } from './campaign.service';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
+import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Campanhas')
 @ApiBearerAuth()
@@ -23,8 +24,8 @@ export class CampaignController {
   @Get()
   @Roles('ADMIN', 'FINANCIAL', 'VOLUNTEER')
   @ApiOperation({ summary: 'Listar campanhas', description: 'Perfis permitidos: ADMIN, FINANCIAL, VOLUNTEER' })
-  findAll(@Query('organizationId') organizationId?: string) {
-    return this.campaignService.findAll(organizationId);
+  findAll(@Query() pagination: PaginationDto, @Query('organizationId') organizationId?: string) {
+    return this.campaignService.findAll(pagination, organizationId);
   }
 
   @Get(':id')

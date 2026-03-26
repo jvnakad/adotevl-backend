@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Partner } from './partner.entity';
 import { CreatePartnerDto } from './dto/create-partner.dto';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class PartnerService {
@@ -16,8 +18,8 @@ export class PartnerService {
     return this.partnerRepository.save(partner);
   }
 
-  async findAll() {
-    return this.partnerRepository.find();
+  async findAll(pagination: PaginationDto) {
+    return paginate(this.partnerRepository, pagination);
   }
 
   async findOne(id: string) {

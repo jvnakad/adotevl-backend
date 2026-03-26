@@ -5,6 +5,8 @@ import { FinancialEntry } from './financial-entry.entity';
 import { FinancialExpense } from './financial-expense.entity';
 import { CreateFinancialEntryDto } from './dto/create-financial-entry.dto';
 import { CreateFinancialExpenseDto } from './dto/create-financial-expense.dto';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class FinancialService {
@@ -25,12 +27,12 @@ export class FinancialService {
     return this.expenseRepository.save(expense);
   }
 
-  async findAllEntries() {
-    return this.entryRepository.find();
+  async findAllEntries(pagination: PaginationDto) {
+    return paginate(this.entryRepository, pagination);
   }
 
-  async findAllExpenses() {
-    return this.expenseRepository.find();
+  async findAllExpenses(pagination: PaginationDto) {
+    return paginate(this.expenseRepository, pagination);
   }
 
   async getBalance() {

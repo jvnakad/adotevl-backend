@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Pet } from './pet.entity';
 import { CreatePetDto } from './dto/create-pet.dto';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class PetService {
@@ -16,11 +18,9 @@ export class PetService {
     return this.petRepository.save(pet);
   }
 
-  async findAll(organizationId?: string) {
-    if (organizationId) {
-      return this.petRepository.find({ where: { organizationId, isActive: true } });
-    }
-    return this.petRepository.find({ where: { isActive: true } });
+  async findAll(pagination: PaginationDto, organizationId?: string) {
+    const where = organizationId ? { organizationId, isActive: true } : { isActive: true };
+    return paginate(this.petRepository, pagination, where);
   }
 
   async findOne(id: string) {

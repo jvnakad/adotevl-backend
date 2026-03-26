@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -6,6 +6,7 @@ import { Roles } from '../auth/roles.decorator';
 import { FinancialService } from './financial.service';
 import { CreateFinancialEntryDto } from './dto/create-financial-entry.dto';
 import { CreateFinancialExpenseDto } from './dto/create-financial-expense.dto';
+import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Financeiro')
 @ApiBearerAuth()
@@ -29,14 +30,14 @@ export class FinancialController {
 
   @Get('entries')
   @ApiOperation({ summary: 'Listar entradas financeiras', description: 'Perfis permitidos: ADMIN, FINANCIAL' })
-  findAllEntries() {
-    return this.financialService.findAllEntries();
+  findAllEntries(@Query() pagination: PaginationDto) {
+    return this.financialService.findAllEntries(pagination);
   }
 
   @Get('expenses')
   @ApiOperation({ summary: 'Listar saídas financeiras', description: 'Perfis permitidos: ADMIN, FINANCIAL' })
-  findAllExpenses() {
-    return this.financialService.findAllExpenses();
+  findAllExpenses(@Query() pagination: PaginationDto) {
+    return this.financialService.findAllExpenses(pagination);
   }
 
   @Get('balance')

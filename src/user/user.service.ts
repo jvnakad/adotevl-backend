@@ -13,6 +13,8 @@ import { Profile } from '../profile/profile.entity';
 import { Organization } from '../organization/organization.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { MailService } from '../mail/mail.service';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class UserService {
@@ -87,8 +89,8 @@ export class UserService {
     return this.userRepository.save(user);
   }
 
-  async findAll() {
-    return this.userRepository.find();
+  async findAll(pagination: PaginationDto) {
+    return paginate(this.userRepository, pagination);
   }
 
   async findOne(id: string) {

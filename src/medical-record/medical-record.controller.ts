@@ -1,10 +1,11 @@
-import { Controller, Post, Get, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { MedicalRecordService } from './medical-record.service';
 import { CreateMedicalRecordDto } from './dto/create-medical-record.dto';
+import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Histórico Médico')
 @ApiBearerAuth()
@@ -22,8 +23,8 @@ export class MedicalRecordController {
 
   @Get('pet/:petId')
   @ApiOperation({ summary: 'Listar histórico médico por pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
-  findByPet(@Param('petId') petId: string) {
-    return this.medicalRecordService.findByPet(petId);
+  findByPet(@Param('petId') petId: string, @Query() pagination: PaginationDto) {
+    return this.medicalRecordService.findByPet(petId, pagination);
   }
 
   @Get(':id')

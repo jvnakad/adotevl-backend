@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Organization } from './organization.entity';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class OrganizationService {
@@ -25,8 +27,8 @@ export class OrganizationService {
     return this.organizationRepository.save(organization);
   }
 
-  async findAll() {
-    return this.organizationRepository.find();
+  async findAll(pagination: PaginationDto) {
+    return paginate(this.organizationRepository, pagination);
   }
 
   async findOne(id: string) {

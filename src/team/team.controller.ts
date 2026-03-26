@@ -5,6 +5,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { TeamService } from './team.service';
 import { CreateTeamDto } from './dto/create-team.dto';
+import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Equipes')
 @ApiBearerAuth()
@@ -22,8 +23,8 @@ export class TeamController {
 
   @Get()
   @ApiOperation({ summary: 'Listar equipes', description: 'Perfis permitidos: ADMIN' })
-  findAll(@Query('organizationId') organizationId?: string) {
-    return this.teamService.findAll(organizationId);
+  findAll(@Query() pagination: PaginationDto, @Query('organizationId') organizationId?: string) {
+    return this.teamService.findAll(pagination, organizationId);
   }
 
   @Get(':id')

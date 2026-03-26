@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Put, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { PaginationDto } from '../common/pagination.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
@@ -23,8 +24,8 @@ export class PetController {
   @Get()
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({ summary: 'Listar pets', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
-  findAll(@Query('organizationId') organizationId?: string) {
-    return this.petService.findAll(organizationId);
+  findAll(@Query() pagination: PaginationDto, @Query('organizationId') organizationId?: string) {
+    return this.petService.findAll(pagination, organizationId);
   }
 
   @Get(':id')

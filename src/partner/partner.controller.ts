@@ -1,10 +1,11 @@
-import { Controller, Post, Get, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { PartnerService } from './partner.service';
 import { CreatePartnerDto } from './dto/create-partner.dto';
+import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Parceiros')
 @ApiBearerAuth()
@@ -23,8 +24,8 @@ export class PartnerController {
   @Get()
   @Roles('ADMIN', 'FINANCIAL')
   @ApiOperation({ summary: 'Listar parceiros', description: 'Perfis permitidos: ADMIN, FINANCIAL' })
-  findAll() {
-    return this.partnerService.findAll();
+  findAll(@Query() pagination: PaginationDto) {
+    return this.partnerService.findAll(pagination);
   }
 
   @Get(':id')

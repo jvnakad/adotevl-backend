@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Volunteer } from './volunteer.entity';
 import { CreateVolunteerDto } from './dto/create-volunteer.dto';
+import { PaginationDto } from '../common/pagination.dto';
+import { paginate } from '../common/paginate.helper';
 
 @Injectable()
 export class VolunteerService {
@@ -20,8 +22,8 @@ export class VolunteerService {
     return this.volunteerRepository.save(volunteer);
   }
 
-  async findAll() {
-    return this.volunteerRepository.find({ where: { isActive: true } });
+  async findAll(pagination: PaginationDto) {
+    return paginate(this.volunteerRepository, pagination, { isActive: true });
   }
 
   async findOne(id: string) {

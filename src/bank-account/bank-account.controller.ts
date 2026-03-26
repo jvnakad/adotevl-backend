@@ -5,6 +5,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { BankAccountService } from './bank-account.service';
 import { CreateBankAccountDto } from './dto/create-bank-account.dto';
+import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Contas Bancárias')
 @ApiBearerAuth()
@@ -23,8 +24,8 @@ export class BankAccountController {
   @Get()
   @Roles('ADMIN', 'FINANCIAL')
   @ApiOperation({ summary: 'Listar contas bancárias', description: 'Perfis permitidos: ADMIN, FINANCIAL' })
-  findAll(@Query('organizationId') organizationId?: string) {
-    return this.bankAccountService.findAll(organizationId);
+  findAll(@Query() pagination: PaginationDto, @Query('organizationId') organizationId?: string) {
+    return this.bankAccountService.findAll(pagination, organizationId);
   }
 
   @Get(':id')

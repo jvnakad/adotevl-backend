@@ -1,10 +1,11 @@
-import { Controller, Post, Get, Patch, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Param, Body, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Usuários')
@@ -34,6 +35,15 @@ export class UserController {
   @ApiOperation({ summary: 'Buscar usuário por ID', description: 'Perfis permitidos: ADMIN, FINANCIAL, VOLUNTEER' })
   findOne(@Param('id') id: string) {
     return this.userService.findOne(id);
+  }
+
+  @Patch(':id')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Atualizar usuário', description: 'Perfis permitidos: ADMIN' })
+  update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Req() req) {
+    return this.userService.update(id, dto, req.user.id);
   }
 
   @Patch('confirm/:code')

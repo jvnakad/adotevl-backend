@@ -1,4 +1,5 @@
 import { IsString, IsNotEmpty, IsEmail, IsOptional, Matches, MinLength } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateUserDto {
   @IsString()
@@ -20,6 +21,12 @@ export class CreateUserDto {
   @IsNotEmpty({ message: 'A senha é obrigatória.' })
   @MinLength(8, { message: 'A senha deve ter no mínimo 8 caracteres.' })
   password: string;
+
+  @ApiPropertyOptional({ description: 'Celular (somente números, com DDD)' })
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{10,11}$/, { message: 'O celular deve conter 10 ou 11 dígitos numéricos (com DDD, sem formatação).' })
+  phone?: string;
 
   @IsString()
   @IsNotEmpty({ message: 'O perfil é obrigatório.' })

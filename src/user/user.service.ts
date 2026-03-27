@@ -111,6 +111,13 @@ export class UserService {
     return this.userRepository.findOne({ where: { id } });
   }
 
+  async activate(id: string, updatedBy: string = null) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.userRepository.update(id, { isActive: true, updatedBy });
+    return this.userRepository.findOne({ where: { id } });
+  }
+
   async approve(id: string, updatedBy: string = null) {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');

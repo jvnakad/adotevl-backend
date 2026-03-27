@@ -48,6 +48,15 @@ export class UserController {
     return this.userService.update(id, dto, req.user.id);
   }
 
+  @Patch(':id/activate')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Ativar usuário', description: 'Perfis permitidos: ADMIN' })
+  activate(@Param('id') id: string, @Req() req) {
+    return this.userService.activate(id, req.user.id);
+  }
+
   @Patch(':id/approve')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)

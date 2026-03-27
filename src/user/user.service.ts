@@ -13,6 +13,7 @@ import { Profile } from '../profile/profile.entity';
 import { Organization } from '../organization/organization.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { MailService } from '../mail/mail.service';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
@@ -90,8 +91,9 @@ export class UserService {
     return this.userRepository.save(user);
   }
 
-  async findAll(pagination: PaginationDto) {
-    return paginate(this.userRepository, pagination);
+  async findAll(pagination: PaginationDto, isApproved?: boolean) {
+    const where = isApproved !== undefined ? { isApproved } : {};
+    return paginate(this.userRepository, pagination, where);
   }
 
   async findOne(id: string) {
@@ -107,5 +109,39 @@ export class UserService {
     if (!user) throw new NotFoundException('Usuário não encontrado.');
     await this.userRepository.update(id, { ...dto, updatedBy });
     return this.userRepository.findOne({ where: { id } });
+  }
+
+  async approve(id: string, updatedBy: string = null) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.userRepository.update(id, { isApproved: true, updatedBy });
+    return this.userRepository.findOne({ where: { id } });
+  }
+
+  async reject(id: string, updatedBy: string = null) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.userRepository.update(id, { isActive: false, updatedBy });
+    return this.userRepository.findOne({ where: { id } });
+  }
+
+  async changePassword(id: string, dto: ChangePasswordDto) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    const match = await bcrypt.compare(dto.currentPassword, user.password);
+    if (!match) throw new BadRequestException('Senha atual incorreta.');
+    const hashed = await bcrypt.hash(dto.newPassword, 10);
+    await this.userRepository.update(id, { password: hashed });
+    return { message: 'Senha alterada com sucesso.' };
+  }
+
+  async resetPassword(id: string) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    const newPassword = randomUUID().slice(0, 8);
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await this.userRepository.update(id, { password: hashed });
+    await this.mailService.sendPasswordResetEmail(user.email, user.fullName, newPassword);
+    return { message: 'Senha redefinida e enviada por e-mail.' };
   }
 }

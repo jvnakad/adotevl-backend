@@ -9,6 +9,20 @@ export class MailService {
     this.resend = new Resend(process.env.RESEND_API_KEY);
   }
 
+  async sendPasswordResetEmail(to: string, name: string, newPassword: string) {
+    await this.resend.emails.send({
+      from: process.env.MAIL_FROM || 'AdoteVL <onboarding@resend.dev>',
+      to,
+      subject: 'Sua senha foi redefinida — AdoteVL',
+      html: `
+        <h2>Olá, ${name}!</h2>
+        <p>Sua senha foi redefinida pelo administrador. Use a senha temporária abaixo para acessar o sistema:</p>
+        <p style="font-size:20px;font-weight:bold;letter-spacing:2px;">${newPassword}</p>
+        <p>Por segurança, altere sua senha após o primeiro acesso.</p>
+      `,
+    });
+  }
+
   async sendConfirmationEmail(to: string, name: string, confirmationCode: string) {
     const confirmUrl = `${process.env.APP_URL || 'http://localhost:5173'}/confirm/${confirmationCode}`;
 

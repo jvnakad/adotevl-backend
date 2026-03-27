@@ -6,6 +6,7 @@ import { Roles } from '../auth/roles.decorator';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Usuários')
@@ -24,8 +25,9 @@ export class UserController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @ApiOperation({ summary: 'Listar usuários', description: 'Perfis permitidos: ADMIN' })
-  findAll(@Query() pagination: PaginationDto) {
-    return this.userService.findAll(pagination);
+  findAll(@Query() pagination: PaginationDto, @Query('isApproved') isApproved?: string) {
+    const approved = isApproved !== undefined ? isApproved === 'true' : undefined;
+    return this.userService.findAll(pagination, approved);
   }
 
   @Get(':id')
@@ -44,6 +46,42 @@ export class UserController {
   @ApiOperation({ summary: 'Atualizar usuário', description: 'Perfis permitidos: ADMIN' })
   update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Req() req) {
     return this.userService.update(id, dto, req.user.id);
+  }
+
+  @Patch(':id/approve')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Aprovar usuário', description: 'Perfis permitidos: ADMIN' })
+  approve(@Param('id') id: string, @Req() req) {
+    return this.userService.approve(id, req.user.id);
+  }
+
+  @Patch(':id/reject')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Rejeitar usuário', description: 'Perfis permitidos: ADMIN' })
+  reject(@Param('id') id: string, @Req() req) {
+    return this.userService.reject(id, req.user.id);
+  }
+
+  @Patch(':id/reset-password')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN')
+  @ApiOperation({ summary: 'Resetar senha do usuário', description: 'Perfis permitidos: ADMIN' })
+  resetPassword(@Param('id') id: string) {
+    return this.userService.resetPassword(id);
+  }
+
+  @Patch('me/password')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'FINANCIAL', 'VOLUNTEER')
+  @ApiOperation({ summary: 'Alterar própria senha', description: 'Perfis permitidos: ADMIN, FINANCIAL, VOLUNTEER' })
+  changePassword(@Body() dto: ChangePasswordDto, @Req() req) {
+    return this.userService.changePassword(req.user.id, dto);
   }
 
   @Patch('confirm/:code')

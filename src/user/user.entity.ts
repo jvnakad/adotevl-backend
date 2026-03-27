@@ -33,6 +33,9 @@ export class User {
   @Column({ name: 'is_confirmed', default: false })
   isConfirmed: boolean;
 
+  @Column({ name: 'is_approved', default: false })
+  isApproved: boolean;
+
   @Column({ name: 'confirmation_code', nullable: true })
   confirmationCode: string;
 

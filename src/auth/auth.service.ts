@@ -30,6 +30,10 @@ export class AuthService {
       throw new UnauthorizedException('Conta não confirmada. Verifique seu e-mail.');
     }
 
+    if (!user.isApproved) {
+      throw new UnauthorizedException('Conta aguardando aprovação do administrador.');
+    }
+
     const passwordMatch = await bcrypt.compare(dto.password, user.password);
     if (!passwordMatch) {
       throw new UnauthorizedException('Credenciais inválidas.');

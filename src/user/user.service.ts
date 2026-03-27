@@ -12,6 +12,7 @@ import { User } from './user.entity';
 import { Profile } from '../profile/profile.entity';
 import { Organization } from '../organization/organization.entity';
 import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateUserDto } from './dto/update-user.dto';
 import { MailService } from '../mail/mail.service';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
@@ -99,5 +100,12 @@ export class UserService {
 
   async findByEmail(email: string) {
     return this.userRepository.findOne({ where: { email } });
+  }
+
+  async update(id: string, dto: UpdateUserDto, updatedBy: string = null) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.userRepository.update(id, { ...dto, updatedBy });
+    return this.userRepository.findOne({ where: { id } });
   }
 }

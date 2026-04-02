@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsEmail, IsOptional, Matches, MinLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsEmail, IsOptional, IsDateString, Matches, MinLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateUserDto {
@@ -27,6 +27,11 @@ export class CreateUserDto {
   @IsString()
   @Matches(/^\d{10,11}$/, { message: 'O celular deve conter 10 ou 11 dígitos numéricos (com DDD, sem formatação).' })
   phone?: string;
+
+  @ApiPropertyOptional({ description: 'Data de nascimento (formato: YYYY-MM-DD)' })
+  @IsOptional()
+  @IsDateString({}, { message: 'Informe uma data válida no formato YYYY-MM-DD.' })
+  birthDate?: string;
 
   @IsString()
   @IsNotEmpty({ message: 'O perfil é obrigatório.' })

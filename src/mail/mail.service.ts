@@ -23,6 +23,24 @@ export class MailService {
     });
   }
 
+  async sendApprovalEmail(to: string, name: string, token: string) {
+    const accessUrl = `${process.env.APP_URL || 'http://localhost:5173'}/auth?token=${token}`;
+
+    await this.resend.emails.send({
+      from: process.env.MAIL_FROM || 'AdoteVL <onboarding@resend.dev>',
+      to,
+      subject: 'Sua conta foi aprovada — AdoteVL',
+      html: `
+        <h2>Olá, ${name}!</h2>
+        <p>Sua conta foi aprovada pelo administrador. Clique no link abaixo para acessar o sistema:</p>
+        <a href="${accessUrl}" style="background:#f97316;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;">
+          Acessar o sistema
+        </a>
+        <p>O link é de uso único e expira em 8 horas.</p>
+      `,
+    });
+  }
+
   async sendConfirmationEmail(to: string, name: string, confirmationCode: string) {
     const confirmUrl = `${process.env.APP_URL || 'http://localhost:5173'}/confirm/${confirmationCode}`;
 
@@ -32,7 +50,7 @@ export class MailService {
       subject: 'Confirme sua conta — AdoteVL',
       html: `
         <h2>Olá, ${name}!</h2>
-        <p>Sua conta foi criada no sistema AdoteVL. Clique no link abaixo para confirmar:</p>
+        <p>Sua conta foi criada no sistema AdoteVL. Confirme seu e-mail para que o administrador possa aprovar seu acesso à plataforma.</p>
         <a href="${confirmUrl}" style="background:#f97316;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;display:inline-block;">
           Confirmar conta
         </a>

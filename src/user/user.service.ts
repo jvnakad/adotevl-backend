@@ -15,6 +15,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { MailService } from '../mail/mail.service';
+import { JwtService } from '@nestjs/jwt';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
 
@@ -28,6 +29,7 @@ export class UserService {
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
     private readonly mailService: MailService,
+    private readonly jwtService: JwtService,
   ) {}
 
   async create(dto: CreateUserDto, createdBy: string = null) {
@@ -122,7 +124,11 @@ export class UserService {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
     await this.userRepository.update(id, { isApproved: true, updatedBy });
-    return this.userRepository.findOne({ where: { id } });
+    const updated = await this.userRepository.findOne({ where: { id } });
+    const payload = { sub: updated.id, email: updated.email, profileId: updated.profileId, profileName: updated.profile?.name, organizationId: updated.organizationId };
+    const token = this.jwtService.sign(payload);
+    await this.mailService.sendApprovalEmail(updated.email, updated.fullName, token);
+    return updated;
   }
 
   async reject(id: string, updatedBy: string = null) {

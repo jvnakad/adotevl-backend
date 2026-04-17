@@ -69,6 +69,8 @@ export class UserService {
       fullName: dto.fullName,
       cpf: dto.cpf,
       email: dto.email,
+      phone: dto.phone,
+      birthDate: dto.birthDate,
       password: hashedPassword,
       profileId,
       organizationId: dto.organizationId,

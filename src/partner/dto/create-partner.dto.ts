@@ -1,8 +1,13 @@
-import { IsString, IsOptional, IsEmail } from 'class-validator';
+import { IsString, IsOptional, IsEmail, IsNotEmpty } from 'class-validator';
 
 export class CreatePartnerDto {
   @IsString()
+  @IsNotEmpty()
   name: string;
+
+  @IsOptional()
+  @IsString()
+  organizationId?: string;
 
   @IsOptional()
   @IsString()

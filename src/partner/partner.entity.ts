@@ -29,6 +29,9 @@ export class Partner {
   @Column({ nullable: true })
   address: string;
 
+  @Column({ name: 'organization_id', nullable: true })
+  organizationId: string;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 

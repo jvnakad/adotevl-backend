@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Team } from './team.entity';
@@ -14,6 +14,8 @@ export class TeamService {
   ) {}
 
   async create(dto: CreateTeamDto, createdBy: string = null) {
+    const existing = await this.teamRepository.findOne({ where: { name: dto.name, organizationId: dto.organizationId } });
+    if (existing) throw new ConflictException('Já existe uma equipe com este nome nesta organização.');
     const team = this.teamRepository.create({ ...dto, createdBy, updatedBy: createdBy });
     return this.teamRepository.save(team);
   }

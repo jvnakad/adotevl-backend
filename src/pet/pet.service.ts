@@ -18,8 +18,13 @@ export class PetService {
     return this.petRepository.save(pet);
   }
 
-  async findAll(pagination: PaginationDto, organizationId?: string) {
-    const where = organizationId ? { organizationId, isActive: true } : { isActive: true };
+  async findAll(pagination: PaginationDto, filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string } = {}) {
+    const where: any = { isActive: true };
+    if (filters.organizationId) where.organizationId = filters.organizationId;
+    if (filters.species) where.species = filters.species;
+    if (filters.sex) where.sex = filters.sex;
+    if (filters.size) where.size = filters.size;
+    if (filters.castration !== undefined) where.castration = filters.castration === 'true';
     return paginate(this.petRepository, pagination, where);
   }
 

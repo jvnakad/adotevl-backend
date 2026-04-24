@@ -22,8 +22,10 @@ export class VolunteerService {
     return this.volunteerRepository.save(volunteer);
   }
 
-  async findAll(pagination: PaginationDto) {
-    return paginate(this.volunteerRepository, pagination, { isActive: true });
+  async findAll(pagination: PaginationDto, filters: { teamId?: string } = {}) {
+    const where: any = { isActive: true };
+    if (filters.teamId) where.teamId = filters.teamId;
+    return paginate(this.volunteerRepository, pagination, where);
   }
 
   async findOne(id: string) {

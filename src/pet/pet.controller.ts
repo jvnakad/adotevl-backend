@@ -23,9 +23,16 @@ export class PetController {
 
   @Get()
   @Roles('ADMIN', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Listar pets', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
-  findAll(@Query() pagination: PaginationDto, @Query('organizationId') organizationId?: string) {
-    return this.petService.findAll(pagination, organizationId);
+  @ApiOperation({ summary: 'Listar pets', description: 'Perfis permitidos: ADMIN, VOLUNTEER. Filtros: organizationId, species, sex, size, castration (true/false)' })
+  findAll(
+    @Query() pagination: PaginationDto,
+    @Query('organizationId') organizationId?: string,
+    @Query('species') species?: string,
+    @Query('sex') sex?: string,
+    @Query('size') size?: string,
+    @Query('castration') castration?: string,
+  ) {
+    return this.petService.findAll(pagination, { organizationId, species, sex, size, castration });
   }
 
   @Get(':id')

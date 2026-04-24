@@ -22,9 +22,9 @@ export class VolunteerController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar voluntários', description: 'Perfis permitidos: ADMIN' })
-  findAll(@Query() pagination: PaginationDto) {
-    return this.volunteerService.findAll(pagination);
+  @ApiOperation({ summary: 'Listar voluntários', description: 'Perfis permitidos: ADMIN. Filtros: teamId' })
+  findAll(@Query() pagination: PaginationDto, @Query('teamId') teamId?: string) {
+    return this.volunteerService.findAll(pagination, { teamId });
   }
 
   @Get(':id')

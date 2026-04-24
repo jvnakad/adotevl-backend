@@ -18,13 +18,14 @@ export class PetService {
     return this.petRepository.save(pet);
   }
 
-  async findAll(pagination: PaginationDto, filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string } = {}) {
+  async findAll(pagination: PaginationDto, filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string; status?: string } = {}) {
     const where: any = { isActive: true };
     if (filters.organizationId) where.organizationId = filters.organizationId;
     if (filters.species) where.species = filters.species;
     if (filters.sex) where.sex = filters.sex;
     if (filters.size) where.size = filters.size;
     if (filters.castration !== undefined) where.castration = filters.castration === 'true';
+    if (filters.status) where.status = filters.status;
     return paginate(this.petRepository, pagination, where);
   }
 
@@ -37,5 +38,12 @@ export class PetService {
   async update(id: string, dto: Partial<CreatePetDto>, updatedBy: string = null) {
     await this.petRepository.update(id, { ...dto, updatedBy });
     return this.findOne(id);
+  }
+
+  async remove(id: string, updatedBy: string = null) {
+    const pet = await this.petRepository.findOne({ where: { id } });
+    if (!pet) throw new NotFoundException('Pet não encontrado.');
+    await this.petRepository.update(id, { isActive: false, updatedBy });
+    return { message: 'Pet desativado com sucesso.' };
   }
 }

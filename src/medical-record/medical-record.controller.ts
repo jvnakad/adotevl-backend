@@ -1,10 +1,11 @@
-import { Controller, Post, Get, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
 import { MedicalRecordService } from './medical-record.service';
 import { CreateMedicalRecordDto } from './dto/create-medical-record.dto';
+import { UpdateMedicalRecordDto } from './dto/update-medical-record.dto';
 import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Histórico Médico')
@@ -31,5 +32,11 @@ export class MedicalRecordController {
   @ApiOperation({ summary: 'Buscar registro médico por ID', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
   findOne(@Param('id') id: string) {
     return this.medicalRecordService.findOne(id);
+  }
+
+  @Patch(':id')
+  @ApiOperation({ summary: 'Editar registro médico', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  update(@Param('id') id: string, @Body() dto: UpdateMedicalRecordDto, @Request() req) {
+    return this.medicalRecordService.update(id, dto, req.user.id);
   }
 }

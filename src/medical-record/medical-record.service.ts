@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { MedicalRecord } from './medical-record.entity';
 import { CreateMedicalRecordDto } from './dto/create-medical-record.dto';
+import { UpdateMedicalRecordDto } from './dto/update-medical-record.dto';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
 
@@ -26,5 +27,12 @@ export class MedicalRecordService {
     const record = await this.medicalRecordRepository.findOne({ where: { id } });
     if (!record) throw new NotFoundException('Registro médico não encontrado.');
     return record;
+  }
+
+  async update(id: string, dto: UpdateMedicalRecordDto, updatedBy: string = null) {
+    const record = await this.medicalRecordRepository.findOne({ where: { id } });
+    if (!record) throw new NotFoundException('Registro médico não encontrado.');
+    await this.medicalRecordRepository.update(id, { ...dto, updatedBy });
+    return this.medicalRecordRepository.findOne({ where: { id } });
   }
 }

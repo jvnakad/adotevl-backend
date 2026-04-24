@@ -29,9 +29,14 @@ export class FinancialController {
   }
 
   @Get('entries')
-  @ApiOperation({ summary: 'Listar entradas financeiras', description: 'Perfis permitidos: ADMIN, FINANCIAL' })
-  findAllEntries(@Query() pagination: PaginationDto) {
-    return this.financialService.findAllEntries(pagination);
+  @ApiOperation({ summary: 'Listar entradas financeiras', description: 'Perfis permitidos: ADMIN, FINANCIAL. Filtros: startDate, endDate (YYYY-MM-DD), campaignId' })
+  findAllEntries(
+    @Query() pagination: PaginationDto,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('campaignId') campaignId?: string,
+  ) {
+    return this.financialService.findAllEntries(pagination, { startDate, endDate, campaignId });
   }
 
   @Get('expenses')

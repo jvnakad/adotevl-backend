@@ -1,12 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Between, Repository } from 'typeorm';
 import { FinancialEntry } from './financial-entry.entity';
 import { FinancialExpense } from './financial-expense.entity';
 import { CreateFinancialEntryDto } from './dto/create-financial-entry.dto';
 import { CreateFinancialExpenseDto } from './dto/create-financial-expense.dto';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
+
+export interface FinancialEntryFilters {
+  startDate?: string;
+  endDate?: string;
+  campaignId?: string;
+}
 
 @Injectable()
 export class FinancialService {
@@ -27,8 +33,13 @@ export class FinancialService {
     return this.expenseRepository.save(expense);
   }
 
-  async findAllEntries(pagination: PaginationDto) {
-    return paginate(this.entryRepository, pagination);
+  async findAllEntries(pagination: PaginationDto, filters: FinancialEntryFilters = {}) {
+    const where: any = {};
+    if (filters.campaignId) where.campaignId = filters.campaignId;
+    if (filters.startDate && filters.endDate) {
+      where.transactionDate = Between(new Date(filters.startDate), new Date(filters.endDate));
+    }
+    return paginate(this.entryRepository, pagination, where);
   }
 
   async findAllExpenses(pagination: PaginationDto) {

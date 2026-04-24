@@ -9,6 +9,14 @@ import {
 } from 'typeorm';
 import { Pet } from '../pet/pet.entity';
 
+export enum MedicalRecordType {
+  CONSULTA = 'CONSULTA',
+  VACINA = 'VACINA',
+  MEDICACAO = 'MEDICACAO',
+  EXAME = 'EXAME',
+  PROCEDIMENTO = 'PROCEDIMENTO',
+}
+
 @Entity('medical_records')
 export class MedicalRecord {
   @PrimaryGeneratedColumn('uuid')
@@ -21,11 +29,23 @@ export class MedicalRecord {
   @Column({ name: 'pet_id' })
   petId: string;
 
-  @Column({ name: 'consultation_type' })
-  consultationType: string;
+  @Column({ type: 'date' })
+  date: string;
 
-  @Column({ nullable: true })
-  observation: string;
+  @Column({ type: 'enum', enum: MedicalRecordType })
+  type: MedicalRecordType;
+
+  @Column()
+  description: string;
+
+  @Column({ name: 'veterinarian_name', nullable: true })
+  veterinarianName: string;
+
+  @Column({ name: 'next_date', type: 'date', nullable: true })
+  nextDate: string;
+
+  @Column({ name: 'attachment_url', nullable: true })
+  attachmentUrl: string;
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;

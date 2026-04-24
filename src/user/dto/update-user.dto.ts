@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsDateString, Matches } from 'class-validator';
+import { IsString, IsOptional, IsDateString, Matches, Length } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export class UpdateUserDto {
@@ -6,6 +6,13 @@ export class UpdateUserDto {
   @IsOptional()
   @IsString()
   fullName?: string;
+
+  @ApiPropertyOptional({ description: 'CPF (somente números, 11 dígitos)' })
+  @IsOptional()
+  @IsString()
+  @Length(11, 11, { message: 'O CPF deve conter exatamente 11 dígitos numéricos.' })
+  @Matches(/^\d{11}$/, { message: 'O CPF deve conter somente números.' })
+  cpf?: string;
 
   @ApiPropertyOptional({ description: 'Celular (somente números, com DDD)' })
   @IsOptional()

@@ -24,7 +24,7 @@ export class MailService {
   }
 
   async sendApprovalEmail(to: string, name: string, token: string) {
-    const accessUrl = `${process.env.APP_URL || 'http://localhost:5173'}/auth?token=${token}`;
+    const accessUrl = `${process.env.APP_URL || 'http://localhost:5173'}/signin?token=${token}`;
 
     await this.resend.emails.send({
       from: process.env.MAIL_FROM || 'AdoteVL <onboarding@resend.dev>',

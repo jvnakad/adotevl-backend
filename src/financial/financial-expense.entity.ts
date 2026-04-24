@@ -2,9 +2,13 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
+  ManyToOne,
+  JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { BankAccount } from '../bank-account/bank-account.entity';
+import { PaymentMethod } from './financial-entry.entity';
 
 @Entity('financial_expenses')
 export class FinancialExpense {
@@ -17,8 +21,21 @@ export class FinancialExpense {
   @Column()
   reason: string;
 
+  @ManyToOne(() => BankAccount, { nullable: false })
+  @JoinColumn({ name: 'bank_account_id' })
+  bankAccount: BankAccount;
+
+  @Column({ name: 'bank_account_id' })
+  bankAccountId: string;
+
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
+
+  @Column({ name: 'payment_method', type: 'enum', enum: PaymentMethod })
+  paymentMethod: PaymentMethod;
+
+  @Column({ name: 'transaction_date', type: 'date' })
+  transactionDate: string;
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;

@@ -8,6 +8,7 @@
     "allowSyntheticDefaultImports": true,
     "target": "ES2017",
     "sourceMap": true,
+    "rootDir": "./src",
     "outDir": "./dist",
     "baseUrl": "./",
     "incremental": true,
@@ -16,5 +17,6 @@
     "noImplicitAny": false,
     "strict": false,
     "types": ["node"]
-  }
+  },
+  "exclude": ["node_modules", "test", "dist"]
 }

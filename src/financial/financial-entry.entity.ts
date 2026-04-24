@@ -8,6 +8,14 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Campaign } from '../campaign/campaign.entity';
+import { BankAccount } from '../bank-account/bank-account.entity';
+
+export enum PaymentMethod {
+  DEBITO = 'DEBITO',
+  CREDITO = 'CREDITO',
+  PIX = 'PIX',
+  OUTROS = 'OUTROS',
+}
 
 @Entity('financial_entries')
 export class FinancialEntry {
@@ -24,11 +32,21 @@ export class FinancialEntry {
   @Column({ name: 'campaign_id', nullable: true })
   campaignId: string;
 
+  @ManyToOne(() => BankAccount, { nullable: false })
+  @JoinColumn({ name: 'bank_account_id' })
+  bankAccount: BankAccount;
+
+  @Column({ name: 'bank_account_id' })
+  bankAccountId: string;
+
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 
-  @Column({ name: 'transaction_date', nullable: true })
-  transactionDate: Date;
+  @Column({ name: 'payment_method', type: 'enum', enum: PaymentMethod })
+  paymentMethod: PaymentMethod;
+
+  @Column({ name: 'transaction_date', type: 'date' })
+  transactionDate: string;
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;

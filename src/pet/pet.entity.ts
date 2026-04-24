@@ -9,6 +9,12 @@ import {
 } from 'typeorm';
 import { Organization } from '../organization/organization.entity';
 
+export enum PetStatus {
+  DISPONIVEL = 'DISPONIVEL',
+  EM_PROCESSO = 'EM_PROCESSO',
+  ADOTADO = 'ADOTADO',
+}
+
 @Entity('pets')
 export class Pet {
   @PrimaryGeneratedColumn('uuid')
@@ -53,6 +59,9 @@ export class Pet {
 
   @Column({ name: 'organization_id' })
   organizationId: string;
+
+  @Column({ type: 'enum', enum: PetStatus, default: PetStatus.DISPONIVEL, nullable: true })
+  status: PetStatus;
 
   @Column({ name: 'is_active', default: true })
   isActive: boolean;

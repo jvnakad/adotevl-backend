@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsBoolean, IsNumber, IsDateString, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, IsDateString, IsUUID, IsEnum } from 'class-validator';
+import { PetStatus } from '../pet.entity';
 
 export class CreatePetDto {
   @IsString()
@@ -41,6 +42,10 @@ export class CreatePetDto {
   @IsString()
   @IsOptional()
   about?: string;
+
+  @IsEnum(PetStatus, { message: 'Status inválido. Use: DISPONIVEL, EM_PROCESSO ou ADOTADO.' })
+  @IsOptional()
+  status?: PetStatus;
 
   @IsUUID()
   organizationId: string;

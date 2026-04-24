@@ -3,6 +3,7 @@ import {
   ConflictException,
   BadRequestException,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -108,10 +109,21 @@ export class UserService {
     return this.userRepository.findOne({ where: { email } });
   }
 
-  async update(id: string, dto: UpdateUserDto, updatedBy: string = null) {
+  async update(id: string, dto: UpdateUserDto, updatedBy: string = null, requesterProfile: string = null) {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
-    await this.userRepository.update(id, { ...dto, updatedBy });
+
+    const isAdmin = requesterProfile === 'ADMIN';
+
+    if (!isAdmin && id !== updatedBy) {
+      throw new ForbiddenException('Você só pode editar o próprio perfil.');
+    }
+
+    const data: Partial<UpdateUserDto> = isAdmin
+      ? { ...dto }
+      : { fullName: dto.fullName, cpf: dto.cpf, phone: dto.phone, birthDate: dto.birthDate };
+
+    await this.userRepository.update(id, { ...data, updatedBy });
     return this.userRepository.findOne({ where: { id } });
   }
 

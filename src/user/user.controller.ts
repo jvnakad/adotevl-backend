@@ -42,10 +42,10 @@ export class UserController {
   @Patch(':id')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Atualizar usuário', description: 'Perfis permitidos: ADMIN' })
+  @Roles('ADMIN', 'FINANCIAL', 'VOLUNTEER')
+  @ApiOperation({ summary: 'Atualizar usuário', description: 'Perfis permitidos: ADMIN (qualquer usuário), FINANCIAL e VOLUNTEER (apenas o próprio perfil)' })
   update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Req() req) {
-    return this.userService.update(id, dto, req.user.id);
+    return this.userService.update(id, dto, req.user.id, req.user.profileName);
   }
 
   @Patch(':id/activate')

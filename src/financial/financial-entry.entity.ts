@@ -32,20 +32,20 @@ export class FinancialEntry {
   @Column({ name: 'campaign_id', nullable: true })
   campaignId: string;
 
-  @ManyToOne(() => BankAccount, { nullable: false })
+  @ManyToOne(() => BankAccount, { nullable: true })
   @JoinColumn({ name: 'bank_account_id' })
   bankAccount: BankAccount;
 
-  @Column({ name: 'bank_account_id' })
+  @Column({ name: 'bank_account_id', nullable: true })
   bankAccountId: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   amount: number;
 
-  @Column({ name: 'payment_method', type: 'enum', enum: PaymentMethod })
+  @Column({ name: 'payment_method', type: 'enum', enum: PaymentMethod, nullable: true })
   paymentMethod: PaymentMethod;
 
-  @Column({ name: 'transaction_date', type: 'date' })
+  @Column({ name: 'transaction_date', type: 'date', nullable: true })
   transactionDate: string;
 
   @Column({ name: 'is_active', default: true })

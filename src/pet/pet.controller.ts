@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PaginationDto } from '../common/pagination.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -23,7 +23,7 @@ export class PetController {
 
   @Get()
   @Roles('ADMIN', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Listar pets', description: 'Perfis permitidos: ADMIN, VOLUNTEER. Filtros: organizationId, species, sex, size, castration (true/false)' })
+  @ApiOperation({ summary: 'Listar pets', description: 'Perfis permitidos: ADMIN, VOLUNTEER. Filtros: organizationId, species, sex, size, castration (true/false), status (DISPONIVEL, EM_PROCESSO, ADOTADO)' })
   findAll(
     @Query() pagination: PaginationDto,
     @Query('organizationId') organizationId?: string,
@@ -31,8 +31,9 @@ export class PetController {
     @Query('sex') sex?: string,
     @Query('size') size?: string,
     @Query('castration') castration?: string,
+    @Query('status') status?: string,
   ) {
-    return this.petService.findAll(pagination, { organizationId, species, sex, size, castration });
+    return this.petService.findAll(pagination, { organizationId, species, sex, size, castration, status });
   }
 
   @Get(':id')
@@ -47,5 +48,12 @@ export class PetController {
   @ApiOperation({ summary: 'Atualizar pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
   update(@Param('id') id: string, @Body() dto: Partial<CreatePetDto>, @Request() req) {
     return this.petService.update(id, dto, req.user.id);
+  }
+
+  @Delete(':id')
+  @Roles('ADMIN', 'VOLUNTEER')
+  @ApiOperation({ summary: 'Desativar pet (soft delete)', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  remove(@Param('id') id: string, @Request() req) {
+    return this.petService.remove(id, req.user.id);
   }
 }

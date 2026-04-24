@@ -126,13 +126,12 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     expect(editRes.status).toBe(200);
     expect(editRes.body.fullName).toBe('Voluntário Atualizado');
 
-    // 7. Admin lista usuários e o novo aparece
-    const listRes = await request(app.getHttpServer())
-      .get('/users')
+    // 7. Admin busca o usuário diretamente e confirma aprovação
+    const getRes = await request(app.getHttpServer())
+      .get(`/users/${userId}`)
       .set('Authorization', `Bearer ${adminToken}`);
-    expect(listRes.status).toBe(200);
-    const found = listRes.body.data.find(u => u.id === userId);
-    expect(found).toBeDefined();
-    expect(found.isApproved).toBe(true);
+    expect(getRes.status).toBe(200);
+    expect(getRes.body.isApproved).toBe(true);
+    expect(getRes.body.fullName).toBe('Voluntário Atualizado');
   }, 30000);
 });

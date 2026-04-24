@@ -26,14 +26,14 @@ export class PetController {
   @ApiOperation({ summary: 'Listar pets', description: 'Perfis permitidos: ADMIN, VOLUNTEER. Filtros: organizationId, species, sex, size, castration (true/false), status (DISPONIVEL, EM_PROCESSO, ADOTADO)' })
   findAll(
     @Query() pagination: PaginationDto,
-    @Query('organizationId') organizationId?: string,
+    @Request() req,
     @Query('species') species?: string,
     @Query('sex') sex?: string,
     @Query('size') size?: string,
     @Query('castration') castration?: string,
     @Query('status') status?: string,
   ) {
-    return this.petService.findAll(pagination, { organizationId, species, sex, size, castration, status });
+    return this.petService.findAll(pagination, { organizationId: req.user.organizationId, species, sex, size, castration, status });
   }
 
   @Get(':id')

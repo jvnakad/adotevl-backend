@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsBoolean, IsNumber, IsDateString, IsUUID, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsInt, IsNumber, IsDateString, IsUUID, IsEnum } from 'class-validator';
 import { PetStatus } from '../pet.entity';
 
 export class CreatePetDto {
@@ -12,7 +12,7 @@ export class CreatePetDto {
   @IsOptional()
   animal?: string;
 
-  @IsNumber()
+  @IsInt({ message: 'A idade deve ser um número inteiro.' })
   @IsOptional()
   age?: number;
 

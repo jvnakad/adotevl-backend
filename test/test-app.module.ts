@@ -5,6 +5,7 @@ import { Organization } from '../src/organization/organization.entity';
 import { Profile } from '../src/profile/profile.entity';
 import { User } from '../src/user/user.entity';
 import { Pet } from '../src/pet/pet.entity';
+import { PetPhoto } from '../src/pet/pet-photo.entity';
 import { MedicalRecord } from '../src/medical-record/medical-record.entity';
 import { Team } from '../src/team/team.entity';
 import { Volunteer } from '../src/volunteer/volunteer.entity';
@@ -28,6 +29,7 @@ import { PartnerModule } from '../src/partner/partner.module';
 import { BankAccountModule } from '../src/bank-account/bank-account.module';
 import { OrganizationAddressModule } from '../src/organization-address/organization-address.module';
 import { MailService } from '../src/mail/mail.service';
+import { StorageService } from '../src/storage/storage.service';
 
 class MockMailService {
   async sendConfirmationEmail() {}
@@ -42,6 +44,20 @@ class MockMailService {
 })
 class MockMailModule {}
 
+export class MockStorageService {
+  async upload(path: string) {
+    return `https://storage.test/pet-photos/${path}`;
+  }
+  async remove() {}
+}
+
+@Global()
+@Module({
+  providers: [{ provide: StorageService, useClass: MockStorageService }],
+  exports: [StorageService],
+})
+class MockStorageModule {}
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -49,7 +65,7 @@ class MockMailModule {}
       type: 'postgres',
       url: process.env.DATABASE_URL,
       entities: [
-        Organization, Profile, User, Pet, MedicalRecord, Team, Volunteer,
+        Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress,
       ],
       synchronize: true,
@@ -69,6 +85,7 @@ class MockMailModule {}
     BankAccountModule,
     OrganizationAddressModule,
     MockMailModule,
+    MockStorageModule,
   ],
 })
 export class TestAppModule {}

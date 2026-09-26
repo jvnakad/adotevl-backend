@@ -57,6 +57,7 @@ import { StorageModule } from './storage/storage.module';
     BankAccountModule,
     OrganizationAddressModule,
     MailModule,
+    StorageModule,
   ],
   controllers: [AppController],
   providers: [AppService],

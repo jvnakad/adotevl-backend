@@ -16,7 +16,7 @@
     "strictNullChecks": false,
     "noImplicitAny": false,
     "strict": false,
-    "types": ["node"]
+    "types": ["node", "multer"]
   },
   "exclude": ["node_modules", "test", "dist"]
 }

@@ -129,4 +129,74 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
       .set('Authorization', `Bearer ${adminToken}`);
     expect(listAfterDelete.body.data.some(p => p.id === petId)).toBe(false);
   }, 30000);
+
+  it('fluxo de fotos: upload → fotos no GET → limite de 10 → remoção', async () => {
+    const image = Buffer.from('fake-image');
+
+    // 1. Pet recém-criado já retorna fotos vazia
+    const createRes = await request(app.getHttpServer())
+      .post('/pets')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Mingau', species: 'Gato', sex: 'F', organizationId: orgId });
+    expect(createRes.status).toBe(201);
+    expect(createRes.body.fotos).toEqual([]);
+    const petId = createRes.body.id;
+
+    // 2. Upload de 9 fotos
+    let upload = request(app.getHttpServer())
+      .post(`/pets/${petId}/photos`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    for (let i = 0; i < 9; i++) {
+      upload = upload.attach('photos', image, { filename: `foto${i}.jpg`, contentType: 'image/jpeg' });
+    }
+    const uploadRes = await upload;
+    expect(uploadRes.status).toBe(201);
+    expect(uploadRes.body.fotos).toHaveLength(9);
+    expect(uploadRes.body.fotos[0].url).toContain(`${petId}/`);
+
+    // 3. Fotos aparecem no GET por ID e na listagem
+    const getRes = await request(app.getHttpServer())
+      .get(`/pets/${petId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(getRes.body.fotos).toHaveLength(9);
+
+    const listRes = await request(app.getHttpServer())
+      .get('/pets')
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(listRes.body.data.find(p => p.id === petId).fotos).toHaveLength(9);
+
+    // 4. Enviar mais 2 ultrapassa o limite de 10
+    const overLimit = await request(app.getHttpServer())
+      .post(`/pets/${petId}/photos`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .attach('photos', image, { filename: 'a.jpg', contentType: 'image/jpeg' })
+      .attach('photos', image, { filename: 'b.jpg', contentType: 'image/jpeg' });
+    expect(overLimit.status).toBe(400);
+
+    // 5. Arquivo que não é imagem é rejeitado
+    const invalidType = await request(app.getHttpServer())
+      .post(`/pets/${petId}/photos`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .attach('photos', image, { filename: 'doc.pdf', contentType: 'application/pdf' });
+    expect(invalidType.status).toBe(400);
+
+    // 6. Remove uma foto
+    const photoId = getRes.body.fotos[0].id;
+    const deleteRes = await request(app.getHttpServer())
+      .delete(`/pets/${petId}/photos/${photoId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(deleteRes.status).toBe(200);
+
+    const afterDelete = await request(app.getHttpServer())
+      .get(`/pets/${petId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(afterDelete.body.fotos).toHaveLength(8);
+    expect(afterDelete.body.fotos.some(f => f.id === photoId)).toBe(false);
+
+    // 7. Foto já removida retorna 404
+    const deleteAgain = await request(app.getHttpServer())
+      .delete(`/pets/${petId}/photos/${photoId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(deleteAgain.status).toBe(404);
+  }, 30000);
 });

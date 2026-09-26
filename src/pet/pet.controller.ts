@@ -1,10 +1,11 @@
-import { Controller, Post, Get, Put, Delete, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Post, Get, Put, Delete, Param, Body, Query, Request, UseGuards, UseInterceptors, UploadedFiles, ParseUUIDPipe } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { PaginationDto } from '../common/pagination.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
 import { Roles } from '../auth/roles.decorator';
-import { PetService } from './pet.service';
+import { PetService, MAX_PET_PHOTOS, MAX_PHOTO_SIZE } from './pet.service';
 import { CreatePetDto } from './dto/create-pet.dto';
 
 @ApiTags('Pets')
@@ -55,5 +56,27 @@ export class PetController {
   @ApiOperation({ summary: 'Desativar pet (soft delete)', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
   remove(@Param('id') id: string, @Request() req) {
     return this.petService.remove(id, req.user.id);
+  }
+
+  @Post(':id/photos')
+  @Roles('ADMIN', 'VOLUNTEER')
+  @UseInterceptors(FilesInterceptor('photos', MAX_PET_PHOTOS, { limits: { fileSize: MAX_PHOTO_SIZE } }))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { photos: { type: 'array', items: { type: 'string', format: 'binary' } } },
+    },
+  })
+  @ApiOperation({ summary: 'Adicionar fotos ao pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER. Campo multipart "photos" (JPEG, PNG ou WEBP, até 5MB cada). Máximo de 10 fotos por pet. Retorna o pet com a lista "fotos" atualizada.' })
+  addPhotos(@Param('id', ParseUUIDPipe) id: string, @UploadedFiles() files: Express.Multer.File[], @Request() req) {
+    return this.petService.addPhotos(id, files, req.user.id);
+  }
+
+  @Delete(':id/photos/:photoId')
+  @Roles('ADMIN', 'VOLUNTEER')
+  @ApiOperation({ summary: 'Remover foto do pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  removePhoto(@Param('id', ParseUUIDPipe) id: string, @Param('photoId', ParseUUIDPipe) photoId: string) {
+    return this.petService.removePhoto(id, photoId);
   }
 }

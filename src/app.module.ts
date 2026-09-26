@@ -12,6 +12,7 @@ import { User } from './user/user.entity';
 import { AuthModule } from './auth/auth.module';
 import { PetModule } from './pet/pet.module';
 import { Pet } from './pet/pet.entity';
+import { PetPhoto } from './pet/pet-photo.entity';
 import { MedicalRecordModule } from './medical-record/medical-record.module';
 import { MedicalRecord } from './medical-record/medical-record.entity';
 import { TeamModule } from './team/team.module';
@@ -30,6 +31,7 @@ import { BankAccount } from './bank-account/bank-account.entity';
 import { OrganizationAddressModule } from './organization-address/organization-address.module';
 import { OrganizationAddress } from './organization-address/organization-address.entity';
 import { MailModule } from './mail/mail.module';
+import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
@@ -37,7 +39,7 @@ import { MailModule } from './mail/mail.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress],
       synchronize: true,
       ssl: { rejectUnauthorized: false },
     }),
@@ -55,6 +57,7 @@ import { MailModule } from './mail/mail.module';
     BankAccountModule,
     OrganizationAddressModule,
     MailModule,
+    StorageModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -3,11 +3,13 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  OneToMany,
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { Organization } from '../organization/organization.entity';
+import { PetPhoto } from './pet-photo.entity';
 
 export enum PetStatus {
   DISPONIVEL = 'DISPONIVEL',
@@ -59,6 +61,9 @@ export class Pet {
 
   @Column({ name: 'organization_id' })
   organizationId: string;
+
+  @OneToMany(() => PetPhoto, (photo) => photo.pet)
+  fotos: PetPhoto[];
 
   @Column({ type: 'enum', enum: PetStatus, default: PetStatus.DISPONIVEL, nullable: true })
   status: PetStatus;

@@ -43,6 +43,24 @@ export class PetService {
     return result;
   }
 
+  // Versão para o site público: só os campos exibidos, sem dados internos nem storagePath
+  async findAllPublic(pagination: PaginationDto, filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string; status?: string } = {}) {
+    const result = await this.findAll(pagination, filters);
+    return {
+      ...result,
+      data: result.data.map((pet) => ({
+        id: pet.id,
+        name: pet.name,
+        sex: pet.sex,
+        age: pet.age,
+        size: pet.size,
+        castration: pet.castration,
+        about: pet.about,
+        fotos: (pet.fotos ?? []).map((foto) => ({ url: foto.url })),
+      })),
+    };
+  }
+
   async findOne(id: string) {
     const pet = await this.petRepository.findOne({ where: { id }, relations: { fotos: true } });
     if (!pet) throw new NotFoundException('Pet não encontrado.');

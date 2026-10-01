@@ -18,7 +18,6 @@ API REST do sistema de gestão de adoção de pets da AdoteVL. Front-end em `../
 | `npm run start:dev` | nodemon + ts-node em `src/main.ts` |
 | `npm run build` | `tsc -p tsconfig.json` (exclui `test/` e `scripts/`) |
 | `npm run test:e2e` | Jest + ts-jest em `test/*.e2e-spec.ts` (precisa de Postgres; CI usa `postgres:15`) |
-| `npm run db:up` / `db:down` | Postgres local via `docker-compose.yml` (porta **5433**) |
 | `npm run seed:dev` | Organização + admin de dev (só roda com `DATABASE_URL` em localhost) |
 
 `npm test` (specs `.js` em `src/`) está quebrado desde antes e não roda no CI — use os e2e.

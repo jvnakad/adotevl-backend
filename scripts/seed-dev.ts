@@ -1,5 +1,5 @@
 // Seed do ambiente local: organização + usuário ADMIN para testar o sistema sem o Supabase.
-// Uso: npm run seed:dev (com o Postgres do docker-compose rodando e o .env.local configurado)
+// Uso: npm run seed:dev (com o Postgres local rodando e o .env.local configurado)
 import { NestFactory } from '@nestjs/core';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';

@@ -10,8 +10,6 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main",
     "start:dev": "nodemon",
-    "db:up": "docker compose up -d",
-    "db:down": "docker compose down",
     "seed:dev": "ts-node -r tsconfig-paths/register scripts/seed-dev.ts",
     "test": "jest",
     "test:cov": "jest --coverage",

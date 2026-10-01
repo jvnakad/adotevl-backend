@@ -26,12 +26,15 @@ APP_URL=http://localhost:5173
 SUPABASE_URL=https://seu-projeto.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key
 SUPABASE_STORAGE_BUCKET=pet-photos
+SUPABASE_ADOPTION_BUCKET=adoption-forms
 ```
 
 > Para obter a `DATABASE_URL`, acesse o projeto no [Supabase](https://supabase.com) → Connect → ORM → TypeORM.
 > Atenção: caracteres especiais na senha devem ser URL-encoded (`@` → `%40`, `#` → `%23`).
 >
 > As fotos dos pets são armazenadas no Supabase Storage. Crie um bucket **público** com o nome definido em `SUPABASE_STORAGE_BUCKET` (padrão `pet-photos`) e use a `service_role` key em Project Settings → API.
+>
+> As fotos das fichas de adoção (residência dos adotantes) ficam num bucket **privado**, definido em `SUPABASE_ADOPTION_BUCKET` (padrão `adoption-forms`). A API devolve URLs assinadas válidas por 1 hora a cada leitura da ficha.
 >
 > Para obter a `RESEND_API_KEY`, acesse [resend.com](https://resend.com) e crie uma API key. O domínio remetente deve estar verificado no Resend.
 
@@ -42,6 +45,26 @@ npm run start:dev
 ```
 
 A API estará disponível em `http://localhost:3000`.
+
+## Ambiente local (sem Supabase)
+
+Para desenvolver sem acesso ao Supabase, use um Postgres local (15+) e o storage em disco. Ajuste a `DATABASE_URL` do `.env.local` para o seu banco:
+
+```bash
+cp .env.local.example .env.local      # .env.local tem precedência sobre o .env
+npm run start:dev                     # cria as tabelas (synchronize) e os perfis padrão
+npm run seed:dev                      # organização "AdoteVL Dev" + admin@adotevl.local / admin123
+```
+
+O `seed:dev` imprime as variáveis para o `.env` do front (`VITE_API_URL`, `VITE_ORGANIZATION_ID`, `VITE_PROFILE_*`).
+
+Com `STORAGE_DRIVER=local` as fotos são gravadas em `./uploads` e servidas em `http://localhost:3000/uploads/...`.
+
+Testes e2e contra o banco local:
+
+```bash
+DATABASE_URL="postgresql://adotevl:adotevl@localhost:5432/adotevl?sslmode=disable" JWT_SECRET=test-secret RESEND_API_KEY=re_fake npm run test:e2e
+```
 
 ## Documentação das rotas
 

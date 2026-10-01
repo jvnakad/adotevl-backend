@@ -28,6 +28,9 @@ import { FinancialModule } from '../src/financial/financial.module';
 import { PartnerModule } from '../src/partner/partner.module';
 import { BankAccountModule } from '../src/bank-account/bank-account.module';
 import { OrganizationAddressModule } from '../src/organization-address/organization-address.module';
+import { AdoptionForm } from '../src/adoption-form/adoption-form.entity';
+import { AdoptionFormPhoto } from '../src/adoption-form/adoption-form-photo.entity';
+import { AdoptionFormModule } from '../src/adoption-form/adoption-form.module';
 import { MailService } from '../src/mail/mail.service';
 import { StorageService } from '../src/storage/storage.service';
 
@@ -49,6 +52,11 @@ export class MockStorageService {
     return `https://storage.test/pet-photos/${path}`;
   }
   async remove() {}
+  async uploadPrivate() {}
+  async removePrivate() {}
+  async getSignedUrls(paths: string[]) {
+    return Object.fromEntries(paths.map((path) => [path, `https://storage.test/signed/${path}`]));
+  }
 }
 
 @Global()
@@ -66,7 +74,7 @@ class MockStorageModule {}
       url: process.env.DATABASE_URL,
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer,
-        Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress,
+        Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
       ],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
@@ -84,6 +92,7 @@ class MockStorageModule {}
     PartnerModule,
     BankAccountModule,
     OrganizationAddressModule,
+    AdoptionFormModule,
     MockMailModule,
     MockStorageModule,
   ],

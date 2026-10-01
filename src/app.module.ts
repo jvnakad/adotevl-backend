@@ -32,6 +32,9 @@ import { OrganizationAddressModule } from './organization-address/organization-a
 import { OrganizationAddress } from './organization-address/organization-address.entity';
 import { MailModule } from './mail/mail.module';
 import { StorageModule } from './storage/storage.module';
+import { AdoptionFormModule } from './adoption-form/adoption-form.module';
+import { AdoptionForm } from './adoption-form/adoption-form.entity';
+import { AdoptionFormPhoto } from './adoption-form/adoption-form-photo.entity';
 
 @Module({
   imports: [
@@ -40,7 +43,7 @@ import { StorageModule } from './storage/storage.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),
@@ -59,6 +62,7 @@ import { StorageModule } from './storage/storage.module';
     OrganizationAddressModule,
     MailModule,
     StorageModule,
+    AdoptionFormModule,
   ],
   controllers: [AppController],
   providers: [AppService],

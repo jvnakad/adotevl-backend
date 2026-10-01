@@ -87,20 +87,18 @@ export class AdoptionFormService {
 
     const result = await paginate(this.formRepository, pagination, where, { fotos: true }, { createdAt: 'DESC' });
     result.data.forEach((form) => this.sortPhotos(form));
+    await this.signPhotoUrls(result.data);
     return result;
   }
 
   async findOne(id: string, organizationId: string) {
-    const form = await this.formRepository.findOne({
-      where: { id, organizationId, isActive: true },
-      relations: { fotos: true },
-    });
-    if (!form) throw new NotFoundException('Ficha de adoção não encontrada.');
-    return this.sortPhotos(form);
+    const form = await this.getForm(id, organizationId);
+    await this.signPhotoUrls([form]);
+    return form;
   }
 
   async update(id: string, dto: UpdateAdoptionFormDto, organizationId: string, updatedBy: string = null) {
-    const form = await this.findOne(id, organizationId);
+    const form = await this.getForm(id, organizationId);
     // Fotos têm endpoints próprios; ignora caso o front reenvie o objeto completo
     const { fotos, ...data } = dto as UpdateAdoptionFormDto & { fotos?: unknown };
     Object.assign(form, data, { updatedBy });
@@ -114,7 +112,7 @@ export class AdoptionFormService {
   }
 
   async updateStatus(id: string, dto: UpdateAdoptionFormStatusDto, organizationId: string, reviewedBy: string = null) {
-    await this.findOne(id, organizationId);
+    await this.getForm(id, organizationId);
     await this.formRepository.update(id, {
       status: dto.status,
       ...(dto.reviewNotes !== undefined && { reviewNotes: dto.reviewNotes }),
@@ -126,7 +124,12 @@ export class AdoptionFormService {
   }
 
   async remove(id: string, organizationId: string, updatedBy: string = null) {
-    await this.findOne(id, organizationId);
+    const form = await this.getForm(id, organizationId);
+    // A ficha fica no banco (soft delete), mas as fotos da residência são apagadas de vez
+    if (form.fotos?.length) {
+      await this.storageService.removePrivate(form.fotos.map((photo) => photo.storagePath));
+      await this.photoRepository.delete({ adoptionFormId: id });
+    }
     await this.formRepository.update(id, { isActive: false, updatedBy });
     return { message: 'Ficha de adoção removida com sucesso.' };
   }
@@ -134,7 +137,7 @@ export class AdoptionFormService {
   async addPhotos(id: string, files: Express.Multer.File[], organizationId: string, createdBy: string = null) {
     if (!files?.length) throw new BadRequestException('Envie ao menos uma foto no campo "photos".');
     this.validatePhotoTypes(files);
-    await this.findOne(id, organizationId);
+    await this.getForm(id, organizationId);
 
     const current = await this.photoRepository.count({ where: { adoptionFormId: id } });
     if (current + files.length > MAX_ADOPTION_FORM_PHOTOS) {
@@ -148,12 +151,30 @@ export class AdoptionFormService {
   }
 
   async removePhoto(id: string, photoId: string, organizationId: string) {
-    await this.findOne(id, organizationId);
+    await this.getForm(id, organizationId);
     const photo = await this.photoRepository.findOne({ where: { id: photoId, adoptionFormId: id } });
     if (!photo) throw new NotFoundException('Foto não encontrada.');
-    await this.storageService.remove([photo.storagePath]);
+    await this.storageService.removePrivate([photo.storagePath]);
     await this.photoRepository.delete(photo.id);
     return { message: 'Foto removida com sucesso.' };
+  }
+
+  private async getForm(id: string, organizationId: string) {
+    const form = await this.formRepository.findOne({
+      where: { id, organizationId, isActive: true },
+      relations: { fotos: true },
+    });
+    if (!form) throw new NotFoundException('Ficha de adoção não encontrada.');
+    return this.sortPhotos(form);
+  }
+
+  // Fotos ficam no bucket privado: cada leitura devolve URLs assinadas e temporárias
+  private async signPhotoUrls(forms: AdoptionForm[]) {
+    const photos = forms.flatMap((form) => form.fotos ?? []);
+    const signed = await this.storageService.getSignedUrls(photos.map((photo) => photo.storagePath));
+    photos.forEach((photo) => {
+      photo.url = signed[photo.storagePath] ?? photo.url;
+    });
   }
 
   private validatePhotoTypes(files: Express.Multer.File[]) {
@@ -162,20 +183,20 @@ export class AdoptionFormService {
   }
 
   private async uploadPhotos(adoptionFormId: string, files: Express.Multer.File[], createdBy: string = null) {
-    const uploaded: { path: string; url: string }[] = [];
+    const uploaded: string[] = [];
     try {
       for (const file of files) {
         const path = `adoption-forms/${adoptionFormId}/${randomUUID()}${extname(file.originalname).toLowerCase()}`;
-        const url = await this.storageService.upload(path, file.buffer, file.mimetype);
-        uploaded.push({ path, url });
+        await this.storageService.uploadPrivate(path, file.buffer, file.mimetype);
+        uploaded.push(path);
       }
       const photos = this.photoRepository.create(
-        uploaded.map(({ path, url }) => ({ adoptionFormId, url, storagePath: path, createdBy })),
+        uploaded.map((path) => ({ adoptionFormId, url: null, storagePath: path, createdBy })),
       );
       await this.photoRepository.save(photos);
     } catch (error) {
       // Evita arquivos órfãos no bucket caso algum upload ou o insert falhe
-      await this.storageService.remove(uploaded.map((u) => u.path)).catch(() => undefined);
+      await this.storageService.removePrivate(uploaded).catch(() => undefined);
       throw error;
     }
   }

@@ -52,6 +52,11 @@ export class MockStorageService {
     return `https://storage.test/pet-photos/${path}`;
   }
   async remove() {}
+  async uploadPrivate() {}
+  async removePrivate() {}
+  async getSignedUrls(paths: string[]) {
+    return Object.fromEntries(paths.map((path) => [path, `https://storage.test/signed/${path}`]));
+  }
 }
 
 @Global()

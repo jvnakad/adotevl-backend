@@ -43,6 +43,26 @@ npm run start:dev
 
 A API estará disponível em `http://localhost:3000`.
 
+## Ambiente local (sem Supabase)
+
+Para desenvolver sem acesso ao Supabase, use um Postgres local (15+) e o storage em disco. Ajuste a `DATABASE_URL` do `.env.local` para o seu banco:
+
+```bash
+cp .env.local.example .env.local      # .env.local tem precedência sobre o .env
+npm run start:dev                     # cria as tabelas (synchronize) e os perfis padrão
+npm run seed:dev                      # organização "AdoteVL Dev" + admin@adotevl.local / admin123
+```
+
+O `seed:dev` imprime as variáveis para o `.env` do front (`VITE_API_URL`, `VITE_ORGANIZATION_ID`, `VITE_PROFILE_*`).
+
+Com `STORAGE_DRIVER=local` as fotos são gravadas em `./uploads` e servidas em `http://localhost:3000/uploads/...`.
+
+Testes e2e contra o banco local:
+
+```bash
+DATABASE_URL="postgresql://adotevl:adotevl@localhost:5432/adotevl?sslmode=disable" JWT_SECRET=test-secret RESEND_API_KEY=re_fake npm run test:e2e
+```
+
 ## Documentação das rotas
 
 Com o servidor rodando, acesse a documentação interativa completa em:

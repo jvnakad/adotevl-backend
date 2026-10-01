@@ -6,7 +6,9 @@ export class AdoptionFormPhoto {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column()
+  // Fotos novas ficam no bucket privado e não guardam URL: ela é assinada a cada leitura.
+  // Fichas antigas, do bucket público, ainda têm a URL gravada.
+  @Column({ nullable: true })
   url: string;
 
   @Column({ name: 'storage_path' })

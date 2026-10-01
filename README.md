@@ -26,12 +26,15 @@ APP_URL=http://localhost:5173
 SUPABASE_URL=https://seu-projeto.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=sua_service_role_key
 SUPABASE_STORAGE_BUCKET=pet-photos
+SUPABASE_ADOPTION_BUCKET=adoption-forms
 ```
 
 > Para obter a `DATABASE_URL`, acesse o projeto no [Supabase](https://supabase.com) → Connect → ORM → TypeORM.
 > Atenção: caracteres especiais na senha devem ser URL-encoded (`@` → `%40`, `#` → `%23`).
 >
 > As fotos dos pets são armazenadas no Supabase Storage. Crie um bucket **público** com o nome definido em `SUPABASE_STORAGE_BUCKET` (padrão `pet-photos`) e use a `service_role` key em Project Settings → API.
+>
+> As fotos das fichas de adoção (residência dos adotantes) ficam num bucket **privado**, definido em `SUPABASE_ADOPTION_BUCKET` (padrão `adoption-forms`). A API devolve URLs assinadas válidas por 1 hora a cada leitura da ficha.
 >
 > Para obter a `RESEND_API_KEY`, acesse [resend.com](https://resend.com) e crie uma API key. O domínio remetente deve estar verificado no Resend.
 

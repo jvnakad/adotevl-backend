@@ -65,14 +65,18 @@ describe('AdoptionFormService', () => {
   let formRepo: MockRepository;
   let photoRepo: MockRepository;
   let orgRepo: MockRepository;
-  let storage: { upload: jest.Mock; remove: jest.Mock };
+  let storage: { uploadPrivate: jest.Mock; removePrivate: jest.Mock; getSignedUrls: jest.Mock };
   let service: AdoptionFormService;
 
   beforeEach(() => {
     formRepo = createMockRepository();
     photoRepo = createMockRepository();
     orgRepo = createMockRepository();
-    storage = { upload: jest.fn(async (path: string) => `https://cdn/${path}`), remove: jest.fn(async () => undefined) };
+    storage = {
+      uploadPrivate: jest.fn(async () => undefined),
+      removePrivate: jest.fn(async () => undefined),
+      getSignedUrls: jest.fn(async (paths: string[]) => Object.fromEntries(paths.map((path) => [path, `https://signed/${path}`]))),
+    };
     service = new AdoptionFormService(formRepo as any, photoRepo as any, orgRepo as any, storage as any);
 
     orgRepo.findOne.mockResolvedValue({ id: 'org-1' });
@@ -102,22 +106,22 @@ describe('AdoptionFormService', () => {
       const result = await service.create(baseDto(), [file('sala.PNG'), file('quarto.png')]);
 
       expect(savedForm()).toEqual(expect.objectContaining({ fullName: 'Maria', state: 'SP', birthDate: new Date('1990-05-10') }));
-      expect(storage.upload).toHaveBeenCalledTimes(2);
-      expect(storage.upload.mock.calls[0][0]).toMatch(/^adoption-forms\/form-1\/[0-9a-f-]{36}\.png$/);
+      expect(storage.uploadPrivate).toHaveBeenCalledTimes(2);
+      expect(storage.uploadPrivate.mock.calls[0][0]).toMatch(/^adoption-forms\/form-1\/[0-9a-f-]{36}\.png$/);
       expect(photoRepo.save).toHaveBeenCalledWith([
-        expect.objectContaining({ adoptionFormId: 'form-1', createdBy: null }),
-        expect.objectContaining({ adoptionFormId: 'form-1', createdBy: null }),
+        expect.objectContaining({ adoptionFormId: 'form-1', url: null, createdBy: null }),
+        expect.objectContaining({ adoptionFormId: 'form-1', url: null, createdBy: null }),
       ]);
       expect(result).toEqual({ id: 'form-1', status: 'PENDENTE', createdAt: new Date('2026-09-30'), message: 'Ficha de adoção enviada com sucesso.' });
       expect(result).not.toHaveProperty('cpf');
     });
 
     it('apaga a ficha e os arquivos enviados quando o upload falha', async () => {
-      storage.upload.mockResolvedValueOnce('https://cdn/1').mockRejectedValueOnce(new Error('storage fora'));
+      storage.uploadPrivate.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('storage fora'));
 
       await expect(service.create(baseDto(), [file(), file()])).rejects.toThrow('storage fora');
 
-      expect(storage.remove).toHaveBeenCalledWith([expect.stringMatching(/^adoption-forms\/form-1\//)]);
+      expect(storage.removePrivate).toHaveBeenCalledWith([expect.stringMatching(/^adoption-forms\/form-1\//)]);
       expect(formRepo.delete).toHaveBeenCalledWith('form-1');
     });
 
@@ -207,6 +211,22 @@ describe('AdoptionFormService', () => {
 
       expect(result.data[0].fotos.map((f) => f.id)).toEqual(['a', 'b']);
     });
+
+    it('devolve URLs assinadas de todas as fichas numa única chamada', async () => {
+      formRepo.findAndCount.mockResolvedValue([
+        [
+          { id: 'f1', fotos: [{ id: 'a', storagePath: 'adoption-forms/f1/a.png', createdAt: new Date(1) }] },
+          { id: 'f2', fotos: [{ id: 'b', storagePath: 'adoption-forms/f2/b.png', createdAt: new Date(1) }] },
+        ],
+        2,
+      ]);
+
+      const result = await service.findAll(pagination, 'org-1');
+
+      expect(storage.getSignedUrls).toHaveBeenCalledTimes(1);
+      expect(storage.getSignedUrls).toHaveBeenCalledWith(['adoption-forms/f1/a.png', 'adoption-forms/f2/b.png']);
+      expect(result.data.map((form) => form.fotos[0].url)).toEqual(['https://signed/adoption-forms/f1/a.png', 'https://signed/adoption-forms/f2/b.png']);
+    });
   });
 
   describe('findOne', () => {
@@ -216,6 +236,23 @@ describe('AdoptionFormService', () => {
       await service.findOne('form-1', 'org-1');
 
       expect(formRepo.findOne).toHaveBeenCalledWith({ where: { id: 'form-1', organizationId: 'org-1', isActive: true }, relations: { fotos: true } });
+    });
+
+    it('troca a URL das fotos por uma URL assinada', async () => {
+      formRepo.findOne.mockResolvedValue({ id: 'form-1', fotos: [{ id: 'a', url: null, storagePath: 'adoption-forms/form-1/a.png', createdAt: new Date(1) }] });
+
+      const form = await service.findOne('form-1', 'org-1');
+
+      expect(form.fotos[0].url).toBe('https://signed/adoption-forms/form-1/a.png');
+    });
+
+    it('mantém a URL gravada quando a foto não está no bucket privado (fichas antigas)', async () => {
+      storage.getSignedUrls.mockResolvedValue({});
+      formRepo.findOne.mockResolvedValue({ id: 'form-1', fotos: [{ id: 'a', url: 'https://public/a.png', storagePath: 'adoption-forms/form-1/a.png', createdAt: new Date(1) }] });
+
+      const form = await service.findOne('form-1', 'org-1');
+
+      expect(form.fotos[0].url).toBe('https://public/a.png');
     });
 
     it('lança NotFoundException para ficha de outra organização ou removida', async () => {
@@ -278,6 +315,23 @@ describe('AdoptionFormService', () => {
 
     expect(formRepo.update).toHaveBeenCalledWith('form-1', { isActive: false, updatedBy: 'user-1' });
     expect(result.message).toBe('Ficha de adoção removida com sucesso.');
+    expect(storage.removePrivate).not.toHaveBeenCalled();
+  });
+
+  it('remove apaga as fotos da residência do storage e do banco', async () => {
+    formRepo.findOne.mockResolvedValue({
+      id: 'form-1',
+      fotos: [
+        { id: 'a', storagePath: 'adoption-forms/form-1/a.png', createdAt: new Date(1) },
+        { id: 'b', storagePath: 'adoption-forms/form-1/b.png', createdAt: new Date(2) },
+      ],
+    });
+
+    await service.remove('form-1', 'org-1', 'user-1');
+
+    expect(storage.removePrivate).toHaveBeenCalledWith(['adoption-forms/form-1/a.png', 'adoption-forms/form-1/b.png']);
+    expect(photoRepo.delete).toHaveBeenCalledWith({ adoptionFormId: 'form-1' });
+    expect(formRepo.update).toHaveBeenCalledWith('form-1', { isActive: false, updatedBy: 'user-1' });
   });
 
   describe('addPhotos', () => {
@@ -291,7 +345,7 @@ describe('AdoptionFormService', () => {
       photoRepo.count.mockResolvedValue(MAX_ADOPTION_FORM_PHOTOS);
 
       await expect(service.addPhotos('form-1', [file()], 'org-1')).rejects.toThrow('restam 0');
-      expect(storage.upload).not.toHaveBeenCalled();
+      expect(storage.uploadPrivate).not.toHaveBeenCalled();
     });
 
     it('envia e salva com createdBy', async () => {
@@ -317,7 +371,7 @@ describe('AdoptionFormService', () => {
 
       await service.removePhoto('form-1', 'f1', 'org-1');
 
-      expect(storage.remove).toHaveBeenCalledWith(['adoption-forms/form-1/f1.png']);
+      expect(storage.removePrivate).toHaveBeenCalledWith(['adoption-forms/form-1/f1.png']);
       expect(photoRepo.delete).toHaveBeenCalledWith('f1');
     });
   });

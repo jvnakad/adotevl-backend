@@ -11,7 +11,7 @@ jest.mock('fs/promises', () => ({
 }));
 jest.mock('@supabase/supabase-js', () => ({ createClient: jest.fn() }));
 
-const ENV_KEYS = ['STORAGE_DRIVER', 'API_URL', 'PORT', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'];
+const ENV_KEYS = ['STORAGE_DRIVER', 'API_URL', 'PORT', 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_STORAGE_BUCKET', 'SUPABASE_ADOPTION_BUCKET'];
 
 describe('StorageService', () => {
   const originalEnv = { ...process.env };
@@ -59,10 +59,26 @@ describe('StorageService', () => {
       expect(rm).toHaveBeenCalledWith(join(LOCAL_UPLOADS_DIR, 'a.png'), { force: true });
       expect(rm).toHaveBeenCalledWith(join(LOCAL_UPLOADS_DIR, 'b/c.png'), { force: true });
     });
+
+    it('arquivos privados também vão para ./uploads e o link é a própria URL local', async () => {
+      process.env.API_URL = 'http://api.local';
+      const service = new StorageService();
+
+      await service.uploadPrivate('adoption-forms/f1/a.png', Buffer.from('x'), 'image/png');
+      await service.removePrivate(['adoption-forms/f1/a.png']);
+
+      expect(writeFile).toHaveBeenCalledWith(join(LOCAL_UPLOADS_DIR, 'adoption-forms/f1/a.png'), Buffer.from('x'));
+      expect(rm).toHaveBeenCalledWith(join(LOCAL_UPLOADS_DIR, 'adoption-forms/f1/a.png'), { force: true });
+      expect(await service.getSignedUrls(['adoption-forms/f1/a.png'])).toEqual({
+        'adoption-forms/f1/a.png': 'http://api.local/uploads/adoption-forms/f1/a.png',
+      });
+      expect(createClient).not.toHaveBeenCalled();
+    });
   });
 
   describe('driver Supabase (padrão)', () => {
-    let bucket: { upload: jest.Mock; getPublicUrl: jest.Mock; remove: jest.Mock };
+    let bucket: { upload: jest.Mock; getPublicUrl: jest.Mock; remove: jest.Mock; createSignedUrls: jest.Mock };
+    let from: jest.Mock;
 
     beforeEach(() => {
       process.env.SUPABASE_URL = 'https://proj.supabase.co';
@@ -71,8 +87,13 @@ describe('StorageService', () => {
         upload: jest.fn(async () => ({ error: null })),
         getPublicUrl: jest.fn((path: string) => ({ data: { publicUrl: `https://cdn/${path}` } })),
         remove: jest.fn(async () => ({ error: null })),
+        createSignedUrls: jest.fn(async (paths: string[]) => ({
+          data: paths.map((path) => ({ path, signedUrl: `https://signed/${path}`, error: null })),
+          error: null,
+        })),
       };
-      (createClient as jest.Mock).mockReturnValue({ storage: { from: jest.fn(() => bucket) } });
+      from = jest.fn(() => bucket);
+      (createClient as jest.Mock).mockReturnValue({ storage: { from } });
     });
 
     it('falha com 500 quando as variáveis não estão configuradas', async () => {
@@ -110,8 +131,59 @@ describe('StorageService', () => {
 
     it('remove sem chamar o Supabase quando a lista está vazia', async () => {
       await new StorageService().remove([]);
+      await new StorageService().removePrivate([]);
+      expect(await new StorageService().getSignedUrls([])).toEqual({});
 
       expect(createClient).not.toHaveBeenCalled();
+    });
+
+    describe('bucket privado (fichas de adoção)', () => {
+      it('usa o bucket adoption-forms por padrão e não gera URL pública', async () => {
+        const service = new StorageService();
+
+        const result = await service.uploadPrivate('a.png', Buffer.from('x'), 'image/png');
+
+        expect(from).toHaveBeenCalledWith('adoption-forms');
+        expect(bucket.upload).toHaveBeenCalledWith('a.png', Buffer.from('x'), { contentType: 'image/png', upsert: false });
+        expect(bucket.getPublicUrl).not.toHaveBeenCalled();
+        expect(result).toBeUndefined();
+      });
+
+      it('respeita SUPABASE_ADOPTION_BUCKET e não mexe no bucket dos pets', async () => {
+        process.env.SUPABASE_ADOPTION_BUCKET = 'fichas';
+        const service = new StorageService();
+
+        await service.removePrivate(['a.png']);
+        await service.upload('b.png', Buffer.from('x'), 'image/png');
+
+        expect(from.mock.calls.map(([name]) => name)).toEqual(['fichas', 'pet-photos']);
+      });
+
+      it('gera URLs assinadas de 1 hora e ignora arquivos que não existem', async () => {
+        bucket.createSignedUrls.mockResolvedValue({
+          data: [
+            { path: 'a.png', signedUrl: 'https://signed/a.png', error: null },
+            { path: 'antiga.png', signedUrl: null, error: 'Object not found' },
+          ],
+          error: null,
+        });
+
+        const urls = await new StorageService().getSignedUrls(['a.png', 'antiga.png']);
+
+        expect(bucket.createSignedUrls).toHaveBeenCalledWith(['a.png', 'antiga.png'], 3600);
+        expect(urls).toEqual({ 'a.png': 'https://signed/a.png' });
+      });
+
+      it('converte erro do Supabase em erro 500', async () => {
+        bucket.upload.mockResolvedValue({ error: { message: 'quota' } });
+        bucket.remove.mockResolvedValue({ error: { message: 'quota' } });
+        bucket.createSignedUrls.mockResolvedValue({ data: null, error: { message: 'quota' } });
+        const service = new StorageService();
+
+        await expect(service.uploadPrivate('a.png', Buffer.from('x'), 'image/png')).rejects.toThrow('Falha ao enviar arquivo.');
+        await expect(service.removePrivate(['a.png'])).rejects.toThrow('Falha ao remover arquivo.');
+        await expect(service.getSignedUrls(['a.png'])).rejects.toThrow('Falha ao gerar links dos arquivos.');
+      });
     });
   });
 });

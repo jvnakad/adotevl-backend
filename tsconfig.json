@@ -18,5 +18,5 @@
     "strict": false,
     "types": ["node", "multer"]
   },
-  "exclude": ["node_modules", "test", "dist", "scripts"]
+  "exclude": ["node_modules", "test", "dist", "scripts", "src/**/*.spec.ts", "src/testing"]
 }

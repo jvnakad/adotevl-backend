@@ -17,10 +17,11 @@ API REST do sistema de gestão de adoção de pets da AdoteVL. Front-end em `../
 |---|---|
 | `npm run start:dev` | nodemon + ts-node em `src/main.ts` |
 | `npm run build` | `tsc -p tsconfig.json` (exclui `test/` e `scripts/`) |
+| `npm test` | Testes unitários (Jest + ts-jest em `src/**/*.spec.ts`, sem banco) |
+| `npm run test:cov` | Unitários com cobertura (services, guards, helpers, DTO de fichas) |
 | `npm run test:e2e` | Jest + ts-jest em `test/*.e2e-spec.ts` (precisa de Postgres; CI usa `postgres:15`) |
 | `npm run seed:dev` | Organização + admin de dev (só roda com `DATABASE_URL` em localhost) |
 
-`npm test` (specs `.js` em `src/`) está quebrado desde antes e não roda no CI — use os e2e.
 
 ## Ambiente local
 - `.env.local` (copiado de `.env.local.example`) tem precedência sobre `.env` (`ConfigModule.forRoot({ envFilePath: ['.env.local', '.env'] })`).
@@ -76,6 +77,10 @@ src/<feature>/
 - Rota pública não expõe dados internos (ver `PetService.findAllPublic`).
 
 ### Testes
+- Unitários ao lado do arquivo testado (`<arquivo>.spec.ts`), um por service/guard/helper. Instanciar a classe direto com dependências falsas — sem `Test.createTestingModule` e sem banco.
+- Repositório falso: `createMockRepository()` de `src/testing/mock-repository.ts` (`create` devolve o próprio objeto, `save` resolve o objeto, `findAndCount` resolve `[[], 0]`). `src/testing` e `*.spec.ts` ficam fora do build.
+- Libs externas com `jest.mock` (`bcryptjs`, `resend`, `@supabase/supabase-js`, `fs/promises`); variáveis usadas na factory com prefixo `mock`.
+- DTOs com regra relevante: `plainToInstance` + `validate` (ver `adoption-form/dto/create-adoption-form.dto.spec.ts`).
 - E2E de fluxo completo por feature em `test/<feature>-lifecycle.e2e-spec.ts`, usando `TestAppModule` (mock de `MailService` e `StorageService`).
 - Cada suite cria/limpa a própria organização (CNPJ fixo único por suite) e um admin, e faz login via `/auth/login`.
 - Textos de teste (`describe`/`it`/comentários) em PT-BR.
@@ -87,7 +92,7 @@ src/<feature>/
 ## Git
 - Branches: `feat/<kebab-en>`, `fix/<kebab-en>`, a partir de `develop`. PR para `develop`; `develop` → `main` (merge em `main` sincroniza `develop` via Action).
 - Commits Conventional Commits em inglês (`feat: add pet photos upload...`, `fix: ...`, `refactor: ...`).
-- CI (`.github/workflows/test.yml`): `npm ci` + `npm run test:e2e` com Postgres 15.
+- CI (`.github/workflows/test.yml`): `npm ci` + `npm test` + `npm run test:e2e` com Postgres 15.
 
 ## Módulos
 organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), mail, storage.

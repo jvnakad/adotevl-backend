@@ -5,3 +5,5 @@ dist/
 .claude/
 .env.local
 uploads/
+coverage/
+*.tsbuildinfo

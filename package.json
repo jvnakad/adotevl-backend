@@ -13,7 +13,8 @@
     "seed:dev": "ts-node -r tsconfig-paths/register scripts/seed-dev.ts",
     "test": "jest",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json"
+    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:watch": "jest --watch"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -66,10 +67,27 @@
   "jest": {
     "moduleFileExtensions": [
       "js",
-      "json"
+      "json",
+      "ts"
     ],
     "rootDir": "src",
-    "testRegex": ".spec.js$",
+    "testRegex": ".*\\.spec\\.ts$",
+    "transform": {
+      "^.+\\.ts$": [
+        "ts-jest",
+        {
+          "tsconfig": "<rootDir>/../tsconfig.test.json"
+        }
+      ]
+    },
+    "testEnvironment": "node",
+    "collectCoverageFrom": [
+      "**/*.service.ts",
+      "**/*.guard.ts",
+      "**/*.helper.ts",
+      "adoption-form/dto/*.ts",
+      "!app.service.ts"
+    ],
     "coverageDirectory": "../coverage"
   }
 }

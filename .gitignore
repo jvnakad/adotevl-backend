@@ -3,3 +3,5 @@ dist/
 *.sqlite
 .env
 .claude/
+.env.local
+uploads/

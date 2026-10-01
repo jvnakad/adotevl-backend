@@ -43,6 +43,29 @@ npm run start:dev
 
 A API estará disponível em `http://localhost:3000`.
 
+## Ambiente local (sem Supabase)
+
+Para desenvolver sem acesso ao Supabase, suba um Postgres em Docker e use o storage em disco:
+
+```bash
+npm run db:up                         # Postgres 15 em localhost:5433 (docker-compose.yml)
+cp .env.local.example .env.local      # .env.local tem precedência sobre o .env
+npm run start:dev                     # cria as tabelas (synchronize) e os perfis padrão
+npm run seed:dev                      # organização "AdoteVL Dev" + admin@adotevl.local / admin123
+```
+
+O `seed:dev` imprime as variáveis para o `.env` do front (`VITE_API_URL`, `VITE_ORGANIZATION_ID`, `VITE_PROFILE_*`).
+
+Com `STORAGE_DRIVER=local` as fotos são gravadas em `./uploads` e servidas em `http://localhost:3000/uploads/...`.
+
+Testes e2e contra o banco local:
+
+```bash
+DATABASE_URL="postgresql://adotevl:adotevl@localhost:5433/adotevl?sslmode=disable" JWT_SECRET=test-secret RESEND_API_KEY=re_fake npm run test:e2e
+```
+
+Para parar o banco: `npm run db:down` (os dados ficam no volume `adotevl-pgdata`).
+
 ## Documentação das rotas
 
 Com o servidor rodando, acesse a documentação interativa completa em:

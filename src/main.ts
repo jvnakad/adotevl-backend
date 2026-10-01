@@ -1,12 +1,19 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { isLocalStorage, LOCAL_UPLOADS_DIR } from './storage/storage.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
+
+  // Em dev com STORAGE_DRIVER=local os arquivos enviados ficam em ./uploads
+  if (isLocalStorage()) {
+    app.useStaticAssets(LOCAL_UPLOADS_DIR, { prefix: '/uploads' });
+  }
 
   const config = new DocumentBuilder()
     .setTitle('AdoteVL API')

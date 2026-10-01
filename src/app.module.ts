@@ -35,13 +35,14 @@ import { StorageModule } from './storage/storage.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    // .env.local (ambiente local) tem precedência sobre o .env
+    ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
       entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress],
       synchronize: true,
-      ssl: { rejectUnauthorized: false },
+      ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),
     OrganizationModule,
     ProfileModule,

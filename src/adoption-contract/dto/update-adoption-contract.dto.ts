@@ -18,25 +18,25 @@ export class ContractClauseDto {
   @MaxLength(MAX_CLAUSE_LENGTH, { message: `Texto da cláusula deve ter no máximo ${MAX_CLAUSE_LENGTH} caracteres.` })
   content: string;
 
-  @ApiProperty({ description: 'Cláusula removida do contrato' })
+  @ApiProperty({ description: 'Cláusula removida do termo de adoção' })
   @IsBoolean({ message: 'Informe se a cláusula foi removida (true ou false).' })
   removed: boolean;
 }
 
 export class UpdateAdoptionContractDto {
-  @ApiPropertyOptional({ description: 'Pet vinculado ao contrato (null desvincula)', nullable: true })
+  @ApiPropertyOptional({ description: 'Pet vinculado ao termo de adoção (null desvincula)', nullable: true })
   @IsOptional()
   @IsUUID('all', { message: 'Pet inválido.' })
   petId?: string | null;
 
   @ApiPropertyOptional({
-    description: 'Dados do contrato: { adopter: { name, age, birthDate, rg, cpf, email, phone, profession, address }, animal: { name, species (CANINA|FELINA), sex (MACHO|FEMEA), breed, coat, distinctiveMarks, age, castrated, vaccinated, temperament, usesMedication, medicationDetails }, signature: { city, date } }',
+    description: 'Dados do termo de adoção: { adopter: { name, age, birthDate, rg, cpf, email, phone, profession, address }, animal: { name, species (CANINA|FELINA), sex (MACHO|FEMEA), breed, coat, distinctiveMarks, age, castrated, vaccinated, temperament, usesMedication, medicationDetails }, signature: { city, date } }',
   })
   @IsOptional()
-  @IsObject({ message: 'Dados do contrato inválidos.' })
+  @IsObject({ message: 'Dados do termo de adoção inválidos.' })
   data?: Record<string, any>;
 
-  @ApiPropertyOptional({ type: [ContractClauseDto], description: 'Todas as cláusulas do contrato' })
+  @ApiPropertyOptional({ type: [ContractClauseDto], description: 'Todas as cláusulas do termo de adoção' })
   @IsOptional()
   @IsArray({ message: 'Cláusulas devem ser uma lista.' })
   @ValidateNested({ each: true })

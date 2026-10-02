@@ -7,7 +7,7 @@ import { AdoptionContractService } from './adoption-contract.service';
 import { UpdateAdoptionContractDto } from './dto/update-adoption-contract.dto';
 
 // Rotas do contrato ficam sob a ficha: /adoption-forms/:id/contract
-@ApiTags('Contrato de adoção')
+@ApiTags('Termo de adoção')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('adoption-forms')
@@ -18,7 +18,7 @@ export class AdoptionContractController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
     summary: 'Buscar contrato da ficha de adoção',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Ficha APROVADO, CONTRATO_GERADO, AGUARDANDO_ASSINATURA, CONTRATO_ASSINADO ou CONCLUIDA. Na primeira chamada cria o rascunho a partir do modelo, pré-preenchido com a ficha e o pet vinculado.',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Ficha APROVADO, CONTRATO_GERADO, AGUARDANDO_ASSINATURA ou CONCLUIDA. Na primeira chamada cria o rascunho a partir do modelo, pré-preenchido com a ficha e o pet vinculado.',
   })
   findOne(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.findByForm(id, req.user.organizationId, req.user.id);
@@ -56,7 +56,7 @@ export class AdoptionContractController {
   @ApiOperation({
     summary: 'Enviar contrato para assinatura (Autentique)',
     description:
-      'Perfis permitidos: ADMIN, VOLUNTEER. Ficha CONTRATO_GERADO. Envia o PDF da versão atual ao Autentique; o adotante recebe o link por e-mail. Ficha vai para AGUARDANDO_ASSINATURA e o contrato fica somente leitura.',
+      'Perfis permitidos: ADMIN, VOLUNTEER. Ficha CONTRATO_GERADO. Envia o PDF da versão atual ao Autentique; o adotante recebe o link por e-mail. Ficha vai para AGUARDANDO_ASSINATURA e o termo fica somente leitura.',
   })
   sendForSignature(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.sendForSignature(id, req.user.organizationId, req.user.id);
@@ -66,7 +66,7 @@ export class AdoptionContractController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
     summary: 'Atualizar status da assinatura',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Consulta o documento no Autentique: assinado → CONTRATO_ASSINADO (PDF assinado salvo no bucket privado); recusado → volta para CONTRATO_GERADO.',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Consulta o documento no Autentique: assinado → adoção CONCLUIDA (pet ADOTADO, PDF assinado salvo no bucket privado); recusado → volta para CONTRATO_GERADO.',
   })
   syncSignature(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.syncSignatureByForm(id, req.user.organizationId, req.user.id);

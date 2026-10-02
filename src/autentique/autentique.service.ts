@@ -148,7 +148,7 @@ export class AutentiqueService {
     } catch (error) {
       if (error instanceof ServiceUnavailableException) throw error;
       this.logger.error(`Falha ao baixar arquivo do Autentique: ${error?.message}`);
-      throw new BadGatewayException('Não foi possível baixar o contrato assinado do Autentique.');
+      throw new BadGatewayException('Não foi possível baixar o termo de adoção assinado do Autentique.');
     }
   }
 

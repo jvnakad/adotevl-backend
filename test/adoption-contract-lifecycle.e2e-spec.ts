@@ -74,7 +74,7 @@ const answers = (organizationId: string): Record<string, string> => ({
 // Dia local (Brasil, UTC-3) para os filtros do histórico
 const localToday = () => new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-describe('Fluxo do contrato de adoção (e2e)', () => {
+describe('Fluxo do termo de adoção (e2e)', () => {
   let app: INestApplication;
   let profileRepo: Repository<Profile>;
   let orgRepo: Repository<Organization>;
@@ -181,10 +181,10 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     expect(initialHistory.status).toBe(200);
     expect(initialHistory.body).toEqual([expect.objectContaining({ type: 'FICHA_CRIADA', userName: 'Formulário público', adopterName: 'Carla Contrato' })]);
 
-    // 2. Kanban com as 8 colunas
+    // 2. Kanban com as 6 colunas
     const board = await auth(api().get('/adoption-forms/board?search=carla'));
     expect(board.status).toBe(200);
-    expect(board.body.columns.map((c) => c.status)).toEqual(['PENDENTE', 'EM_ANALISE', 'APROVADO', 'CONTRATO_GERADO', 'AGUARDANDO_ASSINATURA', 'CONTRATO_ASSINADO', 'CONCLUIDA', 'REPROVADO']);
+    expect(board.body.columns.map((c) => c.status)).toEqual(['PENDENTE', 'APROVADO', 'CONTRATO_GERADO', 'AGUARDANDO_ASSINATURA', 'CONCLUIDA', 'REPROVADO']);
     expect(board.body.columns[0].items.map((i) => i.id)).toEqual([formId]);
     expect(board.body.columns[0].items[0]).toEqual(expect.objectContaining({ petId: null, petName: null }));
 
@@ -192,7 +192,7 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     expect((await auth(api().get(`/adoption-forms/${formId}/contract`))).status).toBe(400);
     const manualContract = await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'CONTRATO_GERADO' });
     expect(manualContract.status).toBe(400);
-    expect(manualContract.body.message).toBe('Gere o contrato para mover a ficha para Contrato gerado.');
+    expect(manualContract.body.message).toBe('Gere o termo de adoção para mover a ficha para Termo gerado.');
     expect((await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'CONCLUIDA' })).status).toBe(400);
     // Mesmo status: só atualiza as observações
     const sameStatus = await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'PENDENTE', reviewNotes: 'Aguardando entrevista' });
@@ -219,7 +219,7 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     // 6. Gerar sem pet
     const noPet = await auth(api().post(`/adoption-forms/${formId}/contract/generate`));
     expect(noPet.status).toBe(400);
-    expect(noPet.body.message).toBe('Vincule um pet antes de gerar o contrato.');
+    expect(noPet.body.message).toBe('Vincule um pet antes de gerar o termo de adoção.');
 
     // 7. Vincular pet: adotado é recusado; disponível é reservado e preenche o animal
     expect((await auth(api().put(`/adoption-forms/${formId}/contract`)).send({ petId: adopted.id })).status).toBe(400);
@@ -276,11 +276,11 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     const volunteerReopen = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'APROVADO' });
     expect(volunteerReopen.status).toBe(403);
 
-    // 12a. Sem assinatura não conclui
+    // 12a. Concluir nunca é manual: só a assinatura conclui
     const notSigned = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'CONCLUIDA' });
     expect(notSigned.status).toBe(400);
-    expect(notSigned.body.message).toBe('A adoção só pode ser concluída depois que o contrato for assinado.');
-    expect((await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'CONTRATO_ASSINADO' })).status).toBe(400);
+    expect(notSigned.body.message).toBe('A adoção é concluída automaticamente quando o adotante assina o termo de adoção.');
+    expect((await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'AGUARDANDO_ASSINATURA' })).status).toBe(400);
 
     // 12b. Envia para assinatura: ficha aguardando, contrato só leitura
     const sent = await auth(api().post(`/adoption-forms/${formId}/contract/signature`), volunteerToken);
@@ -289,7 +289,7 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('AGUARDANDO_ASSINATURA');
     const lockedEdit = await auth(api().put(`/adoption-forms/${formId}/contract`)).send({ data: {} });
     expect(lockedEdit.status).toBe(400);
-    expect(lockedEdit.body.message).toBe('O contrato já foi enviado para assinatura e não pode mais ser alterado.');
+    expect(lockedEdit.body.message).toBe('O termo de adoção já foi enviado para assinatura e não pode mais ser alterado.');
     expect((await auth(api().post(`/adoption-forms/${formId}/contract/signature`))).status).toBe(400);
     const firstDocumentId = [...autentique.documents.keys()].pop();
 
@@ -308,7 +308,7 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     expect(pending.status).toBe(201);
     expect(pending.body.signature.status).toBe('PENDENTE');
 
-    // 12e. Webhook: HMAC inválido é recusado; válido marca o contrato como assinado
+    // 12e. Webhook: HMAC inválido é recusado; válido marca o termo como assinado e conclui a adoção
     autentique.signDocument(documentId);
     const webhookBody = JSON.stringify({ id: 'wh-1', object: 'webhook', event: { id: 'ev-1', type: 'signature.accepted', data: { document: documentId } } });
     const webhook = (signature: string) =>
@@ -321,13 +321,11 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     const signedContract = await auth(api().get(`/adoption-forms/${formId}/contract`));
     expect(signedContract.body.signature).toEqual(expect.objectContaining({ status: 'ASSINADO', signedAt: expect.any(String) }));
     expect(signedContract.body.signature.signedPdfUrl).toContain(`contracts/${formId}/assinado-v1.pdf`);
-    expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('CONTRATO_ASSINADO');
+    expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('CONCLUIDA');
     const signedBoard = await auth(api().get('/adoption-forms/board?search=carla'));
-    expect(signedBoard.body.columns.find((c) => c.status === 'CONTRATO_ASSINADO').items.map((i) => i.id)).toEqual([formId]);
+    expect(signedBoard.body.columns.find((c) => c.status === 'CONCLUIDA').items.map((i) => i.id)).toEqual([formId]);
 
-    // 13. Concluir adoção: pet adotado
-    const concluded = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'CONCLUIDA' });
-    expect(concluded.status).toBe(200);
+    // 13. Adoção concluída pela assinatura: pet adotado
     const adoptedRex = await petRepo.findOne({ where: { id: rex.id } });
     expect(adoptedRex.status).toBe('ADOTADO');
     expect(adoptedRex.adoptionDate).toBeTruthy();
@@ -336,13 +334,14 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     expect((await auth(api().get(`/adoption-forms/${formId}/contract`))).status).toBe(200);
     const readOnly = await auth(api().put(`/adoption-forms/${formId}/contract`)).send({ data: {} });
     expect(readOnly.status).toBe(400);
-    expect(readOnly.body.message).toBe('Adoção concluída: o contrato não pode mais ser alterado.');
+    expect(readOnly.body.message).toBe('Adoção concluída: o termo de adoção não pode mais ser alterado.');
 
     // 15. Histórico da ficha com tudo, mais recente primeiro
     const formHistory = await auth(api().get(`/adoption-forms/${formId}/history`));
     expect(formHistory.status).toBe(200);
     const types = formHistory.body.map((event) => event.type);
-    expect(types[0]).toBe('ADOCAO_CONCLUIDA');
+    // Assinatura e conclusão são gravadas juntas (mesmo instante)
+    expect(types.slice(0, 2)).toEqual(expect.arrayContaining(['CONTRATO_ASSINADO', 'ADOCAO_CONCLUIDA']));
     expect(types).toEqual(
       expect.arrayContaining([
         'FICHA_CRIADA',

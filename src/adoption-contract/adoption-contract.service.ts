@@ -19,10 +19,8 @@ const CONTRACT_VIEW_STATUSES = [
   AdoptionFormStatus.APROVADO,
   AdoptionFormStatus.CONTRATO_GERADO,
   AdoptionFormStatus.AGUARDANDO_ASSINATURA,
-  AdoptionFormStatus.CONTRATO_ASSINADO,
   AdoptionFormStatus.CONCLUIDA,
 ];
-const CONTRACT_LOCKED_STATUSES = [AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONTRATO_ASSINADO];
 // Ator dos eventos gravados pelo webhook/sincronização (sem usuário logado)
 export const AUTENTIQUE_USER_NAME = 'Autentique';
 const LINKABLE_PET_STATUSES = [PetStatus.DISPONIVEL, PetStatus.EM_PROCESSO];
@@ -81,7 +79,7 @@ export class AdoptionContractService {
       if (fields.length) {
         events.push({
           type: AdoptionHistoryType.CONTRATO_DADOS_ALTERADOS,
-          description: `Dados do contrato alterados: ${fields.map((field) => field.label).join(', ')}`,
+          description: `Dados do termo de adoção alterados: ${fields.map((field) => field.label).join(', ')}`,
           metadata: { fields },
         });
       }
@@ -107,10 +105,10 @@ export class AdoptionContractService {
       events.push({
         type: AdoptionHistoryType.PET_VINCULADO,
         description: newPet
-          ? `Pet ${newPet.name} vinculado ao contrato`
+          ? `Pet ${newPet.name} vinculado ao termo de adoção`
           : previousPet
-            ? `Pet ${previousPet.name} desvinculado do contrato`
-            : 'Pet desvinculado do contrato',
+            ? `Pet ${previousPet.name} desvinculado do termo de adoção`
+            : 'Pet desvinculado do termo de adoção',
         metadata: {
           before: previousPet ? { id: previousPet.id, name: previousPet.name } : null,
           after: newPet ? { id: newPet.id, name: newPet.name } : null,
@@ -152,9 +150,9 @@ export class AdoptionContractService {
     const form = await this.getForm(formId, organizationId);
     this.assertEditable(form);
     const contract = await this.ensureContract(form, userId);
-    if (!contract.petId) throw new BadRequestException('Vincule um pet antes de gerar o contrato.');
+    if (!contract.petId) throw new BadRequestException('Vincule um pet antes de gerar o termo de adoção.');
     if (!contract.data?.adopter?.name?.trim() || !contract.data?.adopter?.cpf?.trim()) {
-      throw new BadRequestException('Preencha o nome e o CPF do adotante antes de gerar o contrato.');
+      throw new BadRequestException('Preencha o nome e o CPF do adotante antes de gerar o termo de adoção.');
     }
 
     const pet = await this.petRepository.findOne({ where: { id: contract.petId }, relations: { fotos: true } });
@@ -175,10 +173,10 @@ export class AdoptionContractService {
         [
           {
             type: AdoptionHistoryType.CONTRATO_GERADO,
-            description: `Contrato gerado (versão ${version})`,
+            description: `Termo de adoção gerado (versão ${version})`,
             fromStatus: statusChanged ? form.status : null,
             toStatus: statusChanged ? AdoptionFormStatus.CONTRATO_GERADO : null,
-            metadata: { version, storagePath, fileName: `contrato-v${version}.pdf` },
+            metadata: { version, storagePath, fileName: `termo-adocao-v${version}.pdf` },
           },
         ],
         async (manager) => {
@@ -203,10 +201,10 @@ export class AdoptionContractService {
   async sendForSignature(formId: string, organizationId: string, userId: string = null) {
     const form = await this.getForm(formId, organizationId);
     if (form.status !== AdoptionFormStatus.CONTRATO_GERADO) {
-      throw new BadRequestException('Só é possível enviar para assinatura um contrato gerado.');
+      throw new BadRequestException('Só é possível enviar para assinatura um termo de adoção gerado.');
     }
     const contract = await this.ensureContract(form, userId);
-    if (!contract.pdfStoragePath) throw new BadRequestException('Gere o PDF do contrato antes de enviar para assinatura.');
+    if (!contract.pdfStoragePath) throw new BadRequestException('Gere o PDF do termo de adoção antes de enviar para assinatura.');
     const name = contract.data?.adopter?.name?.trim() || form.fullName;
     const email = (contract.data?.adopter?.email?.trim() || form.email)?.toLowerCase();
     if (!email) throw new BadRequestException('Informe o e-mail do adotante antes de enviar para assinatura.');
@@ -228,7 +226,7 @@ export class AdoptionContractService {
         [
           {
             type: AdoptionHistoryType.CONTRATO_ENVIADO_ASSINATURA,
-            description: `Contrato (versão ${contract.version}) enviado para assinatura de ${email}`,
+            description: `Termo de adoção (versão ${contract.version}) enviado para assinatura de ${email}`,
             fromStatus: form.status,
             toStatus: AdoptionFormStatus.AGUARDANDO_ASSINATURA,
             metadata: { documentId: document.id, version: contract.version, email },
@@ -262,7 +260,7 @@ export class AdoptionContractService {
     const form = await this.getForm(formId, organizationId);
     this.assertCanView(form);
     const contract = await this.contractRepository.findOne({ where: { adoptionFormId: form.id } });
-    if (!contract?.autentiqueDocumentId) throw new BadRequestException('O contrato ainda não foi enviado para assinatura.');
+    if (!contract?.autentiqueDocumentId) throw new BadRequestException('O termo de adoção ainda não foi enviado para assinatura.');
     await this.syncSignature(contract, form);
     return this.findByForm(formId, organizationId, userId);
   }
@@ -287,7 +285,7 @@ export class AdoptionContractService {
     }
     const signature = document.signatures.find((item) => item.email === contract.signatureEmail);
     if (!signature) return;
-    // A ficha pode ter voltado para Aprovado (ADMIN) enquanto aguardava: aí só o contrato é atualizado
+    // A ficha pode ter voltado para Aprovado (ADMIN) enquanto aguardava: aí só o termo é atualizado
     const waiting = form.status === AdoptionFormStatus.AGUARDANDO_ASSINATURA;
 
     if (signature.signedAt) {
@@ -306,11 +304,21 @@ export class AdoptionContractService {
         [
           {
             type: AdoptionHistoryType.CONTRATO_ASSINADO,
-            description: `Contrato (versão ${contract.signatureVersion}) assinado por ${signature.name ?? contract.signatureEmail}`,
-            fromStatus: waiting ? form.status : null,
-            toStatus: waiting ? AdoptionFormStatus.CONTRATO_ASSINADO : null,
+            description: `Termo de adoção (versão ${contract.signatureVersion}) assinado por ${signature.name ?? contract.signatureEmail}`,
             metadata: { documentId: document.id, version: contract.signatureVersion, signedAt: signature.signedAt, storagePath: signedPdfStoragePath },
           },
+          // Assinatura conclui a adoção sozinha
+          ...(waiting
+            ? [
+                {
+                  type: AdoptionHistoryType.ADOCAO_CONCLUIDA,
+                  description: 'Adoção concluída',
+                  fromStatus: form.status,
+                  toStatus: AdoptionFormStatus.CONCLUIDA,
+                  metadata: { petId: contract.petId ?? null },
+                },
+              ]
+            : []),
         ],
         async (manager) => {
           await manager.getRepository(AdoptionContract).update(contract.id, {
@@ -318,7 +326,11 @@ export class AdoptionContractService {
             signedAt: new Date(signature.signedAt),
             signedPdfStoragePath,
           });
-          if (waiting) await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONTRATO_ASSINADO });
+          if (!waiting) return;
+          await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONCLUIDA });
+          if (contract.petId) {
+            await manager.getRepository(Pet).update({ id: contract.petId, organizationId: form.organizationId }, { status: PetStatus.ADOTADO, adoptionDate: new Date() });
+          }
         },
         AUTENTIQUE_USER_NAME,
       );
@@ -332,7 +344,7 @@ export class AdoptionContractService {
         [
           {
             type: AdoptionHistoryType.ASSINATURA_RECUSADA,
-            description: `Assinatura do contrato recusada por ${signature.name ?? contract.signatureEmail}`,
+            description: `Assinatura do termo de adoção recusada por ${signature.name ?? contract.signatureEmail}`,
             fromStatus: waiting ? form.status : null,
             toStatus: waiting ? AdoptionFormStatus.CONTRATO_GERADO : null,
             metadata: { documentId: document.id, version: contract.signatureVersion, rejectedAt: signature.rejectedAt },
@@ -351,7 +363,7 @@ export class AdoptionContractService {
   async cancelSignature(formId: string, organizationId: string, userId: string = null) {
     const form = await this.getForm(formId, organizationId);
     if (form.status !== AdoptionFormStatus.AGUARDANDO_ASSINATURA) {
-      throw new BadRequestException('Só é possível cancelar um contrato aguardando assinatura.');
+      throw new BadRequestException('Só é possível cancelar um termo de adoção aguardando assinatura.');
     }
     const contract = await this.contractRepository.findOne({ where: { adoptionFormId: form.id } });
     if (contract?.autentiqueDocumentId) await this.autentiqueService.deleteDocument(contract.autentiqueDocumentId);
@@ -362,7 +374,7 @@ export class AdoptionContractService {
       [
         {
           type: AdoptionHistoryType.ASSINATURA_CANCELADA,
-          description: 'Envio do contrato para assinatura cancelado',
+          description: 'Envio do termo de adoção para assinatura cancelado',
           fromStatus: form.status,
           toStatus: AdoptionFormStatus.CONTRATO_GERADO,
           metadata: { documentId: contract?.autentiqueDocumentId ?? null, version: contract?.signatureVersion ?? null },
@@ -405,7 +417,7 @@ export class AdoptionContractService {
       if (!clause.removed && !clause.content?.trim()) errors.push(`O texto da cláusula "${template.title}" não pode ficar vazio.`);
     }
     const missing = CONTRACT_TEMPLATE.filter((clause) => !seen.has(clause.key)).map((clause) => clause.key);
-    if (missing.length) errors.push(`Envie todas as cláusulas do contrato. Faltando: ${missing.join(', ')}.`);
+    if (missing.length) errors.push(`Envie todas as cláusulas do termo de adoção. Faltando: ${missing.join(', ')}.`);
     if (errors.length) throw new BadRequestException(errors);
 
     const templateIndex = (key: string) => CONTRACT_TEMPLATE.findIndex((clause) => clause.key === key);
@@ -495,17 +507,17 @@ export class AdoptionContractService {
 
   private assertCanView(form: AdoptionForm) {
     if (!CONTRACT_VIEW_STATUSES.includes(form.status)) {
-      throw new BadRequestException('O contrato só pode ser gerado para fichas aprovadas.');
+      throw new BadRequestException('O termo de adoção só pode ser gerado para fichas aprovadas.');
     }
   }
 
   private assertEditable(form: AdoptionForm) {
     this.assertCanView(form);
     if (form.status === AdoptionFormStatus.CONCLUIDA) {
-      throw new BadRequestException('Adoção concluída: o contrato não pode mais ser alterado.');
+      throw new BadRequestException('Adoção concluída: o termo de adoção não pode mais ser alterado.');
     }
-    if (CONTRACT_LOCKED_STATUSES.includes(form.status)) {
-      throw new BadRequestException('O contrato já foi enviado para assinatura e não pode mais ser alterado.');
+    if (form.status === AdoptionFormStatus.AGUARDANDO_ASSINATURA) {
+      throw new BadRequestException('O termo de adoção já foi enviado para assinatura e não pode mais ser alterado.');
     }
   }
 

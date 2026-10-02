@@ -126,10 +126,10 @@ describe('AdoptionContractService', () => {
   const recordedEvents = () => history.recordMany.mock.calls.flatMap((call) => call[0]);
 
   describe('findByForm', () => {
-    it.each([AdoptionFormStatus.PENDENTE, AdoptionFormStatus.EM_ANALISE, AdoptionFormStatus.REPROVADO])('bloqueia ficha %s', async (status) => {
+    it.each([AdoptionFormStatus.PENDENTE, AdoptionFormStatus.REPROVADO])('bloqueia ficha %s', async (status) => {
       formRepo.findOne.mockResolvedValue(baseForm(status));
 
-      await expect(service.findByForm('form-1', 'org-1')).rejects.toThrow('O contrato só pode ser gerado para fichas aprovadas.');
+      await expect(service.findByForm('form-1', 'org-1')).rejects.toThrow('O termo de adoção só pode ser gerado para fichas aprovadas.');
     });
 
     it('lança 404 para ficha de outra organização', async () => {
@@ -189,7 +189,7 @@ describe('AdoptionContractService', () => {
     it('adoção concluída é só leitura', async () => {
       formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONCLUIDA));
 
-      await expect(service.update('form-1', { data: {} }, 'org-1')).rejects.toThrow('Adoção concluída: o contrato não pode mais ser alterado.');
+      await expect(service.update('form-1', { data: {} }, 'org-1')).rejects.toThrow('Adoção concluída: o termo de adoção não pode mais ser alterado.');
     });
 
     it('salva dados aceitando só chaves conhecidas e registra CONTRATO_DADOS_ALTERADOS', async () => {
@@ -203,7 +203,7 @@ describe('AdoptionContractService', () => {
       expect(recordedEvents()).toEqual([
         expect.objectContaining({
           type: AdoptionHistoryType.CONTRATO_DADOS_ALTERADOS,
-          description: 'Dados do contrato alterados: RG do adotante, Pelagem do animal',
+          description: 'Dados do termo de adoção alterados: RG do adotante, Pelagem do animal',
           userId: 'user-1',
           userName: 'Ana Admin',
           metadata: {
@@ -293,7 +293,7 @@ describe('AdoptionContractService', () => {
 
       it.each([
         ['chave desconhecida', () => [...clausesPayload(), { key: 'nova', order: 15, content: 'x', removed: false }], 'Cláusula desconhecida: nova.'],
-        ['cláusula faltando', () => clausesPayload().filter((c) => c.key !== 'foro'), 'Envie todas as cláusulas do contrato. Faltando: foro.'],
+        ['cláusula faltando', () => clausesPayload().filter((c) => c.key !== 'foro'), 'Envie todas as cláusulas do termo de adoção. Faltando: foro.'],
         ['cláusula travada removida', () => clausesPayload((c) => (c.key === 'animal' ? { ...c, removed: true } : c)), 'A cláusula "Identificação do animal" não pode ser removida.'],
         ['texto vazio', () => clausesPayload((c) => (c.key === 'danos' ? { ...c, content: '  ' } : c)), 'O texto da cláusula "Danos causados pelo animal" não pode ficar vazio.'],
         ['cláusula repetida', () => [...clausesPayload(), { key: 'foro', order: 15, content: 'x', removed: false }], 'Cláusula repetida: foro.'],
@@ -327,7 +327,7 @@ describe('AdoptionContractService', () => {
         expect(recordedEvents()).toEqual([
           expect.objectContaining({
             type: AdoptionHistoryType.PET_VINCULADO,
-            description: 'Pet Mia vinculado ao contrato',
+            description: 'Pet Mia vinculado ao termo de adoção',
             metadata: { before: { id: 'pet-old', name: 'Rex' }, after: { id: 'pet-new', name: 'Mia' } },
           }),
         ]);
@@ -363,7 +363,7 @@ describe('AdoptionContractService', () => {
 
         expect(tx.form.update).toHaveBeenCalledWith('form-1', { petId: null, updatedBy: null });
         expect(tx.pet.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-1', organizationId: expect.any(String) }), { status: PetStatus.DISPONIVEL, updatedBy: null });
-        expect(recordedEvents()[0].description).toBe('Pet Rex desvinculado do contrato');
+        expect(recordedEvents()[0].description).toBe('Pet Rex desvinculado do termo de adoção');
       });
     });
   });
@@ -387,8 +387,63 @@ describe('AdoptionContractService', () => {
   });
 
   describe('generate', () => {
+    it.each([AdoptionFormStatus.PENDENTE, AdoptionFormStatus.REPROVADO])('ficha %s não gera o termo', async (status) => {
+      formRepo.findOne.mockResolvedValue(baseForm(status, 'pet-1'));
+
+      await expect(service.generate('form-1', 'org-1')).rejects.toThrow('O termo de adoção só pode ser gerado para fichas aprovadas.');
+      expect(buildContractPdf).not.toHaveBeenCalled();
+    });
+
+    it('exige o nome do adotante', async () => {
+      const data = buildInitialData(baseForm() as any);
+      data.adopter.name = '   ';
+      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1', data }));
+
+      await expect(service.generate('form-1', 'org-1')).rejects.toThrow('Preencha o nome e o CPF do adotante antes de gerar o termo de adoção.');
+      expect(storage.uploadPrivate).not.toHaveBeenCalled();
+    });
+
+    it('pet sem foto gera o PDF sem imagem', async () => {
+      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
+      petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', status: PetStatus.EM_PROCESSO, fotos: [] });
+
+      await service.generate('form-1', 'org-1', 'user-1');
+
+      expect(loadImageAsDataUrl).not.toHaveBeenCalled();
+      expect((buildContractPdf as jest.Mock).mock.calls[0][0].petPhoto).toBeNull();
+      // Pet já reservado: não grava de novo
+      expect(tx.pet.update).not.toHaveBeenCalled();
+    });
+
+    it('primeira versão grava v1 e cláusulas removidas ficam fora do PDF, com a numeração refeita', async () => {
+      const clauses = templateClauses().map((clause) => (clause.key === 'vacina_castracao' ? { ...clause, removed: true } : clause));
+      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1', clauses }));
+      petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', status: PetStatus.EM_PROCESSO, fotos: [] });
+
+      const response = await service.generate('form-1', 'org-1', 'user-1');
+
+      const input = (buildContractPdf as jest.Mock).mock.calls[0][0];
+      expect(input.clauses).toHaveLength(CONTRACT_TEMPLATE.length - 1);
+      expect(input.clauses.map((clause) => clause.key)).not.toContain('vacina_castracao');
+      expect(input.clauses[input.clauses.length - 1].heading).toBe('CLÁUSULA DÉCIMA TERCEIRA');
+      expect(input.data).toEqual(expect.objectContaining({ adopter: expect.objectContaining({ name: 'Maria da Silva' }) }));
+      expect(storage.uploadPrivate).toHaveBeenCalledWith('contracts/form-1/v1.pdf', expect.any(Buffer), 'application/pdf');
+      expect(recordedEvents()[0].metadata).toEqual({ version: 1, storagePath: 'contracts/form-1/v1.pdf', fileName: 'termo-adocao-v1.pdf' });
+      expect(response).toBeDefined();
+    });
+
+    it('falha ao montar o PDF não grava nada', async () => {
+      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
+      petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', status: PetStatus.EM_PROCESSO, fotos: [] });
+      (buildContractPdf as jest.Mock).mockRejectedValueOnce(new Error('pdfmake'));
+
+      await expect(service.generate('form-1', 'org-1')).rejects.toThrow('pdfmake');
+      expect(storage.uploadPrivate).not.toHaveBeenCalled();
+      expect(tx.contract.update).not.toHaveBeenCalled();
+    });
+
     it('exige pet vinculado', async () => {
-      await expect(service.generate('form-1', 'org-1')).rejects.toThrow('Vincule um pet antes de gerar o contrato.');
+      await expect(service.generate('form-1', 'org-1')).rejects.toThrow('Vincule um pet antes de gerar o termo de adoção.');
     });
 
     it('exige nome e CPF do adotante', async () => {
@@ -396,7 +451,7 @@ describe('AdoptionContractService', () => {
       data.adopter.cpf = '';
       contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1', data }));
 
-      await expect(service.generate('form-1', 'org-1')).rejects.toThrow('Preencha o nome e o CPF do adotante antes de gerar o contrato.');
+      await expect(service.generate('form-1', 'org-1')).rejects.toThrow('Preencha o nome e o CPF do adotante antes de gerar o termo de adoção.');
     });
 
     it('gera o PDF, salva no bucket privado, move a ficha e registra a versão', async () => {
@@ -431,8 +486,8 @@ describe('AdoptionContractService', () => {
           type: AdoptionHistoryType.CONTRATO_GERADO,
           fromStatus: 'APROVADO',
           toStatus: 'CONTRATO_GERADO',
-          description: 'Contrato gerado (versão 2)',
-          metadata: { version: 2, storagePath: 'contracts/form-1/v2.pdf', fileName: 'contrato-v2.pdf' },
+          description: 'Termo de adoção gerado (versão 2)',
+          metadata: { version: 2, storagePath: 'contracts/form-1/v2.pdf', fileName: 'termo-adocao-v2.pdf' },
         }),
       ]);
     });
@@ -458,14 +513,14 @@ describe('AdoptionContractService', () => {
       expect(storage.removePrivate).toHaveBeenCalledWith(['contracts/form-1/v1.pdf']);
     });
 
-    it('adoção concluída não gera novo contrato', async () => {
+    it('adoção concluída não gera novo termo de adoção', async () => {
       formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONCLUIDA, 'pet-1'));
 
       await expect(service.generate('form-1', 'org-1')).rejects.toThrow('Adoção concluída');
     });
 
-    it.each([AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONTRATO_ASSINADO])('contrato em %s não pode ser regerado nem editado', async (status) => {
-      formRepo.findOne.mockResolvedValue(baseForm(status, 'pet-1'));
+    it('termo aguardando assinatura não pode ser regerado nem editado', async () => {
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.AGUARDANDO_ASSINATURA, 'pet-1'));
 
       await expect(service.generate('form-1', 'org-1')).rejects.toThrow('já foi enviado para assinatura');
       await expect(service.update('form-1', { data: {} } as any, 'org-1')).rejects.toThrow('já foi enviado para assinatura');
@@ -481,7 +536,7 @@ describe('AdoptionContractService', () => {
     it.each([AdoptionFormStatus.APROVADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('ficha %s não pode ser enviada', async (status) => {
       formRepo.findOne.mockResolvedValue(baseForm(status, 'pet-1'));
 
-      await expect(service.sendForSignature('form-1', 'org-1')).rejects.toThrow('Só é possível enviar para assinatura um contrato gerado.');
+      await expect(service.sendForSignature('form-1', 'org-1')).rejects.toThrow('Só é possível enviar para assinatura um termo de adoção gerado.');
       expect(autentique.createDocument).not.toHaveBeenCalled();
     });
 
@@ -542,7 +597,7 @@ describe('AdoptionContractService', () => {
       contractRepo.findOne.mockResolvedValue(sentContract());
     });
 
-    it('assinado: salva o PDF assinado, move para CONTRATO_ASSINADO e registra com o ator Autentique', async () => {
+    it('assinado: salva o PDF assinado, conclui a adoção, marca o pet como ADOTADO e registra com o ator Autentique', async () => {
       autentique.getDocument.mockResolvedValue(autentiqueDocument({ signedAt: '2026-10-02T15:00:00.000Z' }));
 
       await service.syncSignatureByForm('form-1', 'org-1', 'user-1');
@@ -554,9 +609,11 @@ describe('AdoptionContractService', () => {
         signedAt: new Date('2026-10-02T15:00:00.000Z'),
         signedPdfStoragePath: 'contracts/form-1/assinado-v2.pdf',
       });
-      expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.CONTRATO_ASSINADO });
+      expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.CONCLUIDA });
+      expect(tx.pet.update).toHaveBeenCalledWith({ id: 'pet-1', organizationId: 'org-1' }, { status: PetStatus.ADOTADO, adoptionDate: expect.any(Date) });
       expect(recordedEvents()).toEqual([
-        expect.objectContaining({ type: AdoptionHistoryType.CONTRATO_ASSINADO, fromStatus: 'AGUARDANDO_ASSINATURA', toStatus: 'CONTRATO_ASSINADO', userId: null, userName: 'Autentique' }),
+        expect.objectContaining({ type: AdoptionHistoryType.CONTRATO_ASSINADO, userId: null, userName: 'Autentique' }),
+        expect.objectContaining({ type: AdoptionHistoryType.ADOCAO_CONCLUIDA, fromStatus: 'AGUARDANDO_ASSINATURA', toStatus: 'CONCLUIDA', userName: 'Autentique' }),
       ]);
     });
 
@@ -585,7 +642,7 @@ describe('AdoptionContractService', () => {
       expect(autentique.getDocument).not.toHaveBeenCalled();
     });
 
-    it('ficha que voltou para APROVADO só atualiza o contrato', async () => {
+    it('ficha que voltou para APROVADO só atualiza o termo de adoção', async () => {
       formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.APROVADO, 'pet-1'));
       autentique.getDocument.mockResolvedValue(autentiqueDocument({ signedAt: '2026-10-02T15:00:00.000Z' }));
 
@@ -593,13 +650,14 @@ describe('AdoptionContractService', () => {
 
       expect(tx.contract.update).toHaveBeenCalled();
       expect(tx.form.update).not.toHaveBeenCalled();
-      expect(recordedEvents()[0]).toEqual(expect.objectContaining({ fromStatus: null, toStatus: null }));
+      expect(tx.pet.update).not.toHaveBeenCalled();
+      expect(recordedEvents()).toEqual([expect.objectContaining({ type: AdoptionHistoryType.CONTRATO_ASSINADO })]);
     });
 
     it('contrato nunca enviado', async () => {
       contractRepo.findOne.mockResolvedValue(storedContract());
 
-      await expect(service.syncSignatureByForm('form-1', 'org-1')).rejects.toThrow('O contrato ainda não foi enviado para assinatura.');
+      await expect(service.syncSignatureByForm('form-1', 'org-1')).rejects.toThrow('O termo de adoção ainda não foi enviado para assinatura.');
     });
 
     it('webhook: documento desconhecido é ignorado', async () => {
@@ -609,12 +667,12 @@ describe('AdoptionContractService', () => {
       expect(autentique.getDocument).not.toHaveBeenCalled();
     });
 
-    it('webhook: acha o contrato pelo id do documento', async () => {
+    it('webhook: acha o termo de adoção pelo id do documento', async () => {
       autentique.getDocument.mockResolvedValue(autentiqueDocument({ signedAt: '2026-10-02T15:00:00.000Z' }));
 
       await expect(service.syncSignatureByDocument('doc-1')).resolves.toBe(true);
       expect(contractRepo.findOne).toHaveBeenCalledWith({ where: { autentiqueDocumentId: 'doc-1' } });
-      expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.CONTRATO_ASSINADO });
+      expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.CONCLUIDA });
     });
   });
 
@@ -631,8 +689,8 @@ describe('AdoptionContractService', () => {
       expect(recordedEvents()).toEqual([expect.objectContaining({ type: AdoptionHistoryType.ASSINATURA_CANCELADA, toStatus: 'CONTRATO_GERADO' })]);
     });
 
-    it('só cancela contrato aguardando assinatura', async () => {
-      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONTRATO_ASSINADO, 'pet-1'));
+    it('só cancela termo aguardando assinatura', async () => {
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONCLUIDA, 'pet-1'));
 
       await expect(service.cancelSignature('form-1', 'org-1')).rejects.toThrow(BadRequestException);
       expect(autentique.deleteDocument).not.toHaveBeenCalled();
@@ -641,7 +699,7 @@ describe('AdoptionContractService', () => {
 
   describe('resposta', () => {
     it('devolve o resumo da assinatura com a URL assinada do PDF assinado', async () => {
-      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONTRATO_ASSINADO, 'pet-1'));
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONCLUIDA, 'pet-1'));
       contractRepo.findOne.mockResolvedValue(
         sentContract({ signatureStatus: 'ASSINADO', signatureLink: 'https://assina.ae/abc', signedAt: new Date('2026-10-02'), signedPdfStoragePath: 'contracts/form-1/assinado-v2.pdf' }),
       );

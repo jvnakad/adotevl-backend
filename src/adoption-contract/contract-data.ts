@@ -185,7 +185,7 @@ export function sanitizeContractData(input: Record<string, any>, current: Contra
   for (const section of Object.keys(CONTRACT_DATA_FIELDS) as Section[]) {
     const incoming = input?.[section];
     if (incoming !== undefined && (incoming === null || typeof incoming !== 'object' || Array.isArray(incoming))) {
-      errors.push(`Dados do contrato inválidos em "${section}".`);
+      errors.push(`Dados do termo de adoção inválidos em "${section}".`);
     }
     const target: Record<string, any> = { ...base[section], ...(current?.[section] ?? {}) };
     for (const [field, { label, kind }] of Object.entries(CONTRACT_DATA_FIELDS[section])) {

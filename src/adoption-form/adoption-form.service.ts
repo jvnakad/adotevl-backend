@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike, FindOptionsWhere } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -26,19 +26,18 @@ export const BOARD_COLUMN_LIMIT = 50;
 const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
 // Status "livres" do kanban: qualquer um pode ir para qualquer outro
-const REVIEW_STATUSES = [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.EM_ANALISE, AdoptionFormStatus.APROVADO, AdoptionFormStatus.REPROVADO];
+const REVIEW_STATUSES = [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.APROVADO, AdoptionFormStatus.REPROVADO];
 // Status com contrato: só voltam para APROVADO (ADMIN)
 const CONTRACT_STATUSES = [
   AdoptionFormStatus.CONTRATO_GERADO,
   AdoptionFormStatus.AGUARDANDO_ASSINATURA,
-  AdoptionFormStatus.CONTRATO_ASSINADO,
   AdoptionFormStatus.CONCLUIDA,
 ];
-// Só mudam pelo fluxo de assinatura (envio, webhook/sincronização com o Autentique)
-const SIGNATURE_STATUSES = [AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONTRATO_ASSINADO];
-// Saindo destes status para PENDENTE/EM_ANALISE/REPROVADO o pet vinculado volta a ficar disponível
+// Só mudam pelo fluxo de assinatura: envio ao Autentique e assinatura (que conclui a adoção)
+const SIGNATURE_STATUSES = [AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA];
+// Saindo destes status para PENDENTE/REPROVADO o pet vinculado volta a ficar disponível
 const PET_RESERVED_STATUSES = [AdoptionFormStatus.APROVADO, AdoptionFormStatus.CONTRATO_GERADO];
-const PET_RELEASE_TARGETS = [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.EM_ANALISE, AdoptionFormStatus.REPROVADO];
+const PET_RELEASE_TARGETS = [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.REPROVADO];
 
 // "YYYY-MM-DD" -> Date à meia-noite local: o TypeORM grava colunas "date" com o dia local,
 // então new Date('YYYY-MM-DD') (meia-noite UTC) gravaria o dia anterior em servidores UTC-3
@@ -73,7 +72,7 @@ const CONDITIONAL_ANSWERS: { field: keyof AdoptionForm; visible: (f: AdoptionFor
 ];
 
 @Injectable()
-export class AdoptionFormService {
+export class AdoptionFormService implements OnModuleInit {
   private readonly logger = new Logger(AdoptionFormService.name);
 
   constructor(
@@ -91,6 +90,12 @@ export class AdoptionFormService {
     private readonly contractRepository: Repository<AdoptionContract>,
     private readonly autentiqueService: AutentiqueService,
   ) {}
+
+  // "Em análise" saiu do fluxo: fichas que ainda estavam nele voltam para Pendente
+  async onModuleInit() {
+    const { affected } = await this.formRepository.update({ status: AdoptionFormStatus.EM_ANALISE }, { status: AdoptionFormStatus.PENDENTE });
+    if (affected) this.logger.log(`${affected} ficha(s) em análise movida(s) para Pendente.`);
+  }
 
   // Rota pública: não devolve os dados pessoais enviados, só a confirmação
   async create(dto: CreateAdoptionFormDto, files: Express.Multer.File[]) {
@@ -227,12 +232,10 @@ export class AdoptionFormService {
         updatedBy: reviewedBy,
       });
 
-      // Efeitos no pet vinculado ao contrato
+      // Efeitos no pet vinculado ao termo de adoção
       if (form.petId) {
         const pets = manager.getRepository(Pet);
-        if (to === AdoptionFormStatus.CONCLUIDA) {
-          await pets.update({ id: form.petId, organizationId: form.organizationId }, { status: PetStatus.ADOTADO, adoptionDate: new Date(), updatedBy: reviewedBy });
-        } else if (CONTRACT_STATUSES.includes(from)) {
+        if (CONTRACT_STATUSES.includes(from)) {
           await pets.update({ id: form.petId, organizationId: form.organizationId }, { status: PetStatus.EM_PROCESSO, adoptionDate: null, updatedBy: reviewedBy });
         } else if (PET_RESERVED_STATUSES.includes(from) && PET_RELEASE_TARGETS.includes(to)) {
           await pets.update({ id: form.petId, organizationId: form.organizationId }, { status: PetStatus.DISPONIVEL, updatedBy: reviewedBy });
@@ -243,14 +246,13 @@ export class AdoptionFormService {
         await manager.getRepository(AdoptionContract).update({ adoptionFormId: id }, { signatureStatus: ContractSignatureStatus.CANCELADO, updatedBy: reviewedBy });
       }
 
-      const concluded = to === AdoptionFormStatus.CONCLUIDA;
       await this.historyService.record(
         {
           form,
-          type: concluded ? AdoptionHistoryType.ADOCAO_CONCLUIDA : AdoptionHistoryType.STATUS_ALTERADO,
+          type: AdoptionHistoryType.STATUS_ALTERADO,
           fromStatus: from,
           toStatus: to,
-          description: concluded ? 'Adoção concluída' : `Status alterado de ${statusLabel(from)} para ${statusLabel(to)}`,
+          description: `Status alterado de ${statusLabel(from)} para ${statusLabel(to)}`,
           metadata: {
             ...(dto.reviewNotes !== undefined && { reviewNotes: dto.reviewNotes }),
             ...(form.petId && { petId: form.petId }),
@@ -356,23 +358,20 @@ export class AdoptionFormService {
   // Regras de movimentação manual (PATCH :id/status); CONTRATO_GERADO só pela geração do contrato
   private validateTransition(from: AdoptionFormStatus, to: AdoptionFormStatus, profileName: string) {
     if (to === AdoptionFormStatus.CONTRATO_GERADO) {
-      throw new BadRequestException('Gere o contrato para mover a ficha para Contrato gerado.');
-    }
-    if (SIGNATURE_STATUSES.includes(to)) {
-      throw new BadRequestException('Envie o contrato para assinatura pela aba Contrato; o status muda sozinho conforme a assinatura.');
+      throw new BadRequestException('Gere o termo de adoção para mover a ficha para Termo gerado.');
     }
     if (to === AdoptionFormStatus.CONCLUIDA) {
-      if (from !== AdoptionFormStatus.CONTRATO_ASSINADO) {
-        throw new BadRequestException('A adoção só pode ser concluída depois que o contrato for assinado.');
-      }
-      return;
+      throw new BadRequestException('A adoção é concluída automaticamente quando o adotante assina o termo de adoção.');
+    }
+    if (SIGNATURE_STATUSES.includes(to)) {
+      throw new BadRequestException('Envie o termo de adoção para assinatura pela aba Termo de Adoção.');
     }
     if (CONTRACT_STATUSES.includes(from)) {
       if (to !== AdoptionFormStatus.APROVADO) {
         throw new BadRequestException(`Uma ficha em ${statusLabel(from)} só pode voltar para Aprovado.`);
       }
       if (profileName !== 'ADMIN') {
-        throw new ForbiddenException('Somente administradores podem voltar uma ficha com contrato para Aprovado.');
+        throw new ForbiddenException('Somente administradores podem voltar uma ficha com termo de adoção para Aprovado.');
       }
       return;
     }

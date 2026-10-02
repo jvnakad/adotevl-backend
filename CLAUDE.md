@@ -10,6 +10,7 @@ API REST do sistema de gestão de adoção de pets da AdoteVL. Front-end em `../
 - Swagger em `/docs` (`@nestjs/swagger`)
 - Storage de arquivos: Supabase Storage (`src/storage`), ou disco local com `STORAGE_DRIVER=local`
 - E-mail: Resend (`src/mail`)
+- Assinatura digital: Autentique API v2 GraphQL (`src/autentique`, `fetch` nativo)
 - Deploy: Railway (`npm run build` → `node dist/main`)
 
 ## Scripts
@@ -26,6 +27,7 @@ API REST do sistema de gestão de adoção de pets da AdoteVL. Front-end em `../
 ## Ambiente local
 - `.env.local` (copiado de `.env.local.example`) tem precedência sobre `.env` (`ConfigModule.forRoot({ envFilePath: ['.env.local', '.env'] })`).
 - `DATABASE_URL` com `?sslmode=disable` desliga SSL (Supabase exige SSL; Postgres local não).
+- Autentique: `AUTENTIQUE_TOKEN`, `AUTENTIQUE_SANDBOX=true` (documentos de teste, sem créditos, somem em alguns dias; `false` em produção) e `AUTENTIQUE_WEBHOOK_SECRET` (secret do webhook cadastrado no painel; sem ele o webhook responde 401). Sem URL pública em dev, use o botão "Atualizar status" (`POST :id/contract/signature/sync`).
 - Login de dev: `admin@adotevl.local` / `admin123`. O seed imprime os IDs para o `.env` do front.
 
 ## Estrutura
@@ -43,6 +45,8 @@ src/<feature>/
 - `src/auth/` — `JwtAuthGuard`, `RolesGuard`, `@Roles(...)`, `OptionalJwtAuthGuard` (rota pública que aceita token opcional).
 - `src/storage/` — `StorageService.upload(path, buffer, mimetype)` → URL pública; `remove(paths)`. Módulo `@Global`.
 - `src/mail/` — `MailService` (Resend).
+- `src/autentique/` — `AutentiqueService` (`createDocument`, `getDocument`, `deleteDocument`, `downloadFile`). Módulo `@Global`; token lido sob demanda (sem `AUTENTIQUE_TOKEN` → 503).
+- `src/webhooks/` — rotas públicas chamadas por serviços externos (`POST /webhooks/autentique`), sem JWT, validadas por HMAC.
 
 **Toda entidade nova precisa ser registrada em `src/app.module.ts` (array `entities` + módulo em `imports`) e em `test/test-app.module.ts`.**
 
@@ -81,7 +85,7 @@ src/<feature>/
 - Repositório falso: `createMockRepository()` de `src/testing/mock-repository.ts` (`create` devolve o próprio objeto, `save` resolve o objeto, `findAndCount` resolve `[[], 0]`). `src/testing` e `*.spec.ts` ficam fora do build.
 - Libs externas com `jest.mock` (`bcryptjs`, `resend`, `@supabase/supabase-js`, `fs/promises`); variáveis usadas na factory com prefixo `mock`.
 - DTOs com regra relevante: `plainToInstance` + `validate` (ver `adoption-form/dto/create-adoption-form.dto.spec.ts`).
-- E2E de fluxo completo por feature em `test/<feature>-lifecycle.e2e-spec.ts`, usando `TestAppModule` (mock de `MailService` e `StorageService`).
+- E2E de fluxo completo por feature em `test/<feature>-lifecycle.e2e-spec.ts`, usando `TestAppModule` (mock de `MailService`, `StorageService` e `AutentiqueService` — `MockAutentiqueService.signDocument/rejectDocument` simulam o adotante).
 - Cada suite cria/limpa a própria organização (CNPJ fixo único por suite) e um admin, e faz login via `/auth/login`.
 - Textos de teste (`describe`/`it`/comentários) em PT-BR.
 
@@ -95,7 +99,7 @@ src/<feature>/
 - CI (`.github/workflows/test.yml`): `npm ci` + `npm test` + `npm run test:e2e` com Postgres 15.
 
 ## Módulos
-organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), adoption-history, adoption-contract, mail, storage.
+organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), adoption-history, adoption-contract, autentique, webhooks, mail, storage.
 
 ### adoption-form
 Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFormPage.tsx`, payload em `src/mappers/adoptionForm.ts`) e gestão em `/adotantes`.
@@ -103,15 +107,16 @@ Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFo
 - `GET` (paginado, `status`, `search`), `GET :id`, `PUT :id`, `PATCH :id/status`, `POST/DELETE :id/photos` — ADMIN, VOLUNTEER; `DELETE :id` — ADMIN. Sempre escopo da organização do usuário.
 - Valores das múltiplas escolhas espelham `src/constants/adoptionFormOptions.ts` do front — mudou lá, mudar em `dto/create-adoption-form.dto.ts`.
 - Respostas condicionais: validadas e limpas em `AdoptionFormService.normalizeAnswers` (tabela `CONDITIONAL_ANSWERS`).
-- Status (ordem do kanban): `PENDENTE`, `EM_ANALISE`, `APROVADO`, `CONTRATO_GERADO`, `CONCLUIDA`, `REPROVADO` (`ADOPTION_FORM_STATUS_ORDER`/`_LABELS` em `adoption-form.entity.ts`).
+- Status (ordem do kanban): `PENDENTE`, `EM_ANALISE`, `APROVADO`, `CONTRATO_GERADO`, `AGUARDANDO_ASSINATURA`, `CONTRATO_ASSINADO`, `CONCLUIDA`, `REPROVADO` (`ADOPTION_FORM_STATUS_ORDER`/`_LABELS` em `adoption-form.entity.ts`).
 - Regras do `PATCH :id/status` (`AdoptionFormService.validateTransition`, em transação com o histórico):
   - mesmo status → só atualiza `reviewNotes` (evento `FICHA_EDITADA` se mudou);
   - `PENDENTE/EM_ANALISE/APROVADO/REPROVADO` livres entre si; saindo de `APROVADO` para `PENDENTE/EM_ANALISE/REPROVADO` o pet vinculado volta a `DISPONIVEL`;
   - `CONTRATO_GERADO` nunca manual (só via `POST :id/contract/generate`);
-  - `CONCLUIDA` só a partir de `CONTRATO_GERADO` (ADMIN/VOLUNTEER) → pet `ADOTADO` + `adoptionDate`, evento `ADOCAO_CONCLUIDA`;
-  - de `CONTRATO_GERADO/CONCLUIDA` só volta para `APROVADO` e só ADMIN (403) → pet `EM_PROCESSO`, `adoptionDate` null.
+  - `AGUARDANDO_ASSINATURA`/`CONTRATO_ASSINADO` nunca manuais (só pelo fluxo de assinatura no Autentique);
+  - `CONCLUIDA` só a partir de `CONTRATO_ASSINADO` (ADMIN/VOLUNTEER) → pet `ADOTADO` + `adoptionDate`, evento `ADOCAO_CONCLUIDA`;
+  - de `CONTRATO_GERADO/AGUARDANDO_ASSINATURA/CONTRATO_ASSINADO/CONCLUIDA` só volta para `APROVADO` e só ADMIN (403) → pet `EM_PROCESSO`, `adoptionDate` null; saindo de `AGUARDANDO_ASSINATURA` o documento é excluído no Autentique (best effort) e a assinatura fica `CANCELADO`.
 - `pet`/`petId` (nullable, `SET NULL`): pet escolhido no contrato. `GET :id` devolve `pet: { id, name, species, fotos[{url}] } | null`.
-- `GET /adoption-forms/board?search=` → `{ columns: [{ status, total, items }] }` (6 colunas, até 50 itens resumidos, `updatedAt DESC`). Declarada antes de `:id`.
+- `GET /adoption-forms/board?search=` → `{ columns: [{ status, total, items }] }` (8 colunas, até 50 itens resumidos, `updatedAt DESC`). Declarada antes de `:id`.
 - `GET /adoption-forms/:id/history` → eventos da ficha (`createdAt DESC`).
 - Toda ação da ficha grava histórico: criar (`FICHA_CRIADA`, usuário "Formulário público"), editar (`FICHA_EDITADA` com `metadata.fields` [{field,label,before,after}] — rótulos em `adoption-form-labels.ts`), fotos, remover.
 - `birthDate` é gravado com `localDate()` (meia-noite local): o TypeORM grava coluna `date` pelo dia local; `new Date('YYYY-MM-DD')` voltaria um dia em UTC-3. O driver pg devolve `date` como Date à meia-noite local — use `dateOnly()` de `adoption-contract/contract-data.ts`.
@@ -122,10 +127,15 @@ Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFo
 - `GET /adoption-history?page&limit&type&adoptionFormId&search&from&to` — ADMIN, VOLUNTEER. `search` = nome do adotante; `from/to` = YYYY-MM-DD inclusivos, dia local (UTC-3).
 
 ### adoption-contract
-Termo de adoção da ficha (1 por ficha, `adoption_contracts`). Rotas em `AdoptionContractController` (`@Controller('adoption-forms')`), ADMIN e VOLUNTEER; ficha precisa estar `APROVADO`, `CONTRATO_GERADO` ou `CONCLUIDA` (esta só leitura).
+Termo de adoção da ficha (1 por ficha, `adoption_contracts`). Rotas em `AdoptionContractController` (`@Controller('adoption-forms')`), ADMIN e VOLUNTEER; ficha precisa estar `APROVADO`, `CONTRATO_GERADO`, `AGUARDANDO_ASSINATURA`, `CONTRATO_ASSINADO` ou `CONCLUIDA` (as três últimas só leitura).
 - `GET :id/contract` cria o rascunho na primeira chamada (dados da ficha + pet vinculado, `contract-data.ts`).
 - `PUT :id/contract` `{ petId?, data?, clauses? }`: `data` é sanitizado para as chaves conhecidas (`CONTRACT_DATA_FIELDS`); `clauses` precisa ter todas as chaves, sem remover a travada (`animal`). Um evento por mudança (`PET_VINCULADO`, `CONTRATO_DADOS_ALTERADOS`, `CLAUSULA_EDITADA/REMOVIDA/RESTAURADA`). Vincular pet: pet `EM_PROCESSO`, anterior volta a `DISPONIVEL`.
 - `POST :id/contract/clauses/:key/reset`, `POST :id/contract/generate` (exige pet + nome/CPF; PDF em `contracts/<formId>/v<n>.pdf` no bucket **privado**, `version++`, ficha `APROVADO` → `CONTRATO_GERADO`, evento `CONTRATO_GERADO` com `storagePath`). `pdfUrl` e `versions[].url` são URLs assinadas.
+- Assinatura digital (Autentique, só o adotante assina, link por e-mail):
+  - `POST :id/contract/signature` (ficha `CONTRATO_GERADO`): baixa o PDF da versão atual (`StorageService.downloadPrivate`), `createDocument` (sandbox conforme env), grava `autentiqueDocumentId`, `signatureStatus=PENDENTE`, `signatureEmail/Link/Version/SentAt`; ficha → `AGUARDANDO_ASSINATURA`, evento `CONTRATO_ENVIADO_ASSINATURA`. Falha no banco exclui o documento criado.
+  - `POST :id/contract/signature/sync` e `POST /webhooks/autentique` (eventos `signature.accepted`, `signature.rejected`, `document.finished`; header `X-Autentique-Signature` = HMAC-SHA256 hex do corpo cru, `rawBody: true` no `main.ts`) chamam `syncSignature`: consulta `getDocument` (fonte da verdade, nunca o payload), acha a assinatura pelo e-mail (a lista também traz o dono da conta). Assinado → PDF assinado em `contracts/<formId>/assinado-v<n>.pdf`, `ASSINADO`, ficha → `CONTRATO_ASSINADO`, evento `CONTRATO_ASSINADO`; recusado → `RECUSADO`, ficha volta `CONTRATO_GERADO`, evento `ASSINATURA_RECUSADA`. Eventos com `userName` "Autentique". Idempotente (só age com `PENDENTE`); se a ficha já saiu de `AGUARDANDO_ASSINATURA`, só o contrato muda.
+  - `DELETE :id/contract/signature` (ADMIN, ficha `AGUARDANDO_ASSINATURA`): `deleteDocument`, `CANCELADO`, ficha volta `CONTRATO_GERADO`, evento `ASSINATURA_CANCELADA`.
+  - Resposta do contrato: `signature: { status, email, link, version, sentAt, signedAt, signedPdfUrl } | null`.
 - `contract-template.ts`: 14 cláusulas do modelo .docx (`content` = texto após "CLÁUSULA X:", linhas com `\n`, blocos com `\n\n`, itens `(a) ...`, "Parágrafo ..."), referências como `{{clausula:<key>}}`, dados fixos da entidade em `CONTRACT_ORGANIZATION`.
 - `contract-numbering.ts`: `toOrdinalPt`, `numberClauses` (ignora removidas, numera por `order`, resolve tokens para "Cláusula Terceira"; referência a removida vira "[cláusula removida]" + aviso). O front replica em `src/mappers/adoptionContract.ts`.
 - `contract-pdf.builder.ts`: pdfmake 0.3 (instância única do `require('pdfmake')`, fontes padrão Helvetica, sem acesso a disco/URL); logo em `assets/logo.base64.ts` (tsc não copia assets); foto do pet baixada com `fetch` (só PNG/JPEG; falha = sem foto).

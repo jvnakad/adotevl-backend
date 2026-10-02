@@ -95,7 +95,7 @@ src/<feature>/
 - CI (`.github/workflows/test.yml`): `npm ci` + `npm test` + `npm run test:e2e` com Postgres 15.
 
 ## Módulos
-organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), mail, storage.
+organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), adoption-history, adoption-contract, mail, storage.
 
 ### adoption-form
 Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFormPage.tsx`, payload em `src/mappers/adoptionForm.ts`) e gestão em `/adotantes`.
@@ -103,4 +103,29 @@ Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFo
 - `GET` (paginado, `status`, `search`), `GET :id`, `PUT :id`, `PATCH :id/status`, `POST/DELETE :id/photos` — ADMIN, VOLUNTEER; `DELETE :id` — ADMIN. Sempre escopo da organização do usuário.
 - Valores das múltiplas escolhas espelham `src/constants/adoptionFormOptions.ts` do front — mudou lá, mudar em `dto/create-adoption-form.dto.ts`.
 - Respostas condicionais: validadas e limpas em `AdoptionFormService.normalizeAnswers` (tabela `CONDITIONAL_ANSWERS`).
-- Status: `PENDENTE`, `EM_ANALISE`, `APROVADO`, `REPROVADO`.
+- Status (ordem do kanban): `PENDENTE`, `EM_ANALISE`, `APROVADO`, `CONTRATO_GERADO`, `CONCLUIDA`, `REPROVADO` (`ADOPTION_FORM_STATUS_ORDER`/`_LABELS` em `adoption-form.entity.ts`).
+- Regras do `PATCH :id/status` (`AdoptionFormService.validateTransition`, em transação com o histórico):
+  - mesmo status → só atualiza `reviewNotes` (evento `FICHA_EDITADA` se mudou);
+  - `PENDENTE/EM_ANALISE/APROVADO/REPROVADO` livres entre si; saindo de `APROVADO` para `PENDENTE/EM_ANALISE/REPROVADO` o pet vinculado volta a `DISPONIVEL`;
+  - `CONTRATO_GERADO` nunca manual (só via `POST :id/contract/generate`);
+  - `CONCLUIDA` só a partir de `CONTRATO_GERADO` (ADMIN/VOLUNTEER) → pet `ADOTADO` + `adoptionDate`, evento `ADOCAO_CONCLUIDA`;
+  - de `CONTRATO_GERADO/CONCLUIDA` só volta para `APROVADO` e só ADMIN (403) → pet `EM_PROCESSO`, `adoptionDate` null.
+- `pet`/`petId` (nullable, `SET NULL`): pet escolhido no contrato. `GET :id` devolve `pet: { id, name, species, fotos[{url}] } | null`.
+- `GET /adoption-forms/board?search=` → `{ columns: [{ status, total, items }] }` (6 colunas, até 50 itens resumidos, `updatedAt DESC`). Declarada antes de `:id`.
+- `GET /adoption-forms/:id/history` → eventos da ficha (`createdAt DESC`).
+- Toda ação da ficha grava histórico: criar (`FICHA_CRIADA`, usuário "Formulário público"), editar (`FICHA_EDITADA` com `metadata.fields` [{field,label,before,after}] — rótulos em `adoption-form-labels.ts`), fotos, remover.
+- `birthDate` é gravado com `localDate()` (meia-noite local): o TypeORM grava coluna `date` pelo dia local; `new Date('YYYY-MM-DD')` voltaria um dia em UTC-3. O driver pg devolve `date` como Date à meia-noite local — use `dateOnly()` de `adoption-contract/contract-data.ts`.
+
+### adoption-history
+- Entidade `adoption_history_events` (só insert): `adoptionFormId` (CASCADE), `organizationId`, `adopterName` (snapshot), `type` (`AdoptionHistoryType`), `fromStatus/toStatus`, `description` PT-BR pronta, `metadata` jsonb, `userId`, `userName` (snapshot). Índices (`organizationId`, `createdAt`) e (`adoptionFormId`).
+- `AdoptionHistoryService.record(params, manager?)` / `recordMany` — passe o `EntityManager` para gravar na mesma transação; `userName` é resolvido do `User` (sem usuário = "Formulário público").
+- `GET /adoption-history?page&limit&type&adoptionFormId&search&from&to` — ADMIN, VOLUNTEER. `search` = nome do adotante; `from/to` = YYYY-MM-DD inclusivos, dia local (UTC-3).
+
+### adoption-contract
+Termo de adoção da ficha (1 por ficha, `adoption_contracts`). Rotas em `AdoptionContractController` (`@Controller('adoption-forms')`), ADMIN e VOLUNTEER; ficha precisa estar `APROVADO`, `CONTRATO_GERADO` ou `CONCLUIDA` (esta só leitura).
+- `GET :id/contract` cria o rascunho na primeira chamada (dados da ficha + pet vinculado, `contract-data.ts`).
+- `PUT :id/contract` `{ petId?, data?, clauses? }`: `data` é sanitizado para as chaves conhecidas (`CONTRACT_DATA_FIELDS`); `clauses` precisa ter todas as chaves, sem remover a travada (`animal`). Um evento por mudança (`PET_VINCULADO`, `CONTRATO_DADOS_ALTERADOS`, `CLAUSULA_EDITADA/REMOVIDA/RESTAURADA`). Vincular pet: pet `EM_PROCESSO`, anterior volta a `DISPONIVEL`.
+- `POST :id/contract/clauses/:key/reset`, `POST :id/contract/generate` (exige pet + nome/CPF; PDF em `contracts/<formId>/v<n>.pdf` no bucket **privado**, `version++`, ficha `APROVADO` → `CONTRATO_GERADO`, evento `CONTRATO_GERADO` com `storagePath`). `pdfUrl` e `versions[].url` são URLs assinadas.
+- `contract-template.ts`: 14 cláusulas do modelo .docx (`content` = texto após "CLÁUSULA X:", linhas com `\n`, blocos com `\n\n`, itens `(a) ...`, "Parágrafo ..."), referências como `{{clausula:<key>}}`, dados fixos da entidade em `CONTRACT_ORGANIZATION`.
+- `contract-numbering.ts`: `toOrdinalPt`, `numberClauses` (ignora removidas, numera por `order`, resolve tokens para "Cláusula Terceira"; referência a removida vira "[cláusula removida]" + aviso). O front replica em `src/mappers/adoptionContract.ts`.
+- `contract-pdf.builder.ts`: pdfmake 0.3 (instância única do `require('pdfmake')`, fontes padrão Helvetica, sem acesso a disco/URL); logo em `assets/logo.base64.ts` (tsc não copia assets); foto do pet baixada com `fetch` (só PNG/JPEG; falha = sem foto).

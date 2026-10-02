@@ -9,6 +9,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Organization } from '../organization/organization.entity';
+import { Pet } from '../pet/pet.entity';
 import { AdoptionFormPhoto } from './adoption-form-photo.entity';
 
 export enum AdoptionFormStatus {
@@ -16,7 +17,28 @@ export enum AdoptionFormStatus {
   EM_ANALISE = 'EM_ANALISE',
   APROVADO = 'APROVADO',
   REPROVADO = 'REPROVADO',
+  CONTRATO_GERADO = 'CONTRATO_GERADO',
+  CONCLUIDA = 'CONCLUIDA',
 }
+
+// Ordem das colunas do kanban (GET /adoption-forms/board) e rótulos usados nas descrições do histórico
+export const ADOPTION_FORM_STATUS_ORDER: AdoptionFormStatus[] = [
+  AdoptionFormStatus.PENDENTE,
+  AdoptionFormStatus.EM_ANALISE,
+  AdoptionFormStatus.APROVADO,
+  AdoptionFormStatus.CONTRATO_GERADO,
+  AdoptionFormStatus.CONCLUIDA,
+  AdoptionFormStatus.REPROVADO,
+];
+
+export const ADOPTION_FORM_STATUS_LABELS: Record<AdoptionFormStatus, string> = {
+  PENDENTE: 'Pendente',
+  EM_ANALISE: 'Em análise',
+  APROVADO: 'Aprovado',
+  REPROVADO: 'Reprovado',
+  CONTRATO_GERADO: 'Contrato gerado',
+  CONCLUIDA: 'Concluída',
+};
 
 // Ficha preenchida no formulário público de adoção (/adocao do front)
 @Entity('adoption_forms')
@@ -229,6 +251,14 @@ export class AdoptionForm {
 
   @Column({ name: 'reviewed_at', type: 'timestamptz', nullable: true })
   reviewedAt: Date;
+
+  // Pet escolhido no contrato; SET NULL para a exclusão de um pet não apagar a ficha
+  @ManyToOne(() => Pet, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'pet_id' })
+  pet: Pet;
+
+  @Column({ name: 'pet_id', nullable: true })
+  petId: string;
 
   @ManyToOne(() => Organization, { nullable: false })
   @JoinColumn({ name: 'organization_id' })

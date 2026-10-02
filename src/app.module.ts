@@ -35,6 +35,10 @@ import { StorageModule } from './storage/storage.module';
 import { AdoptionFormModule } from './adoption-form/adoption-form.module';
 import { AdoptionForm } from './adoption-form/adoption-form.entity';
 import { AdoptionFormPhoto } from './adoption-form/adoption-form-photo.entity';
+import { AdoptionHistoryModule } from './adoption-history/adoption-history.module';
+import { AdoptionHistoryEvent } from './adoption-history/adoption-history.entity';
+import { AdoptionContractModule } from './adoption-contract/adoption-contract.module';
+import { AdoptionContract } from './adoption-contract/adoption-contract.entity';
 
 @Module({
   imports: [
@@ -43,7 +47,7 @@ import { AdoptionFormPhoto } from './adoption-form/adoption-form-photo.entity';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),
@@ -63,6 +67,8 @@ import { AdoptionFormPhoto } from './adoption-form/adoption-form-photo.entity';
     MailModule,
     StorageModule,
     AdoptionFormModule,
+    AdoptionHistoryModule,
+    AdoptionContractModule,
   ],
   controllers: [AppController],
   providers: [AppService],

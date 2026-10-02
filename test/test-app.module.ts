@@ -31,6 +31,10 @@ import { OrganizationAddressModule } from '../src/organization-address/organizat
 import { AdoptionForm } from '../src/adoption-form/adoption-form.entity';
 import { AdoptionFormPhoto } from '../src/adoption-form/adoption-form-photo.entity';
 import { AdoptionFormModule } from '../src/adoption-form/adoption-form.module';
+import { AdoptionHistoryEvent } from '../src/adoption-history/adoption-history.entity';
+import { AdoptionHistoryModule } from '../src/adoption-history/adoption-history.module';
+import { AdoptionContract } from '../src/adoption-contract/adoption-contract.entity';
+import { AdoptionContractModule } from '../src/adoption-contract/adoption-contract.module';
 import { MailService } from '../src/mail/mail.service';
 import { StorageService } from '../src/storage/storage.service';
 
@@ -75,6 +79,7 @@ class MockStorageModule {}
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
+        AdoptionHistoryEvent, AdoptionContract,
       ],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
@@ -93,6 +98,8 @@ class MockStorageModule {}
     BankAccountModule,
     OrganizationAddressModule,
     AdoptionFormModule,
+    AdoptionHistoryModule,
+    AdoptionContractModule,
     MockMailModule,
     MockStorageModule,
   ],

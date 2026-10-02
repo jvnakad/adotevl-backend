@@ -50,6 +50,30 @@ const storedContract = (overrides: Record<string, any> = {}) => ({
   ...overrides,
 });
 
+// Documento como o AutentiqueService devolve: dono da conta + adotante
+const autentiqueDocument = (adopter: Record<string, any> = {}) => ({
+  id: 'doc-1',
+  name: 'Termo de Adoção',
+  signedFileUrl: 'https://api.autentique.com.br/documentos/doc-1/assinado.pdf',
+  signatures: [
+    { publicId: 'sig-owner', name: 'ONG', email: 'ong@teste.com', link: null, viewedAt: null, signedAt: null, rejectedAt: null },
+    { publicId: 'sig-1', name: 'Maria da Silva', email: 'maria@teste.com', link: 'https://assina.ae/abc', viewedAt: null, signedAt: null, rejectedAt: null, ...adopter },
+  ],
+});
+
+// Contrato já enviado e aguardando a assinatura do adotante
+const sentContract = (overrides: Record<string, any> = {}) =>
+  storedContract({
+    petId: 'pet-1',
+    version: 2,
+    pdfStoragePath: 'contracts/form-1/v2.pdf',
+    autentiqueDocumentId: 'doc-1',
+    signatureStatus: 'PENDENTE',
+    signatureEmail: 'maria@teste.com',
+    signatureVersion: 2,
+    ...overrides,
+  });
+
 // Payload de cláusulas como o front envia
 const clausesPayload = (change: (clause: any) => any = (clause) => clause) =>
   templateClauses().map(({ key, order, content, removed }) => change({ key, order, content, removed }));
@@ -60,7 +84,8 @@ describe('AdoptionContractService', () => {
   let petRepo: MockRepository;
   let tx: { contract: MockRepository; form: MockRepository; pet: MockRepository };
   let manager: { getRepository: jest.Mock };
-  let storage: { uploadPrivate: jest.Mock; removePrivate: jest.Mock; getSignedUrls: jest.Mock };
+  let storage: { uploadPrivate: jest.Mock; removePrivate: jest.Mock; downloadPrivate: jest.Mock; getSignedUrls: jest.Mock };
+  let autentique: { createDocument: jest.Mock; getDocument: jest.Mock; deleteDocument: jest.Mock; downloadFile: jest.Mock };
   let history: { resolveUserName: jest.Mock; recordMany: jest.Mock; findByForm: jest.Mock };
   let service: AdoptionContractService;
 
@@ -77,6 +102,7 @@ describe('AdoptionContractService', () => {
     storage = {
       uploadPrivate: jest.fn(async () => undefined),
       removePrivate: jest.fn(async () => undefined),
+      downloadPrivate: jest.fn(async () => Buffer.from('%PDF-v1')),
       getSignedUrls: jest.fn(async (paths: string[]) => Object.fromEntries(paths.map((path) => [path, `https://signed/${path}`]))),
     };
     history = {
@@ -84,7 +110,13 @@ describe('AdoptionContractService', () => {
       recordMany: jest.fn(async () => []),
       findByForm: jest.fn(async () => []),
     };
-    service = new AdoptionContractService(contractRepo as any, formRepo as any, petRepo as any, storage as any, history as any);
+    autentique = {
+      createDocument: jest.fn(async () => autentiqueDocument()),
+      getDocument: jest.fn(async () => autentiqueDocument()),
+      deleteDocument: jest.fn(async () => undefined),
+      downloadFile: jest.fn(async () => Buffer.from('%PDF-assinado')),
+    };
+    service = new AdoptionContractService(contractRepo as any, formRepo as any, petRepo as any, storage as any, history as any, autentique as any);
 
     formRepo.findOne.mockResolvedValue(baseForm());
     contractRepo.findOne.mockResolvedValue(storedContract());
@@ -430,6 +462,207 @@ describe('AdoptionContractService', () => {
       formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONCLUIDA, 'pet-1'));
 
       await expect(service.generate('form-1', 'org-1')).rejects.toThrow('Adoção concluída');
+    });
+
+    it.each([AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONTRATO_ASSINADO])('contrato em %s não pode ser regerado nem editado', async (status) => {
+      formRepo.findOne.mockResolvedValue(baseForm(status, 'pet-1'));
+
+      await expect(service.generate('form-1', 'org-1')).rejects.toThrow('já foi enviado para assinatura');
+      await expect(service.update('form-1', { data: {} } as any, 'org-1')).rejects.toThrow('já foi enviado para assinatura');
+    });
+  });
+
+  describe('sendForSignature', () => {
+    beforeEach(() => {
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONTRATO_GERADO, 'pet-1'));
+      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1', version: 2, pdfStoragePath: 'contracts/form-1/v2.pdf' }));
+    });
+
+    it.each([AdoptionFormStatus.APROVADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('ficha %s não pode ser enviada', async (status) => {
+      formRepo.findOne.mockResolvedValue(baseForm(status, 'pet-1'));
+
+      await expect(service.sendForSignature('form-1', 'org-1')).rejects.toThrow('Só é possível enviar para assinatura um contrato gerado.');
+      expect(autentique.createDocument).not.toHaveBeenCalled();
+    });
+
+    it('envia o PDF da versão atual para o e-mail do adotante e aguarda assinatura', async () => {
+      await service.sendForSignature('form-1', 'org-1', 'user-1');
+
+      expect(storage.downloadPrivate).toHaveBeenCalledWith('contracts/form-1/v2.pdf');
+      expect(autentique.createDocument).toHaveBeenCalledWith({
+        name: 'Termo de Adoção - Maria da Silva - v2',
+        pdf: Buffer.from('%PDF-v1'),
+        fileName: 'termo-de-adocao-v2.pdf',
+        signer: { name: 'Maria da Silva', email: 'maria@teste.com' },
+      });
+      expect(tx.contract.update).toHaveBeenCalledWith(
+        'contract-1',
+        expect.objectContaining({
+          autentiqueDocumentId: 'doc-1',
+          signatureStatus: 'PENDENTE',
+          signatureLink: 'https://assina.ae/abc',
+          signatureEmail: 'maria@teste.com',
+          signatureVersion: 2,
+          signatureSentAt: expect.any(Date),
+          signedAt: null,
+        }),
+      );
+      expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA, updatedBy: 'user-1' });
+      expect(recordedEvents()).toEqual([
+        expect.objectContaining({
+          type: AdoptionHistoryType.CONTRATO_ENVIADO_ASSINATURA,
+          fromStatus: 'CONTRATO_GERADO',
+          toStatus: 'AGUARDANDO_ASSINATURA',
+          metadata: { documentId: 'doc-1', version: 2, email: 'maria@teste.com' },
+          userName: 'Ana Admin',
+        }),
+      ]);
+    });
+
+    it('exige e-mail do adotante', async () => {
+      const contract = storedContract({ petId: 'pet-1', version: 2, pdfStoragePath: 'contracts/form-1/v2.pdf' });
+      contract.data.adopter.email = '';
+      contractRepo.findOne.mockResolvedValue(contract);
+      formRepo.findOne.mockResolvedValue({ ...baseForm(AdoptionFormStatus.CONTRATO_GERADO, 'pet-1'), email: '' });
+
+      await expect(service.sendForSignature('form-1', 'org-1')).rejects.toThrow('Informe o e-mail do adotante');
+    });
+
+    it('exclui o documento no Autentique se a transação falhar', async () => {
+      tx.contract.update.mockRejectedValue(new Error('banco fora'));
+
+      await expect(service.sendForSignature('form-1', 'org-1')).rejects.toThrow('banco fora');
+      expect(autentique.deleteDocument).toHaveBeenCalledWith('doc-1');
+    });
+  });
+
+  describe('sincronização da assinatura', () => {
+    beforeEach(() => {
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.AGUARDANDO_ASSINATURA, 'pet-1'));
+      contractRepo.findOne.mockResolvedValue(sentContract());
+    });
+
+    it('assinado: salva o PDF assinado, move para CONTRATO_ASSINADO e registra com o ator Autentique', async () => {
+      autentique.getDocument.mockResolvedValue(autentiqueDocument({ signedAt: '2026-10-02T15:00:00.000Z' }));
+
+      await service.syncSignatureByForm('form-1', 'org-1', 'user-1');
+
+      expect(autentique.downloadFile).toHaveBeenCalledWith('https://api.autentique.com.br/documentos/doc-1/assinado.pdf');
+      expect(storage.uploadPrivate).toHaveBeenCalledWith('contracts/form-1/assinado-v2.pdf', Buffer.from('%PDF-assinado'), 'application/pdf');
+      expect(tx.contract.update).toHaveBeenCalledWith('contract-1', {
+        signatureStatus: 'ASSINADO',
+        signedAt: new Date('2026-10-02T15:00:00.000Z'),
+        signedPdfStoragePath: 'contracts/form-1/assinado-v2.pdf',
+      });
+      expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.CONTRATO_ASSINADO });
+      expect(recordedEvents()).toEqual([
+        expect.objectContaining({ type: AdoptionHistoryType.CONTRATO_ASSINADO, fromStatus: 'AGUARDANDO_ASSINATURA', toStatus: 'CONTRATO_ASSINADO', userId: null, userName: 'Autentique' }),
+      ]);
+    });
+
+    it('recusado: volta para CONTRATO_GERADO e registra ASSINATURA_RECUSADA', async () => {
+      autentique.getDocument.mockResolvedValue(autentiqueDocument({ rejectedAt: '2026-10-02T15:00:00.000Z' }));
+
+      await service.syncSignatureByForm('form-1', 'org-1');
+
+      expect(tx.contract.update).toHaveBeenCalledWith('contract-1', { signatureStatus: 'RECUSADO' });
+      expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO });
+      expect(recordedEvents()).toEqual([expect.objectContaining({ type: AdoptionHistoryType.ASSINATURA_RECUSADA, toStatus: 'CONTRATO_GERADO' })]);
+    });
+
+    it('ainda pendente não grava nada', async () => {
+      await service.syncSignatureByForm('form-1', 'org-1');
+
+      expect(tx.contract.update).not.toHaveBeenCalled();
+      expect(history.recordMany).not.toHaveBeenCalled();
+    });
+
+    it('é idempotente: assinatura já registrada não consulta o Autentique', async () => {
+      contractRepo.findOne.mockResolvedValue(sentContract({ signatureStatus: 'ASSINADO' }));
+
+      await service.syncSignatureByForm('form-1', 'org-1');
+
+      expect(autentique.getDocument).not.toHaveBeenCalled();
+    });
+
+    it('ficha que voltou para APROVADO só atualiza o contrato', async () => {
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.APROVADO, 'pet-1'));
+      autentique.getDocument.mockResolvedValue(autentiqueDocument({ signedAt: '2026-10-02T15:00:00.000Z' }));
+
+      await service.syncSignatureByForm('form-1', 'org-1');
+
+      expect(tx.contract.update).toHaveBeenCalled();
+      expect(tx.form.update).not.toHaveBeenCalled();
+      expect(recordedEvents()[0]).toEqual(expect.objectContaining({ fromStatus: null, toStatus: null }));
+    });
+
+    it('contrato nunca enviado', async () => {
+      contractRepo.findOne.mockResolvedValue(storedContract());
+
+      await expect(service.syncSignatureByForm('form-1', 'org-1')).rejects.toThrow('O contrato ainda não foi enviado para assinatura.');
+    });
+
+    it('webhook: documento desconhecido é ignorado', async () => {
+      contractRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.syncSignatureByDocument('doc-x')).resolves.toBe(false);
+      expect(autentique.getDocument).not.toHaveBeenCalled();
+    });
+
+    it('webhook: acha o contrato pelo id do documento', async () => {
+      autentique.getDocument.mockResolvedValue(autentiqueDocument({ signedAt: '2026-10-02T15:00:00.000Z' }));
+
+      await expect(service.syncSignatureByDocument('doc-1')).resolves.toBe(true);
+      expect(contractRepo.findOne).toHaveBeenCalledWith({ where: { autentiqueDocumentId: 'doc-1' } });
+      expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.CONTRATO_ASSINADO });
+    });
+  });
+
+  describe('cancelSignature', () => {
+    it('exclui o documento no Autentique e volta para CONTRATO_GERADO', async () => {
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.AGUARDANDO_ASSINATURA, 'pet-1'));
+      contractRepo.findOne.mockResolvedValue(sentContract());
+
+      await service.cancelSignature('form-1', 'org-1', 'user-1');
+
+      expect(autentique.deleteDocument).toHaveBeenCalledWith('doc-1');
+      expect(tx.contract.update).toHaveBeenCalledWith('contract-1', { signatureStatus: 'CANCELADO', updatedBy: 'user-1' });
+      expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO, updatedBy: 'user-1' });
+      expect(recordedEvents()).toEqual([expect.objectContaining({ type: AdoptionHistoryType.ASSINATURA_CANCELADA, toStatus: 'CONTRATO_GERADO' })]);
+    });
+
+    it('só cancela contrato aguardando assinatura', async () => {
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONTRATO_ASSINADO, 'pet-1'));
+
+      await expect(service.cancelSignature('form-1', 'org-1')).rejects.toThrow(BadRequestException);
+      expect(autentique.deleteDocument).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('resposta', () => {
+    it('devolve o resumo da assinatura com a URL assinada do PDF assinado', async () => {
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONTRATO_ASSINADO, 'pet-1'));
+      contractRepo.findOne.mockResolvedValue(
+        sentContract({ signatureStatus: 'ASSINADO', signatureLink: 'https://assina.ae/abc', signedAt: new Date('2026-10-02'), signedPdfStoragePath: 'contracts/form-1/assinado-v2.pdf' }),
+      );
+
+      const contract = await service.findByForm('form-1', 'org-1');
+
+      expect(contract.signature).toEqual(
+        expect.objectContaining({
+          status: 'ASSINADO',
+          email: 'maria@teste.com',
+          link: 'https://assina.ae/abc',
+          version: 2,
+          signedPdfUrl: 'https://signed/contracts/form-1/assinado-v2.pdf',
+        }),
+      );
+    });
+
+    it('nunca enviado devolve signature null', async () => {
+      const contract = await service.findByForm('form-1', 'org-1');
+
+      expect(contract.signature).toBeNull();
     });
   });
 });

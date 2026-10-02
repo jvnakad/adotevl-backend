@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike, FindOptionsWhere } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -17,6 +17,8 @@ import { paginate } from '../common/paginate.helper';
 import { StorageService } from '../storage/storage.service';
 import { AdoptionHistoryService } from '../adoption-history/adoption-history.service';
 import { AdoptionHistoryType } from '../adoption-history/adoption-history.entity';
+import { AdoptionContract, ContractSignatureStatus } from '../adoption-contract/adoption-contract.entity';
+import { AutentiqueService } from '../autentique/autentique.service';
 
 export const MAX_ADOPTION_FORM_PHOTOS = 6;
 export const MAX_ADOPTION_PHOTO_SIZE = 5 * 1024 * 1024;
@@ -26,7 +28,14 @@ const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 // Status "livres" do kanban: qualquer um pode ir para qualquer outro
 const REVIEW_STATUSES = [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.EM_ANALISE, AdoptionFormStatus.APROVADO, AdoptionFormStatus.REPROVADO];
 // Status com contrato: só voltam para APROVADO (ADMIN)
-const CONTRACT_STATUSES = [AdoptionFormStatus.CONTRATO_GERADO, AdoptionFormStatus.CONCLUIDA];
+const CONTRACT_STATUSES = [
+  AdoptionFormStatus.CONTRATO_GERADO,
+  AdoptionFormStatus.AGUARDANDO_ASSINATURA,
+  AdoptionFormStatus.CONTRATO_ASSINADO,
+  AdoptionFormStatus.CONCLUIDA,
+];
+// Só mudam pelo fluxo de assinatura (envio, webhook/sincronização com o Autentique)
+const SIGNATURE_STATUSES = [AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONTRATO_ASSINADO];
 // Saindo destes status para PENDENTE/EM_ANALISE/REPROVADO o pet vinculado volta a ficar disponível
 const PET_RESERVED_STATUSES = [AdoptionFormStatus.APROVADO, AdoptionFormStatus.CONTRATO_GERADO];
 const PET_RELEASE_TARGETS = [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.EM_ANALISE, AdoptionFormStatus.REPROVADO];
@@ -65,6 +74,8 @@ const CONDITIONAL_ANSWERS: { field: keyof AdoptionForm; visible: (f: AdoptionFor
 
 @Injectable()
 export class AdoptionFormService {
+  private readonly logger = new Logger(AdoptionFormService.name);
+
   constructor(
     @InjectRepository(AdoptionForm)
     private readonly formRepository: Repository<AdoptionForm>,
@@ -76,6 +87,9 @@ export class AdoptionFormService {
     private readonly petRepository: Repository<Pet>,
     private readonly storageService: StorageService,
     private readonly historyService: AdoptionHistoryService,
+    @InjectRepository(AdoptionContract)
+    private readonly contractRepository: Repository<AdoptionContract>,
+    private readonly autentiqueService: AutentiqueService,
   ) {}
 
   // Rota pública: não devolve os dados pessoais enviados, só a confirmação
@@ -129,7 +143,7 @@ export class AdoptionFormService {
     return { ...form, pet: this.petSummary(form.pet) };
   }
 
-  // Kanban: as 6 colunas sempre presentes, até 50 fichas resumidas por coluna
+  // Kanban: todas as colunas sempre presentes, até 50 fichas resumidas por coluna
   async board(organizationId: string, search?: string) {
     const columns = await Promise.all(
       ADOPTION_FORM_STATUS_ORDER.map(async (status) => {
@@ -203,6 +217,7 @@ export class AdoptionFormService {
     this.validateTransition(from, to, profileName);
 
     const userName = await this.historyService.resolveUserName(reviewedBy);
+    const cancelledDocumentId = from === AdoptionFormStatus.AGUARDANDO_ASSINATURA ? await this.cancelPendingSignature(form.id) : null;
     await this.formRepository.manager.transaction(async (manager) => {
       await manager.getRepository(AdoptionForm).update(id, {
         status: to,
@@ -224,6 +239,10 @@ export class AdoptionFormService {
         }
       }
 
+      if (cancelledDocumentId) {
+        await manager.getRepository(AdoptionContract).update({ adoptionFormId: id }, { signatureStatus: ContractSignatureStatus.CANCELADO, updatedBy: reviewedBy });
+      }
+
       const concluded = to === AdoptionFormStatus.CONCLUIDA;
       await this.historyService.record(
         {
@@ -235,6 +254,7 @@ export class AdoptionFormService {
           metadata: {
             ...(dto.reviewNotes !== undefined && { reviewNotes: dto.reviewNotes }),
             ...(form.petId && { petId: form.petId }),
+            ...(cancelledDocumentId && { cancelledSignatureDocumentId: cancelledDocumentId }),
           },
           userId: reviewedBy,
           userName,
@@ -323,14 +343,27 @@ export class AdoptionFormService {
     return this.findOne(form.id, form.organizationId);
   }
 
+  // Voltando de Aguardando assinatura: exclui o documento no Autentique (falha não bloqueia a movimentação)
+  private async cancelPendingSignature(formId: string) {
+    const contract = await this.contractRepository.findOne({ where: { adoptionFormId: formId } });
+    if (!contract?.autentiqueDocumentId || contract.signatureStatus !== ContractSignatureStatus.PENDENTE) return null;
+    await this.autentiqueService.deleteDocument(contract.autentiqueDocumentId).catch((error) => {
+      this.logger.warn(`Não foi possível excluir o documento ${contract.autentiqueDocumentId} no Autentique: ${error?.message}`);
+    });
+    return contract.autentiqueDocumentId;
+  }
+
   // Regras de movimentação manual (PATCH :id/status); CONTRATO_GERADO só pela geração do contrato
   private validateTransition(from: AdoptionFormStatus, to: AdoptionFormStatus, profileName: string) {
     if (to === AdoptionFormStatus.CONTRATO_GERADO) {
       throw new BadRequestException('Gere o contrato para mover a ficha para Contrato gerado.');
     }
+    if (SIGNATURE_STATUSES.includes(to)) {
+      throw new BadRequestException('Envie o contrato para assinatura pela aba Contrato; o status muda sozinho conforme a assinatura.');
+    }
     if (to === AdoptionFormStatus.CONCLUIDA) {
-      if (from !== AdoptionFormStatus.CONTRATO_GERADO) {
-        throw new BadRequestException('A adoção só pode ser concluída depois que o contrato for gerado.');
+      if (from !== AdoptionFormStatus.CONTRATO_ASSINADO) {
+        throw new BadRequestException('A adoção só pode ser concluída depois que o contrato for assinado.');
       }
       return;
     }

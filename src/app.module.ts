@@ -39,6 +39,8 @@ import { AdoptionHistoryModule } from './adoption-history/adoption-history.modul
 import { AdoptionHistoryEvent } from './adoption-history/adoption-history.entity';
 import { AdoptionContractModule } from './adoption-contract/adoption-contract.module';
 import { AdoptionContract } from './adoption-contract/adoption-contract.entity';
+import { AutentiqueModule } from './autentique/autentique.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -69,6 +71,8 @@ import { AdoptionContract } from './adoption-contract/adoption-contract.entity';
     AdoptionFormModule,
     AdoptionHistoryModule,
     AdoptionContractModule,
+    AutentiqueModule,
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

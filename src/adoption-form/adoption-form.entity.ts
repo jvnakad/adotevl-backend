@@ -18,6 +18,8 @@ export enum AdoptionFormStatus {
   APROVADO = 'APROVADO',
   REPROVADO = 'REPROVADO',
   CONTRATO_GERADO = 'CONTRATO_GERADO',
+  AGUARDANDO_ASSINATURA = 'AGUARDANDO_ASSINATURA',
+  CONTRATO_ASSINADO = 'CONTRATO_ASSINADO',
   CONCLUIDA = 'CONCLUIDA',
 }
 
@@ -27,6 +29,8 @@ export const ADOPTION_FORM_STATUS_ORDER: AdoptionFormStatus[] = [
   AdoptionFormStatus.EM_ANALISE,
   AdoptionFormStatus.APROVADO,
   AdoptionFormStatus.CONTRATO_GERADO,
+  AdoptionFormStatus.AGUARDANDO_ASSINATURA,
+  AdoptionFormStatus.CONTRATO_ASSINADO,
   AdoptionFormStatus.CONCLUIDA,
   AdoptionFormStatus.REPROVADO,
 ];
@@ -37,6 +41,8 @@ export const ADOPTION_FORM_STATUS_LABELS: Record<AdoptionFormStatus, string> = {
   APROVADO: 'Aprovado',
   REPROVADO: 'Reprovado',
   CONTRATO_GERADO: 'Contrato gerado',
+  AGUARDANDO_ASSINATURA: 'Aguardando assinatura',
+  CONTRATO_ASSINADO: 'Contrato assinado',
   CONCLUIDA: 'Concluída',
 };
 

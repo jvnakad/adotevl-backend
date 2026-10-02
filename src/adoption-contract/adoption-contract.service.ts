@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
-import { AdoptionContract, ContractData } from './adoption-contract.entity';
+import { AdoptionContract, ContractData, ContractSignatureStatus } from './adoption-contract.entity';
 import { AdoptionForm, AdoptionFormStatus } from '../adoption-form/adoption-form.entity';
 import { Pet, PetStatus } from '../pet/pet.entity';
 import { StorageService } from '../storage/storage.service';
+import { AutentiqueService } from '../autentique/autentique.service';
 import { AdoptionHistoryService, RecordHistoryParams } from '../adoption-history/adoption-history.service';
 import { AdoptionHistoryType } from '../adoption-history/adoption-history.entity';
 import { CONTRACT_TEMPLATE, CONTRACT_TEMPLATE_BY_KEY } from './contract-template';
@@ -13,8 +14,17 @@ import { buildInitialData, diffContractData, prefillAnimalFromPet, sanitizeContr
 import { buildContractPdf, loadImageAsDataUrl } from './contract-pdf.builder';
 import { ContractClauseDto, UpdateAdoptionContractDto } from './dto/update-adoption-contract.dto';
 
-// Fichas que podem abrir o contrato; CONCLUIDA só leitura
-const CONTRACT_VIEW_STATUSES = [AdoptionFormStatus.APROVADO, AdoptionFormStatus.CONTRATO_GERADO, AdoptionFormStatus.CONCLUIDA];
+// Fichas que podem abrir o contrato; a partir do envio para assinatura fica só leitura
+const CONTRACT_VIEW_STATUSES = [
+  AdoptionFormStatus.APROVADO,
+  AdoptionFormStatus.CONTRATO_GERADO,
+  AdoptionFormStatus.AGUARDANDO_ASSINATURA,
+  AdoptionFormStatus.CONTRATO_ASSINADO,
+  AdoptionFormStatus.CONCLUIDA,
+];
+const CONTRACT_LOCKED_STATUSES = [AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONTRATO_ASSINADO];
+// Ator dos eventos gravados pelo webhook/sincronização (sem usuário logado)
+export const AUTENTIQUE_USER_NAME = 'Autentique';
 const LINKABLE_PET_STATUSES = [PetStatus.DISPONIVEL, PetStatus.EM_PROCESSO];
 
 type HistoryDraft = Omit<RecordHistoryParams, 'form' | 'userId' | 'userName'>;
@@ -35,6 +45,8 @@ const templateClauses = (): StoredClause[] =>
 
 @Injectable()
 export class AdoptionContractService {
+  private readonly logger = new Logger(AdoptionContractService.name);
+
   constructor(
     @InjectRepository(AdoptionContract)
     private readonly contractRepository: Repository<AdoptionContract>,
@@ -44,6 +56,7 @@ export class AdoptionContractService {
     private readonly petRepository: Repository<Pet>,
     private readonly storageService: StorageService,
     private readonly historyService: AdoptionHistoryService,
+    private readonly autentiqueService: AutentiqueService,
   ) {}
 
   // Cria o rascunho a partir do modelo na primeira abertura
@@ -186,9 +199,186 @@ export class AdoptionContractService {
     return this.findByForm(formId, organizationId, userId);
   }
 
-  // Alterações + eventos do histórico na mesma transação
-  private async save(form: AdoptionForm, userId: string, events: HistoryDraft[], work: (manager: EntityManager) => Promise<unknown>) {
-    const userName = events.length ? await this.historyService.resolveUserName(userId) : undefined;
+  // Envia o PDF da versão atual ao Autentique; o adotante recebe o link de assinatura por e-mail
+  async sendForSignature(formId: string, organizationId: string, userId: string = null) {
+    const form = await this.getForm(formId, organizationId);
+    if (form.status !== AdoptionFormStatus.CONTRATO_GERADO) {
+      throw new BadRequestException('Só é possível enviar para assinatura um contrato gerado.');
+    }
+    const contract = await this.ensureContract(form, userId);
+    if (!contract.pdfStoragePath) throw new BadRequestException('Gere o PDF do contrato antes de enviar para assinatura.');
+    const name = contract.data?.adopter?.name?.trim() || form.fullName;
+    const email = (contract.data?.adopter?.email?.trim() || form.email)?.toLowerCase();
+    if (!email) throw new BadRequestException('Informe o e-mail do adotante antes de enviar para assinatura.');
+
+    const pdf = await this.storageService.downloadPrivate(contract.pdfStoragePath);
+    const document = await this.autentiqueService.createDocument({
+      name: `Termo de Adoção - ${name} - v${contract.version}`,
+      pdf,
+      fileName: `termo-de-adocao-v${contract.version}.pdf`,
+      signer: { name, email },
+    });
+    // A lista também traz o dono da conta Autentique: o adotante é achado pelo e-mail
+    const signature = document.signatures.find((item) => item.email === email);
+
+    try {
+      await this.save(
+        form,
+        userId,
+        [
+          {
+            type: AdoptionHistoryType.CONTRATO_ENVIADO_ASSINATURA,
+            description: `Contrato (versão ${contract.version}) enviado para assinatura de ${email}`,
+            fromStatus: form.status,
+            toStatus: AdoptionFormStatus.AGUARDANDO_ASSINATURA,
+            metadata: { documentId: document.id, version: contract.version, email },
+          },
+        ],
+        async (manager) => {
+          await manager.getRepository(AdoptionContract).update(contract.id, {
+            autentiqueDocumentId: document.id,
+            signatureStatus: ContractSignatureStatus.PENDENTE,
+            signatureLink: signature?.link ?? null,
+            signatureEmail: email,
+            signatureVersion: contract.version,
+            signatureSentAt: new Date(),
+            signedAt: null,
+            signedPdfStoragePath: null,
+            updatedBy: userId,
+          });
+          await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA, updatedBy: userId });
+        },
+      );
+    } catch (error) {
+      // Documento sem registro no banco não deve continuar aguardando assinatura no Autentique
+      await this.autentiqueService.deleteDocument(document.id).catch(() => undefined);
+      throw error;
+    }
+    return this.findByForm(formId, organizationId, userId);
+  }
+
+  // Botão "Atualizar status" do front (alternativa ao webhook)
+  async syncSignatureByForm(formId: string, organizationId: string, userId: string = null) {
+    const form = await this.getForm(formId, organizationId);
+    this.assertCanView(form);
+    const contract = await this.contractRepository.findOne({ where: { adoptionFormId: form.id } });
+    if (!contract?.autentiqueDocumentId) throw new BadRequestException('O contrato ainda não foi enviado para assinatura.');
+    await this.syncSignature(contract, form);
+    return this.findByForm(formId, organizationId, userId);
+  }
+
+  // Webhook: o payload só diz qual documento mudou; o estado vem sempre da consulta ao Autentique
+  async syncSignatureByDocument(documentId: string) {
+    const contract = await this.contractRepository.findOne({ where: { autentiqueDocumentId: documentId } });
+    if (!contract) return false;
+    const form = await this.formRepository.findOne({ where: { id: contract.adoptionFormId, isActive: true } });
+    if (!form) return false;
+    await this.syncSignature(contract, form);
+    return true;
+  }
+
+  // Idempotente: só age enquanto a assinatura está pendente
+  private async syncSignature(contract: AdoptionContract, form: AdoptionForm) {
+    if (contract.signatureStatus !== ContractSignatureStatus.PENDENTE) return;
+    const document = await this.autentiqueService.getDocument(contract.autentiqueDocumentId);
+    if (!document) {
+      this.logger.warn(`Documento ${contract.autentiqueDocumentId} não encontrado no Autentique.`);
+      return;
+    }
+    const signature = document.signatures.find((item) => item.email === contract.signatureEmail);
+    if (!signature) return;
+    // A ficha pode ter voltado para Aprovado (ADMIN) enquanto aguardava: aí só o contrato é atualizado
+    const waiting = form.status === AdoptionFormStatus.AGUARDANDO_ASSINATURA;
+
+    if (signature.signedAt) {
+      let signedPdfStoragePath: string = null;
+      if (document.signedFileUrl) {
+        const storagePath = `contracts/${form.id}/assinado-v${contract.signatureVersion}.pdf`;
+        const pdf = await this.autentiqueService.downloadFile(document.signedFileUrl);
+        // Upload não sobrescreve: remove sobra de uma sincronização anterior que falhou no meio
+        await this.storageService.removePrivate([storagePath]).catch(() => undefined);
+        await this.storageService.uploadPrivate(storagePath, pdf, 'application/pdf');
+        signedPdfStoragePath = storagePath;
+      }
+      await this.save(
+        form,
+        null,
+        [
+          {
+            type: AdoptionHistoryType.CONTRATO_ASSINADO,
+            description: `Contrato (versão ${contract.signatureVersion}) assinado por ${signature.name ?? contract.signatureEmail}`,
+            fromStatus: waiting ? form.status : null,
+            toStatus: waiting ? AdoptionFormStatus.CONTRATO_ASSINADO : null,
+            metadata: { documentId: document.id, version: contract.signatureVersion, signedAt: signature.signedAt, storagePath: signedPdfStoragePath },
+          },
+        ],
+        async (manager) => {
+          await manager.getRepository(AdoptionContract).update(contract.id, {
+            signatureStatus: ContractSignatureStatus.ASSINADO,
+            signedAt: new Date(signature.signedAt),
+            signedPdfStoragePath,
+          });
+          if (waiting) await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONTRATO_ASSINADO });
+        },
+        AUTENTIQUE_USER_NAME,
+      );
+      return;
+    }
+
+    if (signature.rejectedAt) {
+      await this.save(
+        form,
+        null,
+        [
+          {
+            type: AdoptionHistoryType.ASSINATURA_RECUSADA,
+            description: `Assinatura do contrato recusada por ${signature.name ?? contract.signatureEmail}`,
+            fromStatus: waiting ? form.status : null,
+            toStatus: waiting ? AdoptionFormStatus.CONTRATO_GERADO : null,
+            metadata: { documentId: document.id, version: contract.signatureVersion, rejectedAt: signature.rejectedAt },
+          },
+        ],
+        async (manager) => {
+          await manager.getRepository(AdoptionContract).update(contract.id, { signatureStatus: ContractSignatureStatus.RECUSADO });
+          if (waiting) await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONTRATO_GERADO });
+        },
+        AUTENTIQUE_USER_NAME,
+      );
+    }
+  }
+
+  // Cancela o envio (ADMIN): exclui o documento no Autentique e a ficha volta para Contrato gerado
+  async cancelSignature(formId: string, organizationId: string, userId: string = null) {
+    const form = await this.getForm(formId, organizationId);
+    if (form.status !== AdoptionFormStatus.AGUARDANDO_ASSINATURA) {
+      throw new BadRequestException('Só é possível cancelar um contrato aguardando assinatura.');
+    }
+    const contract = await this.contractRepository.findOne({ where: { adoptionFormId: form.id } });
+    if (contract?.autentiqueDocumentId) await this.autentiqueService.deleteDocument(contract.autentiqueDocumentId);
+
+    await this.save(
+      form,
+      userId,
+      [
+        {
+          type: AdoptionHistoryType.ASSINATURA_CANCELADA,
+          description: 'Envio do contrato para assinatura cancelado',
+          fromStatus: form.status,
+          toStatus: AdoptionFormStatus.CONTRATO_GERADO,
+          metadata: { documentId: contract?.autentiqueDocumentId ?? null, version: contract?.signatureVersion ?? null },
+        },
+      ],
+      async (manager) => {
+        if (contract) await manager.getRepository(AdoptionContract).update(contract.id, { signatureStatus: ContractSignatureStatus.CANCELADO, updatedBy: userId });
+        await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONTRATO_GERADO, updatedBy: userId });
+      },
+    );
+    return this.findByForm(formId, organizationId, userId);
+  }
+
+  // Alterações + eventos do histórico na mesma transação; fixedUserName para ações sem usuário (Autentique)
+  private async save(form: AdoptionForm, userId: string, events: HistoryDraft[], work: (manager: EntityManager) => Promise<unknown>, fixedUserName?: string) {
+    const userName = events.length ? fixedUserName ?? (await this.historyService.resolveUserName(userId)) : undefined;
     await this.contractRepository.manager.transaction(async (manager) => {
       await work(manager);
       await this.historyService.recordMany(
@@ -314,6 +504,9 @@ export class AdoptionContractService {
     if (form.status === AdoptionFormStatus.CONCLUIDA) {
       throw new BadRequestException('Adoção concluída: o contrato não pode mais ser alterado.');
     }
+    if (CONTRACT_LOCKED_STATUSES.includes(form.status)) {
+      throw new BadRequestException('O contrato já foi enviado para assinatura e não pode mais ser alterado.');
+    }
   }
 
   private async toResponse(contract: AdoptionContract, form: AdoptionForm) {
@@ -321,7 +514,7 @@ export class AdoptionContractService {
     const generated = (await this.historyService.findByForm(form.id, form.organizationId)).filter(
       (event) => event.type === AdoptionHistoryType.CONTRATO_GERADO && event.metadata?.storagePath,
     );
-    const paths = [...new Set([contract.pdfStoragePath, ...generated.map((event) => event.metadata.storagePath)].filter(Boolean))];
+    const paths = [...new Set([contract.pdfStoragePath, contract.signedPdfStoragePath, ...generated.map((event) => event.metadata.storagePath)].filter(Boolean))];
     const signed = await this.storageService.getSignedUrls(paths);
 
     const clauses = [...contract.clauses]
@@ -345,6 +538,17 @@ export class AdoptionContractService {
         url: signed[event.metadata.storagePath] ?? null,
         userName: event.userName,
       })),
+      signature: contract.signatureStatus
+        ? {
+            status: contract.signatureStatus,
+            email: contract.signatureEmail ?? null,
+            link: contract.signatureLink ?? null,
+            version: contract.signatureVersion ?? null,
+            sentAt: contract.signatureSentAt ?? null,
+            signedAt: contract.signedAt ?? null,
+            signedPdfUrl: contract.signedPdfStoragePath ? signed[contract.signedPdfStoragePath] ?? null : null,
+          }
+        : null,
       updatedAt: contract.updatedAt,
     };
   }

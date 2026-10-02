@@ -1,6 +1,6 @@
 import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { mkdir, writeFile, rm } from 'fs/promises';
+import { mkdir, writeFile, readFile, rm } from 'fs/promises';
 import { dirname, join } from 'path';
 
 export const LOCAL_UPLOADS_DIR = join(process.cwd(), 'uploads');
@@ -51,6 +51,20 @@ export class StorageService {
 
   async removePrivate(paths: string[]) {
     await this.removeFromBucket(this.privateBucket, paths);
+  }
+
+  // Conteúdo de um arquivo do bucket privado (ex.: PDF do contrato enviado para assinatura)
+  async downloadPrivate(path: string): Promise<Buffer> {
+    if (isLocalStorage()) {
+      try {
+        return await readFile(join(LOCAL_UPLOADS_DIR, path));
+      } catch {
+        throw new InternalServerErrorException('Falha ao ler arquivo.');
+      }
+    }
+    const { data, error } = await this.getClient().storage.from(this.privateBucket).download(path);
+    if (error || !data) throw new InternalServerErrorException('Falha ao ler arquivo.');
+    return Buffer.from(await data.arrayBuffer());
   }
 
   // URLs temporárias para os arquivos do bucket privado (path -> url). Paths sem URL ficam de fora.

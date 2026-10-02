@@ -6,11 +6,16 @@ import { TestAppModule } from './test-app.module';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
+import { createHmac } from 'crypto';
 import { Profile } from '../src/profile/profile.entity';
 import { Organization } from '../src/organization/organization.entity';
 import { User } from '../src/user/user.entity';
 import { Pet } from '../src/pet/pet.entity';
 import { AdoptionForm } from '../src/adoption-form/adoption-form.entity';
+import { AutentiqueService } from '../src/autentique/autentique.service';
+import { MockAutentiqueService } from './test-app.module';
+
+const WEBHOOK_SECRET = 'segredo-webhook-e2e';
 
 // Respostas mínimas válidas, como o front envia (multipart, tudo string)
 const answers = (organizationId: string): Record<string, string> => ({
@@ -76,6 +81,7 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
   let userRepo: Repository<User>;
   let petRepo: Repository<Pet>;
   let formRepo: Repository<AdoptionForm>;
+  let autentique: MockAutentiqueService;
   let orgId: string;
   let adminToken: string;
   let volunteerToken: string;
@@ -128,7 +134,8 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({ imports: [TestAppModule] }).compile();
-    app = moduleFixture.createNestApplication();
+    // rawBody como no main.ts: o webhook valida o HMAC sobre o corpo original
+    app = moduleFixture.createNestApplication({ rawBody: true });
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
 
@@ -137,6 +144,8 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     userRepo = moduleFixture.get(getRepositoryToken(User));
     petRepo = moduleFixture.get(getRepositoryToken(Pet));
     formRepo = moduleFixture.get(getRepositoryToken(AdoptionForm));
+    autentique = moduleFixture.get(AutentiqueService);
+    process.env.AUTENTIQUE_WEBHOOK_SECRET = WEBHOOK_SECRET;
 
     await cleanup(CNPJ);
     await cleanup(OTHER_CNPJ);
@@ -172,10 +181,10 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     expect(initialHistory.status).toBe(200);
     expect(initialHistory.body).toEqual([expect.objectContaining({ type: 'FICHA_CRIADA', userName: 'Formulário público', adopterName: 'Carla Contrato' })]);
 
-    // 2. Kanban com as 6 colunas
+    // 2. Kanban com as 8 colunas
     const board = await auth(api().get('/adoption-forms/board?search=carla'));
     expect(board.status).toBe(200);
-    expect(board.body.columns.map((c) => c.status)).toEqual(['PENDENTE', 'EM_ANALISE', 'APROVADO', 'CONTRATO_GERADO', 'CONCLUIDA', 'REPROVADO']);
+    expect(board.body.columns.map((c) => c.status)).toEqual(['PENDENTE', 'EM_ANALISE', 'APROVADO', 'CONTRATO_GERADO', 'AGUARDANDO_ASSINATURA', 'CONTRATO_ASSINADO', 'CONCLUIDA', 'REPROVADO']);
     expect(board.body.columns[0].items.map((i) => i.id)).toEqual([formId]);
     expect(board.body.columns[0].items[0]).toEqual(expect.objectContaining({ petId: null, petName: null }));
 
@@ -267,6 +276,55 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
     const volunteerReopen = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'APROVADO' });
     expect(volunteerReopen.status).toBe(403);
 
+    // 12a. Sem assinatura não conclui
+    const notSigned = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'CONCLUIDA' });
+    expect(notSigned.status).toBe(400);
+    expect(notSigned.body.message).toBe('A adoção só pode ser concluída depois que o contrato for assinado.');
+    expect((await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'CONTRATO_ASSINADO' })).status).toBe(400);
+
+    // 12b. Envia para assinatura: ficha aguardando, contrato só leitura
+    const sent = await auth(api().post(`/adoption-forms/${formId}/contract/signature`), volunteerToken);
+    expect(sent.status).toBe(201);
+    expect(sent.body.signature).toEqual(expect.objectContaining({ status: 'PENDENTE', email: 'carla.contrato@teste.com', version: 1, signedPdfUrl: null }));
+    expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('AGUARDANDO_ASSINATURA');
+    const lockedEdit = await auth(api().put(`/adoption-forms/${formId}/contract`)).send({ data: {} });
+    expect(lockedEdit.status).toBe(400);
+    expect(lockedEdit.body.message).toBe('O contrato já foi enviado para assinatura e não pode mais ser alterado.');
+    expect((await auth(api().post(`/adoption-forms/${formId}/contract/signature`))).status).toBe(400);
+    const firstDocumentId = [...autentique.documents.keys()].pop();
+
+    // 12c. Cancelar envio: só ADMIN; ficha volta para Contrato gerado e o documento some do Autentique
+    expect((await auth(api().delete(`/adoption-forms/${formId}/contract/signature`), volunteerToken)).status).toBe(403);
+    const cancelled = await auth(api().delete(`/adoption-forms/${formId}/contract/signature`));
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.signature.status).toBe('CANCELADO');
+    expect(autentique.documents.has(firstDocumentId)).toBe(false);
+    expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('CONTRATO_GERADO');
+
+    // 12d. Reenvia; sincronizar antes de assinar não muda nada
+    expect((await auth(api().post(`/adoption-forms/${formId}/contract/signature`))).status).toBe(201);
+    const documentId = [...autentique.documents.keys()].pop();
+    const pending = await auth(api().post(`/adoption-forms/${formId}/contract/signature/sync`));
+    expect(pending.status).toBe(201);
+    expect(pending.body.signature.status).toBe('PENDENTE');
+
+    // 12e. Webhook: HMAC inválido é recusado; válido marca o contrato como assinado
+    autentique.signDocument(documentId);
+    const webhookBody = JSON.stringify({ id: 'wh-1', object: 'webhook', event: { id: 'ev-1', type: 'signature.accepted', data: { document: documentId } } });
+    const webhook = (signature: string) =>
+      api().post('/webhooks/autentique').set('Content-Type', 'application/json').set('X-Autentique-Signature', signature).send(webhookBody);
+    expect((await webhook('assinatura-falsa')).status).toBe(401);
+    const accepted = await webhook(createHmac('sha256', WEBHOOK_SECRET).update(webhookBody).digest('hex'));
+    expect(accepted.status).toBe(200);
+    expect(accepted.body).toEqual({ received: true, ignored: false });
+
+    const signedContract = await auth(api().get(`/adoption-forms/${formId}/contract`));
+    expect(signedContract.body.signature).toEqual(expect.objectContaining({ status: 'ASSINADO', signedAt: expect.any(String) }));
+    expect(signedContract.body.signature.signedPdfUrl).toContain(`contracts/${formId}/assinado-v1.pdf`);
+    expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('CONTRATO_ASSINADO');
+    const signedBoard = await auth(api().get('/adoption-forms/board?search=carla'));
+    expect(signedBoard.body.columns.find((c) => c.status === 'CONTRATO_ASSINADO').items.map((i) => i.id)).toEqual([formId]);
+
     // 13. Concluir adoção: pet adotado
     const concluded = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'CONCLUIDA' });
     expect(concluded.status).toBe(200);
@@ -294,9 +352,13 @@ describe('Fluxo do contrato de adoção (e2e)', () => {
         'CLAUSULA_REMOVIDA',
         'CLAUSULA_EDITADA',
         'CONTRATO_GERADO',
+        'CONTRATO_ENVIADO_ASSINATURA',
+        'ASSINATURA_CANCELADA',
+        'CONTRATO_ASSINADO',
         'ADOCAO_CONCLUIDA',
       ]),
     );
+    expect(formHistory.body.find((event) => event.type === 'CONTRATO_ASSINADO').userName).toBe('Autentique');
     const removedEvent = formHistory.body.find((event) => event.type === 'CLAUSULA_REMOVIDA');
     expect(removedEvent.description).toBe('Cláusula Terceira (Vacina e castração) removida');
     expect(removedEvent.metadata.clauseNumber).toBe(3);

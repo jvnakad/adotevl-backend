@@ -27,7 +27,7 @@ API REST do sistema de gestão de adoção de pets da AdoteVL. Front-end em `../
 ## Ambiente local
 - `.env.local` (copiado de `.env.local.example`) tem precedência sobre `.env` (`ConfigModule.forRoot({ envFilePath: ['.env.local', '.env'] })`).
 - `DATABASE_URL` com `?sslmode=disable` desliga SSL (Supabase exige SSL; Postgres local não).
-- Autentique: `AUTENTIQUE_TOKEN`, `AUTENTIQUE_SANDBOX=true` (documentos de teste, sem créditos, somem em alguns dias; `false` em produção) e `AUTENTIQUE_WEBHOOK_SECRET` (secret do webhook cadastrado no painel; sem ele o webhook responde 401). Sem URL pública em dev, use o botão "Atualizar status" (`POST :id/contract/signature/sync`).
+- Autentique: `AUTENTIQUE_TOKEN`, `AUTENTIQUE_SANDBOX=true` (documentos de teste, sem créditos, somem em alguns dias; `false` em produção) `AUTENTIQUE_FOLDER_ID` (id da pasta do painel onde os termos ficam salvos — "Termos de adoção" = `7769248f814defa83476a26255cedb252219bfdf`; vazio = raiz; ids das pastas via query `folders`) e `AUTENTIQUE_WEBHOOK_SECRET` (secret do webhook cadastrado no painel; sem ele o webhook responde 401). Sem URL pública em dev, use o botão "Atualizar status" (`POST :id/contract/signature/sync`).
 - Login de dev: `admin@adotevl.local` / `admin123`. O seed imprime os IDs para o `.env` do front.
 
 ## Estrutura

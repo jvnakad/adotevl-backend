@@ -44,8 +44,8 @@ const SIGNATURE_FIELDS = `
 `;
 
 const CREATE_DOCUMENT = `
-  mutation CreateDocument($document: DocumentInput!, $signers: [SignerInput!]!, $file: Upload!, $sandbox: Boolean) {
-    createDocument(sandbox: $sandbox, document: $document, signers: $signers, file: $file) {
+  mutation CreateDocument($document: DocumentInput!, $signers: [SignerInput!]!, $file: Upload!, $sandbox: Boolean, $folderId: UUID) {
+    createDocument(sandbox: $sandbox, document: $document, signers: $signers, file: $file, folder_id: $folderId) {
       id
       name
       files { signed }
@@ -104,6 +104,11 @@ export class AutentiqueService {
     return process.env.AUTENTIQUE_SANDBOX === 'true';
   }
 
+  // Pasta do painel onde os termos ficam salvos (ex.: "Termos de adoção"); vazio = raiz
+  private get folderId() {
+    return process.env.AUTENTIQUE_FOLDER_ID?.trim() || null;
+  }
+
   async createDocument({ name, pdf, fileName, signer }: CreateAutentiqueDocumentParams): Promise<AutentiqueDocument> {
     // Upload no padrão GraphQL multipart request: operations + map + arquivo
     const body = new FormData();
@@ -116,6 +121,7 @@ export class AutentiqueService {
           signers: [{ name: signer.name, email: signer.email, action: 'SIGN' }],
           file: null,
           sandbox: this.sandbox,
+          folderId: this.folderId,
         },
       }),
     );

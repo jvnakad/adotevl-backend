@@ -32,6 +32,7 @@ describe('AutentiqueService', () => {
   beforeEach(() => {
     process.env.AUTENTIQUE_TOKEN = 'token-teste';
     process.env.AUTENTIQUE_SANDBOX = 'true';
+    delete process.env.AUTENTIQUE_FOLDER_ID;
     fetchMock = jest.fn();
     global.fetch = fetchMock as any;
     service = new AutentiqueService();
@@ -64,6 +65,7 @@ describe('AutentiqueService', () => {
       signers: [{ name: 'Maria', email: 'maria@teste.com', action: 'SIGN' }],
       file: null,
       sandbox: true,
+      folderId: null,
     });
     expect(JSON.parse(body.get('map') as string)).toEqual({ file: ['variables.file'] });
     expect((body.get('file') as File).name).toBe('termo.pdf');
@@ -85,6 +87,17 @@ describe('AutentiqueService', () => {
 
     const operations = JSON.parse((fetchMock.mock.calls[0][1].body as FormData).get('operations') as string);
     expect(operations.variables.sandbox).toBe(false);
+  });
+
+  it('salva na pasta configurada em AUTENTIQUE_FOLDER_ID', async () => {
+    process.env.AUTENTIQUE_FOLDER_ID = ' pasta-termos ';
+    fetchMock.mockResolvedValue(jsonResponse({ data: { createDocument: rawDocument } }));
+
+    await service.createDocument({ name: 'Termo', pdf: Buffer.from('%PDF'), fileName: 'termo.pdf', signer });
+
+    const operations = JSON.parse((fetchMock.mock.calls[0][1].body as FormData).get('operations') as string);
+    expect(operations.query).toContain('folder_id: $folderId');
+    expect(operations.variables.folderId).toBe('pasta-termos');
   });
 
   it('documento inexistente devolve null', async () => {

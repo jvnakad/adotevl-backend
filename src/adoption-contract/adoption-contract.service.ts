@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { AdoptionContract, ContractData, ContractSignatureStatus } from './adoption-contract.entity';
@@ -15,12 +15,7 @@ import { buildContractPdf, loadImageAsDataUrl } from './contract-pdf.builder';
 import { ContractClauseDto, UpdateAdoptionContractDto } from './dto/update-adoption-contract.dto';
 
 // Fichas que podem abrir o contrato; a partir do envio para assinatura fica só leitura
-const CONTRACT_VIEW_STATUSES = [
-  AdoptionFormStatus.APROVADO,
-  AdoptionFormStatus.CONTRATO_GERADO,
-  AdoptionFormStatus.AGUARDANDO_ASSINATURA,
-  AdoptionFormStatus.CONCLUIDA,
-];
+const CONTRACT_VIEW_STATUSES = [AdoptionFormStatus.APROVADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA];
 // Ator dos eventos gravados pelo webhook/sincronização (sem usuário logado)
 export const AUTENTIQUE_USER_NAME = 'Autentique';
 const LINKABLE_PET_STATUSES = [PetStatus.DISPONIVEL, PetStatus.EM_PROCESSO];
@@ -164,13 +159,12 @@ export class AdoptionContractService {
     const { clauses } = numberClauses(contract.clauses);
     // Sem data escolhida, o termo sai com a data da geração
     const data = contract.data.signature?.date ? contract.data : { ...contract.data, signature: { ...contract.data.signature, date: todayInBrazil() } };
-    const { buffer, adopterSignature } = await buildContractPdf({ data, clauses, petPhoto });
+    const { buffer, adopterSignature, organizationSignature } = await buildContractPdf({ data, clauses, petPhoto });
 
     const version = (contract.version ?? 0) + 1;
     const storagePath = `contracts/${form.id}/v${version}.pdf`;
     await this.storageService.uploadPrivate(storagePath, buffer, 'application/pdf');
 
-    const statusChanged = form.status === AdoptionFormStatus.APROVADO;
     try {
       await this.save(
         form,
@@ -179,8 +173,6 @@ export class AdoptionContractService {
           {
             type: AdoptionHistoryType.CONTRATO_GERADO,
             description: `Termo de adoção gerado (versão ${version})`,
-            fromStatus: statusChanged ? form.status : null,
-            toStatus: statusChanged ? AdoptionFormStatus.CONTRATO_GERADO : null,
             metadata: { version, storagePath, fileName: `termo-adocao-v${version}.pdf` },
           },
         ],
@@ -190,11 +182,9 @@ export class AdoptionContractService {
             pdfStoragePath: storagePath,
             generatedAt: new Date(),
             adopterSignaturePosition: adopterSignature,
+            organizationSignaturePosition: organizationSignature,
             updatedBy: userId,
           });
-          if (statusChanged) {
-            await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONTRATO_GERADO, updatedBy: userId });
-          }
           if (pet && pet.status !== PetStatus.EM_PROCESSO) {
             await manager.getRepository(Pet).update({ id: pet.id, organizationId: form.organizationId }, { status: PetStatus.EM_PROCESSO, updatedBy: userId });
           }
@@ -208,25 +198,41 @@ export class AdoptionContractService {
     return this.findByForm(formId, organizationId, userId);
   }
 
-  // Envia o PDF da versão atual ao Autentique; o adotante recebe o link de assinatura por e-mail
+  // Envia o PDF da versão atual ao Autentique: a associação assina na hora (conta do token, linha "Representante legal")
+  // e o adotante recebe o link por e-mail
   async sendForSignature(formId: string, organizationId: string, userId: string = null) {
     const form = await this.getForm(formId, organizationId);
-    if (form.status !== AdoptionFormStatus.CONTRATO_GERADO) {
-      throw new BadRequestException('Só é possível enviar para assinatura um termo de adoção gerado.');
+    if (form.status !== AdoptionFormStatus.APROVADO) {
+      throw new BadRequestException('Só é possível enviar para assinatura o termo de uma ficha aprovada.');
     }
     const contract = await this.ensureContract(form, userId);
     if (!contract.pdfStoragePath) throw new BadRequestException('Gere o PDF do termo de adoção antes de enviar para assinatura.');
     const name = contract.data?.adopter?.name?.trim() || form.fullName;
     const email = (contract.data?.adopter?.email?.trim() || form.email)?.toLowerCase();
     if (!email) throw new BadRequestException('Informe o e-mail do adotante antes de enviar para assinatura.');
+    const organization = await this.autentiqueService.getAccount();
+    if (email === organization.email) {
+      throw new BadRequestException('O e-mail do adotante não pode ser o da conta do Autentique da associação.');
+    }
 
     const pdf = await this.storageService.downloadPrivate(contract.pdfStoragePath);
     const document = await this.autentiqueService.createDocument({
       name: `Termo de Adoção - ${name} - v${contract.version}`,
       pdf,
       fileName: `termo-de-adocao-v${contract.version}.pdf`,
-      signer: { name, email, position: contract.adopterSignaturePosition ?? null },
+      signers: [
+        { name: organization.name, email: organization.email, position: contract.organizationSignaturePosition ?? null },
+        { name, email, position: contract.adopterSignaturePosition ?? null },
+      ],
     });
+    try {
+      await this.autentiqueService.signDocument(document.id);
+    } catch (error) {
+      // Sem a assinatura da associação o documento não segue para o adotante
+      await this.autentiqueService.deleteDocument(document.id).catch(() => undefined);
+      this.logger.error(`Falha ao assinar o documento ${document.id} pela associação: ${error?.message}`);
+      throw new BadGatewayException('Não foi possível assinar o termo de adoção pela associação no Autentique. Tente novamente.');
+    }
     // A lista também traz o dono da conta Autentique: o adotante é achado pelo e-mail
     const signature = document.signatures.find((item) => item.email === email);
 
@@ -360,20 +366,20 @@ export class AdoptionContractService {
             type: AdoptionHistoryType.ASSINATURA_RECUSADA,
             description: `Assinatura do termo de adoção recusada por ${signature.name ?? contract.signatureEmail}`,
             fromStatus: waiting ? form.status : null,
-            toStatus: waiting ? AdoptionFormStatus.CONTRATO_GERADO : null,
+            toStatus: waiting ? AdoptionFormStatus.APROVADO : null,
             metadata: { documentId: document.id, version: contract.signatureVersion, rejectedAt: signature.rejectedAt },
           },
         ],
         async (manager) => {
           await manager.getRepository(AdoptionContract).update(contract.id, { signatureStatus: ContractSignatureStatus.RECUSADO });
-          if (waiting) await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONTRATO_GERADO });
+          if (waiting) await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.APROVADO });
         },
         AUTENTIQUE_USER_NAME,
       );
     }
   }
 
-  // Cancela o envio (ADMIN): exclui o documento no Autentique e a ficha volta para Contrato gerado
+  // Cancela o envio (ADMIN): exclui o documento no Autentique e a ficha volta para Aprovado
   async cancelSignature(formId: string, organizationId: string, userId: string = null) {
     const form = await this.getForm(formId, organizationId);
     if (form.status !== AdoptionFormStatus.AGUARDANDO_ASSINATURA) {
@@ -390,13 +396,13 @@ export class AdoptionContractService {
           type: AdoptionHistoryType.ASSINATURA_CANCELADA,
           description: 'Envio do termo de adoção para assinatura cancelado',
           fromStatus: form.status,
-          toStatus: AdoptionFormStatus.CONTRATO_GERADO,
+          toStatus: AdoptionFormStatus.APROVADO,
           metadata: { documentId: contract?.autentiqueDocumentId ?? null, version: contract?.signatureVersion ?? null },
         },
       ],
       async (manager) => {
         if (contract) await manager.getRepository(AdoptionContract).update(contract.id, { signatureStatus: ContractSignatureStatus.CANCELADO, updatedBy: userId });
-        await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONTRATO_GERADO, updatedBy: userId });
+        await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.APROVADO, updatedBy: userId });
       },
     );
     return this.findByForm(formId, organizationId, userId);

@@ -18,7 +18,7 @@ export class AdoptionContractController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
     summary: 'Buscar contrato da ficha de adoção',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Ficha APROVADO, CONTRATO_GERADO, AGUARDANDO_ASSINATURA ou CONCLUIDA. Na primeira chamada cria o rascunho a partir do modelo, pré-preenchido com a ficha e o pet vinculado.',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Ficha APROVADO, AGUARDANDO_ASSINATURA ou CONCLUIDA. Na primeira chamada cria o rascunho a partir do modelo, pré-preenchido com a ficha e o pet vinculado.',
   })
   findOne(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.findByForm(id, req.user.organizationId, req.user.id);
@@ -45,7 +45,7 @@ export class AdoptionContractController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
     summary: 'Gerar PDF do contrato',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Exige pet vinculado e nome/CPF do adotante. Gera nova versão (bucket privado), move a ficha APROVADO para CONTRATO_GERADO e deixa o pet EM_PROCESSO.',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Exige pet vinculado e nome/CPF do adotante. Gera nova versão (bucket privado) com a ficha em APROVADO e deixa o pet EM_PROCESSO.',
   })
   generate(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.generate(id, req.user.organizationId, req.user.id);
@@ -56,7 +56,7 @@ export class AdoptionContractController {
   @ApiOperation({
     summary: 'Enviar contrato para assinatura (Autentique)',
     description:
-      'Perfis permitidos: ADMIN, VOLUNTEER. Ficha CONTRATO_GERADO. Envia o PDF da versão atual ao Autentique; o adotante recebe o link por e-mail. Ficha vai para AGUARDANDO_ASSINATURA e o termo fica somente leitura.',
+      'Perfis permitidos: ADMIN, VOLUNTEER. Ficha APROVADO com PDF gerado. Envia a versão atual ao Autentique, a associação assina na hora (linha Representante legal) e o adotante recebe o link por e-mail. Ficha vai para AGUARDANDO_ASSINATURA e o termo fica somente leitura.',
   })
   sendForSignature(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.sendForSignature(id, req.user.organizationId, req.user.id);
@@ -66,7 +66,7 @@ export class AdoptionContractController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
     summary: 'Atualizar status da assinatura',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Consulta o documento no Autentique: assinado → adoção CONCLUIDA (pet ADOTADO, PDF assinado salvo no bucket privado); recusado → volta para CONTRATO_GERADO.',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Consulta o documento no Autentique: assinado → adoção CONCLUIDA (pet ADOTADO, PDF assinado salvo no bucket privado); recusado → volta para APROVADO.',
   })
   syncSignature(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.syncSignatureByForm(id, req.user.organizationId, req.user.id);
@@ -76,7 +76,7 @@ export class AdoptionContractController {
   @Roles('ADMIN')
   @ApiOperation({
     summary: 'Cancelar envio para assinatura',
-    description: 'Perfis permitidos: ADMIN. Ficha AGUARDANDO_ASSINATURA. Exclui o documento no Autentique e a ficha volta para CONTRATO_GERADO.',
+    description: 'Perfis permitidos: ADMIN. Ficha AGUARDANDO_ASSINATURA. Exclui o documento no Autentique e a ficha volta para APROVADO.',
   })
   cancelSignature(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.cancelSignature(id, req.user.organizationId, req.user.id);

@@ -100,6 +100,10 @@ export class AdoptionContract {
   @Column({ name: 'adopter_signature_position', type: 'jsonb', nullable: true })
   adopterSignaturePosition: SignaturePosition | null;
 
+  // Linha "Representante legal": a associação assina ali automaticamente no envio
+  @Column({ name: 'organization_signature_position', type: 'jsonb', nullable: true })
+  organizationSignaturePosition: SignaturePosition | null;
+
   // Assinatura digital (Autentique): documento enviado = PDF da versão signatureVersion
   @Column({ name: 'autentique_document_id', nullable: true, unique: true })
   autentiqueDocumentId: string;

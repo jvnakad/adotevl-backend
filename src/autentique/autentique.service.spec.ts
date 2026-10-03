@@ -53,7 +53,7 @@ describe('AutentiqueService', () => {
   it('cria o documento via GraphQL multipart com o adotante como signatário', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: { createDocument: rawDocument } }));
 
-    const document = await service.createDocument({ name: 'Termo', pdf: Buffer.from('%PDF'), fileName: 'termo.pdf', signer });
+    const document = await service.createDocument({ name: 'Termo', pdf: Buffer.from('%PDF'), fileName: 'termo.pdf', signers: [signer] });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe(AUTENTIQUE_API_URL);
@@ -82,17 +82,42 @@ describe('AutentiqueService', () => {
   it('carimba a assinatura na posição informada (x/y em % e página)', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: { createDocument: rawDocument } }));
 
-    await service.createDocument({ name: 'Termo', pdf: Buffer.from('%PDF'), fileName: 'termo.pdf', signer: { ...signer, position: { page: 4, x: 62.99, y: 30.81 } } });
+    await service.createDocument({
+      name: 'Termo',
+      pdf: Buffer.from('%PDF'),
+      fileName: 'termo.pdf',
+      signers: [{ name: 'ONG', email: 'ong@teste.com', position: { page: 4, x: 20.55, y: 30.81 } }, { ...signer, position: { page: 4, x: 62.99, y: 30.81 } }],
+    });
 
     const operations = JSON.parse((fetchMock.mock.calls[0][1].body as FormData).get('operations') as string);
-    expect(operations.variables.signers[0].positions).toEqual([{ x: '62.99', y: '30.81', z: 4, element: 'SIGNATURE' }]);
+    expect(operations.variables.signers).toEqual([
+      { name: 'ONG', email: 'ong@teste.com', action: 'SIGN', positions: [{ x: '20.55', y: '30.81', z: 4, element: 'SIGNATURE' }] },
+      { name: 'Maria', email: 'maria@teste.com', action: 'SIGN', positions: [{ x: '62.99', y: '30.81', z: 4, element: 'SIGNATURE' }] },
+    ]);
+  });
+
+  it('busca a conta dona do token uma vez só', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: { me: { name: 'Júlia', email: 'ONG@Teste.com' } } }));
+
+    expect(await service.getAccount()).toEqual({ name: 'Júlia', email: 'ong@teste.com' });
+    await service.getAccount();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('assina como a conta do token e falha se o Autentique não confirmar', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { signDocument: true } }));
+    await expect(service.signDocument('doc-1')).resolves.toBeUndefined();
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).variables).toEqual({ id: 'doc-1' });
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({ data: { signDocument: false } }));
+    await expect(service.signDocument('doc-1')).rejects.toThrow(BadGatewayException);
   });
 
   it('AUTENTIQUE_SANDBOX diferente de true cria documento real', async () => {
     process.env.AUTENTIQUE_SANDBOX = 'false';
     fetchMock.mockResolvedValue(jsonResponse({ data: { createDocument: rawDocument } }));
 
-    await service.createDocument({ name: 'Termo', pdf: Buffer.from('%PDF'), fileName: 'termo.pdf', signer });
+    await service.createDocument({ name: 'Termo', pdf: Buffer.from('%PDF'), fileName: 'termo.pdf', signers: [signer] });
 
     const operations = JSON.parse((fetchMock.mock.calls[0][1].body as FormData).get('operations') as string);
     expect(operations.variables.sandbox).toBe(false);
@@ -102,11 +127,17 @@ describe('AutentiqueService', () => {
     process.env.AUTENTIQUE_FOLDER_ID = ' pasta-termos ';
     fetchMock.mockResolvedValue(jsonResponse({ data: { createDocument: rawDocument } }));
 
-    await service.createDocument({ name: 'Termo', pdf: Buffer.from('%PDF'), fileName: 'termo.pdf', signer });
+    await service.createDocument({ name: 'Termo', pdf: Buffer.from('%PDF'), fileName: 'termo.pdf', signers: [signer] });
 
     const operations = JSON.parse((fetchMock.mock.calls[0][1].body as FormData).get('operations') as string);
     expect(operations.query).toContain('folder_id: $folderId');
     expect(operations.variables.folderId).toBe('pasta-termos');
+  });
+
+  it('documento na lixeira conta como inexistente', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: { document: { ...rawDocument, deleted_at: '2026-10-03 01:00:00' } } }));
+
+    await expect(service.getDocument('doc-1')).resolves.toBeNull();
   });
 
   it('documento inexistente devolve null', async () => {

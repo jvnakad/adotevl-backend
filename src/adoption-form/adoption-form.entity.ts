@@ -18,6 +18,7 @@ export enum AdoptionFormStatus {
   EM_ANALISE = 'EM_ANALISE',
   APROVADO = 'APROVADO',
   REPROVADO = 'REPROVADO',
+  // Legado: o termo é gerado com a ficha em APROVADO (fichas migradas para APROVADO); continua por causa do histórico
   CONTRATO_GERADO = 'CONTRATO_GERADO',
   AGUARDANDO_ASSINATURA = 'AGUARDANDO_ASSINATURA',
   CONCLUIDA = 'CONCLUIDA',
@@ -27,7 +28,6 @@ export enum AdoptionFormStatus {
 export const ADOPTION_FORM_STATUS_ORDER: AdoptionFormStatus[] = [
   AdoptionFormStatus.PENDENTE,
   AdoptionFormStatus.APROVADO,
-  AdoptionFormStatus.CONTRATO_GERADO,
   AdoptionFormStatus.AGUARDANDO_ASSINATURA,
   AdoptionFormStatus.CONCLUIDA,
   AdoptionFormStatus.REPROVADO,

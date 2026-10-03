@@ -29,7 +29,7 @@ const flatText = (node: any) => collectText(node).replace(/\s+/g, ' ');
 
 describe('contract-pdf.builder', () => {
   it('gera um Buffer de PDF e a posição da assinatura do adotante na última página', async () => {
-    const { buffer, adopterSignature } = await buildContractPdf({ data: data(), clauses: clauses() });
+    const { buffer, adopterSignature, organizationSignature } = await buildContractPdf({ data: data(), clauses: clauses() });
 
     expect(Buffer.isBuffer(buffer)).toBe(true);
     expect(buffer.subarray(0, 4).toString()).toBe('%PDF');
@@ -38,11 +38,16 @@ describe('contract-pdf.builder', () => {
     expect(adopterSignature.x).toBe(62.99);
     expect(adopterSignature.y).toBeGreaterThan(0);
     expect(adopterSignature.y).toBeLessThan(100);
+    // Representante legal na coluna esquerda, mesma linha
+    expect(organizationSignature).toEqual({ page: adopterSignature.page, x: expect.any(Number), y: adopterSignature.y });
+    expect(organizationSignature.x).toBeLessThan(adopterSignature.x);
   }, 30000);
 
   it('converte a linha do ADOTANTE no ponto do carimbo do Autentique (centralizado, logo acima da linha)', () => {
     // Coluna direita: 60 + 222,64 + 30 + 111,32 → centro em 423,96 pt; carimbo de 98 x 28 pt
     expect(toAutentiquePosition(4, 287.39)).toEqual({ page: 4, x: 62.99, y: 30.81 });
+    // Coluna esquerda (Representante legal): 60 + 111,32 → centro em 171,32 pt
+    expect(toAutentiquePosition(4, 287.39, 'left')).toEqual({ page: 4, x: 20.55, y: 30.81 });
     // Linha no topo da página não gera y negativo
     expect(toAutentiquePosition(2, 10).y).toBe(0);
   });

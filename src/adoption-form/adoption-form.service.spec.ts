@@ -417,9 +417,9 @@ describe('AdoptionFormService', () => {
     });
 
     it('mesmo status só atualiza as observações e registra FICHA_EDITADA', async () => {
-      formRepo.findOne.mockResolvedValue({ id: 'form-1', organizationId: 'org-1', fullName: 'Maria', status: 'CONTRATO_GERADO', petId: 'pet-1', reviewNotes: 'Antiga', fotos: [] });
+      formRepo.findOne.mockResolvedValue({ id: 'form-1', organizationId: 'org-1', fullName: 'Maria', status: 'AGUARDANDO_ASSINATURA', petId: 'pet-1', reviewNotes: 'Antiga', fotos: [] });
 
-      await service.updateStatus('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO, reviewNotes: 'Nova' }, 'org-1', 'user-1', 'VOLUNTEER');
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA, reviewNotes: 'Nova' }, 'org-1', 'user-1', 'VOLUNTEER');
 
       expect(formRepo.update).toHaveBeenCalledWith('form-1', { reviewNotes: 'Nova', updatedBy: 'user-1' });
       expect(txFormRepo.update).not.toHaveBeenCalled();
@@ -441,16 +441,16 @@ describe('AdoptionFormService', () => {
       expect(history.record).not.toHaveBeenCalled();
     });
 
-    it('não permite mover manualmente para CONTRATO_GERADO', async () => {
+    it('CONTRATO_GERADO (legado) não é mais destino', async () => {
       formWith(AdoptionFormStatus.APROVADO);
 
       await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
-        'Gere o termo de adoção para mover a ficha para Termo gerado.',
+        'Movimentação de status não permitida.',
       );
       expect(txFormRepo.update).not.toHaveBeenCalled();
     });
 
-    it.each([AdoptionFormStatus.APROVADO, AdoptionFormStatus.CONTRATO_GERADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA])('não conclui manualmente a partir de %s', async (from) => {
+    it.each([AdoptionFormStatus.APROVADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA])('não conclui manualmente a partir de %s', async (from) => {
       formWith(from);
 
       await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONCLUIDA }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
@@ -460,7 +460,7 @@ describe('AdoptionFormService', () => {
     });
 
     it('não permite mover manualmente para AGUARDANDO_ASSINATURA', async () => {
-      formWith(AdoptionFormStatus.CONTRATO_GERADO);
+      formWith(AdoptionFormStatus.APROVADO);
 
       await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
         'Envie o termo de adoção para assinatura pela aba Termo de Adoção.',
@@ -493,13 +493,13 @@ describe('AdoptionFormService', () => {
       expect(txFormRepo.update).toHaveBeenCalledWith('form-1', expect.objectContaining({ status: AdoptionFormStatus.APROVADO }));
     });
 
-    it.each([AdoptionFormStatus.CONTRATO_GERADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('de %s só volta para APROVADO', async (from) => {
+    it.each([AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('de %s só volta para APROVADO', async (from) => {
       formWith(from);
 
       await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.PENDENTE }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(BadRequestException);
     });
 
-    it.each([AdoptionFormStatus.CONTRATO_GERADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('voltar de %s para APROVADO é só para ADMIN', async (from) => {
+    it.each([AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('voltar de %s para APROVADO é só para ADMIN', async (from) => {
       formWith(from, 'pet-1');
 
       await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'VOLUNTEER')).rejects.toThrow(ForbiddenException);
@@ -531,7 +531,7 @@ describe('AdoptionFormService', () => {
   });
 
   describe('board', () => {
-    it('devolve as 6 colunas na ordem do kanban, com no máximo 50 itens por coluna', async () => {
+    it('devolve as 5 colunas na ordem do kanban, com no máximo 50 itens por coluna', async () => {
       formRepo.findAndCount.mockImplementation(async ({ where }) =>
         where.status === 'APROVADO'
           ? [[{ id: 'f1', fullName: 'Maria', status: 'APROVADO', petId: 'pet-1', pet: { name: 'Rex' }, cpf: '1', reviewNotes: 'x' }], 1]
@@ -540,7 +540,7 @@ describe('AdoptionFormService', () => {
 
       const { columns } = await service.board('org-1');
 
-      expect(columns.map((column) => column.status)).toEqual(['PENDENTE', 'APROVADO', 'CONTRATO_GERADO', 'AGUARDANDO_ASSINATURA', 'CONCLUIDA', 'REPROVADO']);
+      expect(columns.map((column) => column.status)).toEqual(['PENDENTE', 'APROVADO', 'AGUARDANDO_ASSINATURA', 'CONCLUIDA', 'REPROVADO']);
       expect(formRepo.findAndCount).toHaveBeenCalledWith(
         expect.objectContaining({ where: { organizationId: 'org-1', isActive: true, status: 'PENDENTE' }, order: { updatedAt: 'DESC' }, take: 50 }),
       );

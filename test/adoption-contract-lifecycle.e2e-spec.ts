@@ -181,10 +181,10 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     expect(initialHistory.status).toBe(200);
     expect(initialHistory.body).toEqual([expect.objectContaining({ type: 'FICHA_CRIADA', userName: 'Formulário público', adopterName: 'Carla Contrato' })]);
 
-    // 2. Kanban com as 6 colunas
+    // 2. Kanban com as 5 colunas
     const board = await auth(api().get('/adoption-forms/board?search=carla'));
     expect(board.status).toBe(200);
-    expect(board.body.columns.map((c) => c.status)).toEqual(['PENDENTE', 'APROVADO', 'CONTRATO_GERADO', 'AGUARDANDO_ASSINATURA', 'CONCLUIDA', 'REPROVADO']);
+    expect(board.body.columns.map((c) => c.status)).toEqual(['PENDENTE', 'APROVADO', 'AGUARDANDO_ASSINATURA', 'CONCLUIDA', 'REPROVADO']);
     expect(board.body.columns[0].items.map((i) => i.id)).toEqual([formId]);
     expect(board.body.columns[0].items[0]).toEqual(expect.objectContaining({ petId: null, petName: null }));
 
@@ -192,7 +192,7 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     expect((await auth(api().get(`/adoption-forms/${formId}/contract`))).status).toBe(400);
     const manualContract = await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'CONTRATO_GERADO' });
     expect(manualContract.status).toBe(400);
-    expect(manualContract.body.message).toBe('Gere o termo de adoção para mover a ficha para Termo gerado.');
+    expect(manualContract.body.message).toBe('Movimentação de status não permitida.');
     expect((await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'CONCLUIDA' })).status).toBe(400);
     // Mesmo status: só atualiza as observações
     const sameStatus = await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'PENDENTE', reviewNotes: 'Aguardando entrevista' });
@@ -260,7 +260,7 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     const multa = reset.body.clauses.find((c) => c.key === 'multa');
     expect(multa.content).toBe(multa.originalContent);
 
-    // 11. Gera o PDF: versão 1, ficha em CONTRATO_GERADO
+    // 11. Gera o PDF: versão 1, ficha continua em APROVADO
     const generated = await auth(api().post(`/adoption-forms/${formId}/contract/generate`));
     expect(generated.status).toBe(201);
     expect(generated.body.version).toBe(1);
@@ -269,12 +269,8 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     expect(generated.body.generatedAt).toBeDefined();
 
     const afterGenerate = await auth(api().get(`/adoption-forms/${formId}`));
-    expect(afterGenerate.body.status).toBe('CONTRATO_GERADO');
+    expect(afterGenerate.body.status).toBe('APROVADO');
     expect(afterGenerate.body.pet).toEqual(expect.objectContaining({ id: rex.id, name: 'Rex' }));
-
-    // 12. Voluntário não reabre ficha com contrato
-    const volunteerReopen = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'APROVADO' });
-    expect(volunteerReopen.status).toBe(403);
 
     // 12a. Concluir nunca é manual: só a assinatura conclui
     const notSigned = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'CONCLUIDA' });
@@ -292,14 +288,19 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     expect(lockedEdit.body.message).toBe('O termo de adoção já foi enviado para assinatura e não pode mais ser alterado.');
     expect((await auth(api().post(`/adoption-forms/${formId}/contract/signature`))).status).toBe(400);
     const firstDocumentId = [...autentique.documents.keys()].pop();
+    // A associação já assinou no envio; falta só o adotante
+    expect(autentique.documents.get(firstDocumentId).organizationSigned).toBe(true);
+    // Voluntário não tira a ficha de Aguardando assinatura
+    const volunteerReopen = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'APROVADO' });
+    expect(volunteerReopen.status).toBe(403);
 
-    // 12c. Cancelar envio: só ADMIN; ficha volta para Contrato gerado e o documento some do Autentique
+    // 12c. Cancelar envio: só ADMIN; ficha volta para Aprovado e o documento some do Autentique
     expect((await auth(api().delete(`/adoption-forms/${formId}/contract/signature`), volunteerToken)).status).toBe(403);
     const cancelled = await auth(api().delete(`/adoption-forms/${formId}/contract/signature`));
     expect(cancelled.status).toBe(200);
     expect(cancelled.body.signature.status).toBe('CANCELADO');
     expect(autentique.documents.has(firstDocumentId)).toBe(false);
-    expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('CONTRATO_GERADO');
+    expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('APROVADO');
 
     // 12d. Reenvia; sincronizar antes de assinar não muda nada
     expect((await auth(api().post(`/adoption-forms/${formId}/contract/signature`))).status).toBe(201);
@@ -309,7 +310,7 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     expect(pending.body.signature.status).toBe('PENDENTE');
 
     // 12e. Webhook: HMAC inválido é recusado; válido marca o termo como assinado e conclui a adoção
-    autentique.signDocument(documentId);
+    autentique.adopterSigns(documentId);
     const webhookBody = JSON.stringify({ id: 'wh-1', object: 'webhook', event: { id: 'ev-1', type: 'signature.accepted', data: { document: documentId } } });
     const webhook = (signature: string) =>
       api().post('/webhooks/autentique').set('Content-Type', 'application/json').set('X-Autentique-Signature', signature).send(webhookBody);

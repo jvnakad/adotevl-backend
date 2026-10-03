@@ -75,15 +75,24 @@ export class MockStorageService {
 })
 class MockStorageModule {}
 
-// Autentique falso: documentos ficam em memória; o teste marca a assinatura com signDocument/rejectDocument
+// Autentique falso: documentos ficam em memória; o teste simula o adotante com adopterSigns/adopterRejects
 export class MockAutentiqueService {
-  documents = new Map<string, { email: string; name: string; signedAt: string | null; rejectedAt: string | null }>();
+  documents = new Map<string, { email: string; name: string; signedAt: string | null; rejectedAt: string | null; organizationSigned: boolean }>();
+  account = { name: 'Associação Teste', email: 'associacao@autentique.test' };
   private sequence = 0;
 
-  async createDocument({ signer }: { signer: { name: string; email: string } }) {
+  async getAccount() {
+    return this.account;
+  }
+  // O adotante é o signatário que não é a conta da associação
+  async createDocument({ signers }: { signers: { name: string; email: string }[] }) {
     const id = `doc-${++this.sequence}`;
-    this.documents.set(id, { email: signer.email, name: signer.name, signedAt: null, rejectedAt: null });
+    const adopter = signers.find((signer) => signer.email !== this.account.email);
+    this.documents.set(id, { email: adopter.email, name: adopter.name, signedAt: null, rejectedAt: null, organizationSigned: false });
     return this.toDocument(id);
+  }
+  async signDocument(id: string) {
+    this.documents.get(id).organizationSigned = true;
   }
   async getDocument(id: string) {
     return this.documents.has(id) ? this.toDocument(id) : null;
@@ -94,10 +103,10 @@ export class MockAutentiqueService {
   async downloadFile() {
     return Buffer.from('%PDF-signed');
   }
-  signDocument(id: string) {
+  adopterSigns(id: string) {
     this.documents.get(id).signedAt = new Date().toISOString();
   }
-  rejectDocument(id: string) {
+  adopterRejects(id: string) {
     this.documents.get(id).rejectedAt = new Date().toISOString();
   }
   private toDocument(id: string) {

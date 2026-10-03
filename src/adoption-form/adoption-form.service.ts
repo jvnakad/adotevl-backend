@@ -28,15 +28,11 @@ const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 // Status "livres" do kanban: qualquer um pode ir para qualquer outro
 const REVIEW_STATUSES = [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.APROVADO, AdoptionFormStatus.REPROVADO];
 // Status com contrato: só voltam para APROVADO (ADMIN)
-const CONTRACT_STATUSES = [
-  AdoptionFormStatus.CONTRATO_GERADO,
-  AdoptionFormStatus.AGUARDANDO_ASSINATURA,
-  AdoptionFormStatus.CONCLUIDA,
-];
+const CONTRACT_STATUSES = [AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA];
 // Só mudam pelo fluxo de assinatura: envio ao Autentique e assinatura (que conclui a adoção)
 const SIGNATURE_STATUSES = [AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA];
 // Saindo destes status para PENDENTE/REPROVADO o pet vinculado volta a ficar disponível
-const PET_RESERVED_STATUSES = [AdoptionFormStatus.APROVADO, AdoptionFormStatus.CONTRATO_GERADO];
+const PET_RESERVED_STATUSES = [AdoptionFormStatus.APROVADO];
 const PET_RELEASE_TARGETS = [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.REPROVADO];
 
 // "YYYY-MM-DD" -> Date à meia-noite local: o TypeORM grava colunas "date" com o dia local,
@@ -91,10 +87,16 @@ export class AdoptionFormService implements OnModuleInit {
     private readonly autentiqueService: AutentiqueService,
   ) {}
 
-  // "Em análise" saiu do fluxo: fichas que ainda estavam nele voltam para Pendente
+  // Status que saíram do fluxo: "Em análise" volta para Pendente e "Termo gerado" para Aprovado
   async onModuleInit() {
-    const { affected } = await this.formRepository.update({ status: AdoptionFormStatus.EM_ANALISE }, { status: AdoptionFormStatus.PENDENTE });
-    if (affected) this.logger.log(`${affected} ficha(s) em análise movida(s) para Pendente.`);
+    const legacy = [
+      { from: AdoptionFormStatus.EM_ANALISE, to: AdoptionFormStatus.PENDENTE },
+      { from: AdoptionFormStatus.CONTRATO_GERADO, to: AdoptionFormStatus.APROVADO },
+    ];
+    for (const { from, to } of legacy) {
+      const { affected } = await this.formRepository.update({ status: from }, { status: to });
+      if (affected) this.logger.log(`${affected} ficha(s) em ${statusLabel(from)} movida(s) para ${statusLabel(to)}.`);
+    }
   }
 
   // Rota pública: não devolve os dados pessoais enviados, só a confirmação
@@ -355,11 +357,8 @@ export class AdoptionFormService implements OnModuleInit {
     return contract.autentiqueDocumentId;
   }
 
-  // Regras de movimentação manual (PATCH :id/status); CONTRATO_GERADO só pela geração do contrato
+  // Regras de movimentação manual (PATCH :id/status); assinatura e conclusão só pelo fluxo do Autentique
   private validateTransition(from: AdoptionFormStatus, to: AdoptionFormStatus, profileName: string) {
-    if (to === AdoptionFormStatus.CONTRATO_GERADO) {
-      throw new BadRequestException('Gere o termo de adoção para mover a ficha para Termo gerado.');
-    }
     if (to === AdoptionFormStatus.CONCLUIDA) {
       throw new BadRequestException('A adoção é concluída automaticamente quando o adotante assina o termo de adoção.');
     }

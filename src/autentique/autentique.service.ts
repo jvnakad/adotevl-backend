@@ -14,7 +14,13 @@ export interface CreateAutentiqueDocumentParams {
   name: string;
   pdf: Buffer;
   fileName: string;
-  signer: AutentiqueSigner;
+  signers: AutentiqueSigner[];
+}
+
+// Conta dona do token (quem assina pela associação)
+export interface AutentiqueAccount {
+  name: string;
+  email: string;
 }
 
 export interface AutentiqueSignature {
@@ -61,9 +67,22 @@ const GET_DOCUMENT = `
     document(id: $id) {
       id
       name
+      deleted_at
       files { signed }
       signatures { ${SIGNATURE_FIELDS} }
     }
+  }
+`;
+
+const SIGN_DOCUMENT = `
+  mutation SignDocument($id: UUID!) {
+    signDocument(id: $id)
+  }
+`;
+
+const ME = `
+  query Me {
+    me { name email }
   }
 `;
 
@@ -94,6 +113,7 @@ const toDocument = (raw: any): AutentiqueDocument => ({
 @Injectable()
 export class AutentiqueService {
   private readonly logger = new Logger(AutentiqueService.name);
+  private account: AutentiqueAccount | null = null;
 
   private get token() {
     const token = process.env.AUTENTIQUE_TOKEN;
@@ -111,7 +131,7 @@ export class AutentiqueService {
     return process.env.AUTENTIQUE_FOLDER_ID?.trim() || null;
   }
 
-  async createDocument({ name, pdf, fileName, signer }: CreateAutentiqueDocumentParams): Promise<AutentiqueDocument> {
+  async createDocument({ name, pdf, fileName, signers }: CreateAutentiqueDocumentParams): Promise<AutentiqueDocument> {
     // Upload no padrão GraphQL multipart request: operations + map + arquivo
     const body = new FormData();
     body.append(
@@ -120,16 +140,14 @@ export class AutentiqueService {
         query: CREATE_DOCUMENT,
         variables: {
           document: { name },
-          signers: [
-            {
-              name: signer.name,
-              email: signer.email,
-              action: 'SIGN',
-              ...(signer.position && {
-                positions: [{ x: String(signer.position.x), y: String(signer.position.y), z: signer.position.page, element: 'SIGNATURE' }],
-              }),
-            },
-          ],
+          signers: signers.map((signer) => ({
+            name: signer.name,
+            email: signer.email,
+            action: 'SIGN',
+            ...(signer.position && {
+              positions: [{ x: String(signer.position.x), y: String(signer.position.y), z: signer.position.page, element: 'SIGNATURE' }],
+            }),
+          })),
           file: null,
           sandbox: this.sandbox,
           folderId: this.folderId,
@@ -143,10 +161,26 @@ export class AutentiqueService {
     return toDocument(data.createDocument);
   }
 
-  // null quando o documento não existe mais no Autentique (excluído no painel ou sandbox expirado)
+  // null quando o documento não existe mais no Autentique (excluído no painel/lixeira ou sandbox expirado)
   async getDocument(id: string): Promise<AutentiqueDocument | null> {
     const data = await this.request(JSON.stringify({ query: GET_DOCUMENT, variables: { id } }), ['document_not_found']);
-    return data.document ? toDocument(data.document) : null;
+    // A consulta por id ainda devolve documentos da lixeira
+    return data.document && !data.document.deleted_at ? toDocument(data.document) : null;
+  }
+
+  // Conta dona do token; buscada uma vez (é a mesma enquanto o token não muda)
+  async getAccount(): Promise<AutentiqueAccount> {
+    if (!this.account) {
+      const data = await this.request(JSON.stringify({ query: ME }));
+      this.account = { name: data.me?.name, email: data.me?.email?.toLowerCase() };
+    }
+    return this.account;
+  }
+
+  // Assina o documento como a conta dona do token (precisa estar entre os signatários)
+  async signDocument(id: string) {
+    const data = await this.request(JSON.stringify({ query: SIGN_DOCUMENT, variables: { id } }));
+    if (!data.signDocument) throw new BadGatewayException('Autentique: não foi possível assinar o documento pela associação.');
   }
 
   // Documento que já não existe (excluído no painel, sandbox expirado) conta como excluído

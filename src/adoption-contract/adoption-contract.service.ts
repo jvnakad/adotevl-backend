@@ -27,6 +27,9 @@ const LINKABLE_PET_STATUSES = [PetStatus.DISPONIVEL, PetStatus.EM_PROCESSO];
 
 type HistoryDraft = Omit<RecordHistoryParams, 'form' | 'userId' | 'userName'>;
 
+// "YYYY-MM-DD" no fuso de Brasília (o servidor roda em UTC)
+const todayInBrazil = (now = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(now);
+
 const clauseName = (key: string, number: number | undefined) => {
   const title = CONTRACT_TEMPLATE_BY_KEY[key]?.title ?? key;
   return number ? `Cláusula ${toTitleCase(toOrdinalPt(number))} (${title})` : `Cláusula ${title}`;
@@ -159,7 +162,9 @@ export class AdoptionContractService {
     const firstPhoto = [...(pet?.fotos ?? [])].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
     const petPhoto = firstPhoto?.url ? await loadImageAsDataUrl(firstPhoto.url) : null;
     const { clauses } = numberClauses(contract.clauses);
-    const buffer = await buildContractPdf({ data: contract.data, clauses, petPhoto });
+    // Sem data escolhida, o termo sai com a data da geração
+    const data = contract.data.signature?.date ? contract.data : { ...contract.data, signature: { ...contract.data.signature, date: todayInBrazil() } };
+    const { buffer, adopterSignature } = await buildContractPdf({ data, clauses, petPhoto });
 
     const version = (contract.version ?? 0) + 1;
     const storagePath = `contracts/${form.id}/v${version}.pdf`;
@@ -180,7 +185,13 @@ export class AdoptionContractService {
           },
         ],
         async (manager) => {
-          await manager.getRepository(AdoptionContract).update(contract.id, { version, pdfStoragePath: storagePath, generatedAt: new Date(), updatedBy: userId });
+          await manager.getRepository(AdoptionContract).update(contract.id, {
+            version,
+            pdfStoragePath: storagePath,
+            generatedAt: new Date(),
+            adopterSignaturePosition: adopterSignature,
+            updatedBy: userId,
+          });
           if (statusChanged) {
             await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONTRATO_GERADO, updatedBy: userId });
           }
@@ -214,7 +225,7 @@ export class AdoptionContractService {
       name: `Termo de Adoção - ${name} - v${contract.version}`,
       pdf,
       fileName: `termo-de-adocao-v${contract.version}.pdf`,
-      signer: { name, email },
+      signer: { name, email, position: contract.adopterSignaturePosition ?? null },
     });
     // A lista também traz o dono da conta Autentique: o adotante é achado pelo e-mail
     const signature = document.signatures.find((item) => item.email === email);

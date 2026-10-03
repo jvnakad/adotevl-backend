@@ -6,6 +6,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
 export interface AutentiqueSigner {
   name: string;
   email: string;
+  // Onde carimbar a assinatura: página (1...) e x/y em % da página (canto superior esquerdo do carimbo)
+  position?: { page: number; x: number; y: number } | null;
 }
 
 export interface CreateAutentiqueDocumentParams {
@@ -118,7 +120,16 @@ export class AutentiqueService {
         query: CREATE_DOCUMENT,
         variables: {
           document: { name },
-          signers: [{ name: signer.name, email: signer.email, action: 'SIGN' }],
+          signers: [
+            {
+              name: signer.name,
+              email: signer.email,
+              action: 'SIGN',
+              ...(signer.position && {
+                positions: [{ x: String(signer.position.x), y: String(signer.position.y), z: signer.position.page, element: 'SIGNATURE' }],
+              }),
+            },
+          ],
           file: null,
           sandbox: this.sandbox,
           folderId: this.folderId,

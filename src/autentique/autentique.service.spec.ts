@@ -79,6 +79,15 @@ describe('AutentiqueService', () => {
     });
   });
 
+  it('carimba a assinatura na posição informada (x/y em % e página)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ data: { createDocument: rawDocument } }));
+
+    await service.createDocument({ name: 'Termo', pdf: Buffer.from('%PDF'), fileName: 'termo.pdf', signer: { ...signer, position: { page: 4, x: 62.99, y: 30.81 } } });
+
+    const operations = JSON.parse((fetchMock.mock.calls[0][1].body as FormData).get('operations') as string);
+    expect(operations.variables.signers[0].positions).toEqual([{ x: '62.99', y: '30.81', z: 4, element: 'SIGNATURE' }]);
+  });
+
   it('AUTENTIQUE_SANDBOX diferente de true cria documento real', async () => {
     process.env.AUTENTIQUE_SANDBOX = 'false';
     fetchMock.mockResolvedValue(jsonResponse({ data: { createDocument: rawDocument } }));

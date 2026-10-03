@@ -23,6 +23,29 @@ pdfmake.setFonts({
 pdfmake.setLocalAccessPolicy((path: string) => STANDARD_FONTS.includes(path));
 pdfmake.setUrlAccessPolicy(() => false);
 
+// Página A4 e margens do termo (também usadas para posicionar a assinatura do Autentique)
+const PAGE_WIDTH = 595.28;
+const PAGE_HEIGHT = 841.89;
+const PAGE_MARGINS: [number, number, number, number] = [60, 90, 60, 60];
+const SIGNATURE_COLUMN_GAP = 30;
+const ADOPTER_SIGNATURE_LINE_ID = 'adopter-signature-line';
+// Carimbo de assinatura do Autentique em escala 1 (medido): ponto (x, y) = canto superior esquerdo,
+// rubrica em cima e "Assinado eletronicamente" embaixo, ~98 x 28 pt
+const AUTENTIQUE_STAMP_WIDTH = 98;
+const AUTENTIQUE_STAMP_HEIGHT = 28;
+
+// Onde o Autentique deve carimbar a assinatura do adotante: página (1...) e x/y em % da página
+export interface SignaturePosition {
+  page: number;
+  x: number;
+  y: number;
+}
+
+export interface ContractPdfResult {
+  buffer: Buffer;
+  adopterSignature: SignaturePosition | null;
+}
+
 export interface ContractPdfInput {
   data: ContractData;
   clauses: NumberedClause[];
@@ -152,9 +175,9 @@ export function buildContractDocDefinition({ data, clauses, petPhoto }: Contract
     return clause.key === 'animal' ? [...parts, ...animalBlock(data, petPhoto)] : parts;
   });
 
-  const signature = (title: string, subtitle: string): Content => ({
+  const signature = (title: string, subtitle: string, lineId?: string): Content => ({
     stack: [
-      { text: '____________________________________', margin: [0, 0, 0, 4] },
+      { text: '____________________________________', margin: [0, 0, 0, 4], ...(lineId && { id: lineId }) },
       { text: title, bold: true },
       { text: subtitle },
     ],
@@ -163,7 +186,7 @@ export function buildContractDocDefinition({ data, clauses, petPhoto }: Contract
 
   return {
     pageSize: 'A4',
-    pageMargins: [60, 90, 60, 60],
+    pageMargins: PAGE_MARGINS,
     info: { title: 'Termo de Adoção Responsável', author: org.name },
     defaultStyle: { font: 'Helvetica', fontSize: 11, alignment: 'justify', lineHeight: 1.15 },
     header: { image: CONTRACT_LOGO_DATA_URL, width: 88, alignment: 'center', margin: [0, 24, 0, 0] },
@@ -216,7 +239,6 @@ export function buildContractDocDefinition({ data, clauses, petPhoto }: Contract
       {
         stack: [
           { text: longDate ? `${city}, ${longDate}.` : `${city}, ________ de _________________ de ____________` },
-          ...(longDate ? [] : [{ text: '(local e data da assinatura).', fontSize: 9, italics: true }]),
         ],
         alignment: 'left',
         margin: [0, 18, 0, 50],
@@ -225,15 +247,40 @@ export function buildContractDocDefinition({ data, clauses, petPhoto }: Contract
       {
         columns: [
           signature(org.signatureName, 'Representante legal'),
-          signature('ADOTANTE', adopterName || ' '),
+          signature('ADOTANTE', adopterName || ' ', ADOPTER_SIGNATURE_LINE_ID),
         ],
-        columnGap: 30,
+        columnGap: SIGNATURE_COLUMN_GAP,
         unbreakable: true,
       },
     ],
   };
 }
 
-export async function buildContractPdf(input: ContractPdfInput): Promise<Buffer> {
-  return pdfmake.createPdf(buildContractDocDefinition(input)).getBuffer();
+// Converte a posição da linha "ADOTANTE" (pt) no ponto do carimbo do Autentique: centralizado na coluna, logo acima da linha
+export function toAutentiquePosition(page: number, lineTop: number): SignaturePosition {
+  const contentWidth = PAGE_WIDTH - PAGE_MARGINS[0] - PAGE_MARGINS[2];
+  const columnWidth = (contentWidth - SIGNATURE_COLUMN_GAP) / 2;
+  const columnCenter = PAGE_MARGINS[0] + columnWidth + SIGNATURE_COLUMN_GAP + columnWidth / 2;
+  const round = (value: number) => Math.round(value * 100) / 100;
+  return {
+    page,
+    x: round(((columnCenter - AUTENTIQUE_STAMP_WIDTH / 2) / PAGE_WIDTH) * 100),
+    y: round((Math.max(lineTop - AUTENTIQUE_STAMP_HEIGHT, 0) / PAGE_HEIGHT) * 100),
+  };
+}
+
+export async function buildContractPdf(input: ContractPdfInput): Promise<ContractPdfResult> {
+  let adopterSignature: SignaturePosition | null = null;
+  const definition: TDocumentDefinitions = {
+    ...buildContractDocDefinition(input),
+    // Só para ler onde a linha do adotante caiu (página e altura); nunca força quebra
+    pageBreakBefore: (node: any) => {
+      if (node.id === ADOPTER_SIGNATURE_LINE_ID && node.startPosition) {
+        adopterSignature = toAutentiquePosition(node.startPosition.pageNumber, node.startPosition.top);
+      }
+      return false;
+    },
+  };
+  const buffer: Buffer = await pdfmake.createPdf(definition).getBuffer();
+  return { buffer, adopterSignature };
 }

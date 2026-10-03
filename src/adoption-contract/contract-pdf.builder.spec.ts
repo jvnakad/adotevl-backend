@@ -1,4 +1,4 @@
-import { buildContractDocDefinition, buildContractPdf, formatLongDatePt, loadImageAsDataUrl } from './contract-pdf.builder';
+import { buildContractDocDefinition, buildContractPdf, formatLongDatePt, loadImageAsDataUrl, toAutentiquePosition } from './contract-pdf.builder';
 import { numberClauses } from './contract-numbering';
 import { CONTRACT_TEMPLATE } from './contract-template';
 import { emptyContractData } from './contract-data';
@@ -28,12 +28,24 @@ const collectText = (node: any): string => {
 const flatText = (node: any) => collectText(node).replace(/\s+/g, ' ');
 
 describe('contract-pdf.builder', () => {
-  it('gera um Buffer de PDF', async () => {
-    const buffer = await buildContractPdf({ data: data(), clauses: clauses() });
+  it('gera um Buffer de PDF e a posição da assinatura do adotante na última página', async () => {
+    const { buffer, adopterSignature } = await buildContractPdf({ data: data(), clauses: clauses() });
 
     expect(Buffer.isBuffer(buffer)).toBe(true);
     expect(buffer.subarray(0, 4).toString()).toBe('%PDF');
+    const pages = (buffer.toString('latin1').match(/\/Type\s*\/Page[^s]/g) ?? []).length;
+    expect(adopterSignature.page).toBe(pages);
+    expect(adopterSignature.x).toBe(62.99);
+    expect(adopterSignature.y).toBeGreaterThan(0);
+    expect(adopterSignature.y).toBeLessThan(100);
   }, 30000);
+
+  it('converte a linha do ADOTANTE no ponto do carimbo do Autentique (centralizado, logo acima da linha)', () => {
+    // Coluna direita: 60 + 222,64 + 30 + 111,32 → centro em 423,96 pt; carimbo de 98 x 28 pt
+    expect(toAutentiquePosition(4, 287.39)).toEqual({ page: 4, x: 62.99, y: 30.81 });
+    // Linha no topo da página não gera y negativo
+    expect(toAutentiquePosition(2, 10).y).toBe(0);
+  });
 
   it('monta cabeçalhos numerados, dados do animal e campos vazios com linha', () => {
     const definition = buildContractDocDefinition({ data: data(), clauses: clauses() });
@@ -128,7 +140,7 @@ describe('contract-pdf.builder', () => {
       const text = flatText(buildContractDocDefinition({ data: fullData(), clauses: clauses() }).content);
 
       expect(text).toContain('Londrina/PR, 02 de outubro de 2026.');
-      expect(text).not.toContain('(local e data da assinatura).');
+      expect(text).not.toContain('________ de');
     });
 
     it('assinatura com o nome do adotante e cidade padrão quando vazia', () => {
@@ -137,7 +149,8 @@ describe('contract-pdf.builder', () => {
       const text = flatText(buildContractDocDefinition({ data: base, clauses: clauses() }).content);
 
       expect(text).toContain('Curitiba/PR, ________ de');
-      expect(text).toContain('(local e data da assinatura).');
+      // A observação "(local e data da assinatura)" do modelo não vai para o PDF
+      expect(text).not.toContain('local e data da assinatura');
       expect(text).toContain('ADOTANTE Maria da Silva');
     });
   });

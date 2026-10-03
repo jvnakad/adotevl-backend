@@ -12,6 +12,7 @@ import { Organization } from '../organization/organization.entity';
 import { AdoptionForm } from '../adoption-form/adoption-form.entity';
 import { Pet } from '../pet/pet.entity';
 import { StoredClause } from './contract-numbering';
+import type { SignaturePosition } from './contract-pdf.builder';
 
 export interface ContractAdopterData {
   name: string;
@@ -94,6 +95,10 @@ export class AdoptionContract {
 
   @Column({ name: 'generated_at', type: 'timestamptz', nullable: true })
   generatedAt: Date;
+
+  // Onde a linha "ADOTANTE" caiu no PDF atual: o Autentique carimba a assinatura ali
+  @Column({ name: 'adopter_signature_position', type: 'jsonb', nullable: true })
+  adopterSignaturePosition: SignaturePosition | null;
 
   // Assinatura digital (Autentique): documento enviado = PDF da versão signatureVersion
   @Column({ name: 'autentique_document_id', nullable: true, unique: true })

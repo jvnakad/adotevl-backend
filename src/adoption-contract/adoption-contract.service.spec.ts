@@ -9,7 +9,7 @@ import { createMockRepository, MockRepository } from '../testing/mock-repository
 import { buildContractPdf, loadImageAsDataUrl } from './contract-pdf.builder';
 
 jest.mock('./contract-pdf.builder', () => ({
-  buildContractPdf: jest.fn(async () => Buffer.from('%PDF-fake')),
+  buildContractPdf: jest.fn(async () => ({ buffer: Buffer.from('%PDF-fake'), adopterSignature: { page: 4, x: 62.99, y: 30.81 } })),
   loadImageAsDataUrl: jest.fn(async () => 'data:image/png;base64,AAAA'),
 }));
 
@@ -432,6 +432,34 @@ describe('AdoptionContractService', () => {
       expect(response).toBeDefined();
     });
 
+    it('sem data escolhida o termo sai com a data da geração (fuso de Brasília)', async () => {
+      jest.useFakeTimers({ now: new Date('2026-10-03T01:30:00Z'), doNotFake: ['nextTick', 'setImmediate'] });
+      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
+      petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', status: PetStatus.EM_PROCESSO, fotos: [] });
+
+      try {
+        await service.generate('form-1', 'org-1', 'user-1');
+      } finally {
+        jest.useRealTimers();
+      }
+
+      // 01:30 UTC ainda é dia 02 em Brasília
+      expect((buildContractPdf as jest.Mock).mock.calls[0][0].data.signature).toEqual({ city: 'Curitiba/PR', date: '2026-10-02' });
+      // A data não é gravada no rascunho: uma nova versão usa a data do dia em que for gerada
+      expect(tx.contract.update.mock.calls[0][1]).not.toHaveProperty('data');
+    });
+
+    it('data escolhida no termo é respeitada', async () => {
+      const data = buildInitialData(baseForm() as any);
+      data.signature.date = '2026-12-25';
+      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1', data }));
+      petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', status: PetStatus.EM_PROCESSO, fotos: [] });
+
+      await service.generate('form-1', 'org-1', 'user-1');
+
+      expect((buildContractPdf as jest.Mock).mock.calls[0][0].data.signature.date).toBe('2026-12-25');
+    });
+
     it('falha ao montar o PDF não grava nada', async () => {
       contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
       petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', status: PetStatus.EM_PROCESSO, fotos: [] });
@@ -477,6 +505,7 @@ describe('AdoptionContractService', () => {
         version: 2,
         pdfStoragePath: 'contracts/form-1/v2.pdf',
         generatedAt: expect.any(Date),
+        adopterSignaturePosition: { page: 4, x: 62.99, y: 30.81 },
         updatedBy: 'user-1',
       });
       expect(tx.form.update).toHaveBeenCalledWith('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO, updatedBy: 'user-1' });
@@ -530,7 +559,9 @@ describe('AdoptionContractService', () => {
   describe('sendForSignature', () => {
     beforeEach(() => {
       formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.CONTRATO_GERADO, 'pet-1'));
-      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1', version: 2, pdfStoragePath: 'contracts/form-1/v2.pdf' }));
+      contractRepo.findOne.mockResolvedValue(
+        storedContract({ petId: 'pet-1', version: 2, pdfStoragePath: 'contracts/form-1/v2.pdf', adopterSignaturePosition: { page: 4, x: 62.99, y: 30.81 } }),
+      );
     });
 
     it.each([AdoptionFormStatus.APROVADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('ficha %s não pode ser enviada', async (status) => {
@@ -548,7 +579,7 @@ describe('AdoptionContractService', () => {
         name: 'Termo de Adoção - Maria da Silva - v2',
         pdf: Buffer.from('%PDF-v1'),
         fileName: 'termo-de-adocao-v2.pdf',
-        signer: { name: 'Maria da Silva', email: 'maria@teste.com' },
+        signer: { name: 'Maria da Silva', email: 'maria@teste.com', position: { page: 4, x: 62.99, y: 30.81 } },
       });
       expect(tx.contract.update).toHaveBeenCalledWith(
         'contract-1',

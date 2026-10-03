@@ -167,7 +167,11 @@ export class CreateAdoptionFormDto {
   @Trim() @choice(YES_NO, 'Período de adaptação')
   awareOfAdaptationPeriod: string;
 
-  @ApiProperty({ description: 'Animal que procura' })
+  @ApiPropertyOptional({ description: 'Pet disponível escolhido no select (sem ele, desiredAnimal descreve o animal procurado)' })
+  @Trim() @IsOptional() @IsUUID('all', { message: 'Animal escolhido inválido.' })
+  desiredPetId?: string;
+
+  @ApiProperty({ description: 'Animal que procura (nome do pet escolhido ou descrição livre)' })
   @Trim() @required('Animal desejado') @IsString() @text('Animal desejado')
   desiredAnimal: string;
 

@@ -144,6 +144,38 @@ describe('AdoptionContractService', () => {
       await expect(service.findByForm('form-1', 'org-2')).rejects.toThrow(NotFoundException);
     });
 
+    it('sem pet vinculado, sugere o pet escolhido no formulário e preenche o animal sem reservar', async () => {
+      formRepo.findOne.mockResolvedValue({ ...baseForm(AdoptionFormStatus.APROVADO), desiredPetId: 'pet-9' });
+      contractRepo.findOne.mockResolvedValue(null);
+      petRepo.findOne.mockResolvedValue({ id: 'pet-9', name: 'Mel', species: 'Cachorro', sex: 'Fêmea', status: PetStatus.DISPONIVEL, age: 2, castration: true, fotos: [] });
+
+      const contract = await service.findByForm('form-1', 'org-1', 'user-1');
+
+      const saved = contractRepo.save.mock.calls[0][0];
+      expect(saved.petId).toBeNull();
+      expect(saved.data.animal).toEqual(expect.objectContaining({ name: 'Mel', species: 'CANINA' }));
+      expect(contract.suggestedPetId).toBe('pet-9');
+      expect(petRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('pet escolhido que já foi adotado não é sugerido', async () => {
+      formRepo.findOne.mockResolvedValue({ ...baseForm(AdoptionFormStatus.APROVADO), desiredPetId: 'pet-9' });
+      petRepo.findOne.mockResolvedValue({ id: 'pet-9', name: 'Mel', status: PetStatus.ADOTADO, fotos: [] });
+
+      const contract = await service.findByForm('form-1', 'org-1');
+
+      expect(contract.suggestedPetId).toBeNull();
+    });
+
+    it('com pet já vinculado não sugere outro', async () => {
+      formRepo.findOne.mockResolvedValue({ ...baseForm(AdoptionFormStatus.APROVADO, 'pet-1'), desiredPetId: 'pet-9' });
+      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
+
+      const contract = await service.findByForm('form-1', 'org-1');
+
+      expect(contract.suggestedPetId).toBeNull();
+    });
+
     it('cria o rascunho do modelo pré-preenchido com a ficha e o pet vinculado', async () => {
       formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.APROVADO, 'pet-1'));
       contractRepo.findOne.mockResolvedValue(null);

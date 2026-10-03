@@ -145,6 +145,38 @@ describe('AdoptionFormService', () => {
       expect(recorded().userId).toBeUndefined();
     });
 
+    describe('pet escolhido no select', () => {
+      it('guarda o pet disponível e usa o nome dele como animal desejado', async () => {
+        petRepo.findOne.mockResolvedValue({ id: 'pet-9', name: 'Mel', status: PetStatus.DISPONIVEL });
+
+        await service.create({ ...baseDto(), desiredPetId: 'pet-9', desiredAnimal: 'texto antigo' }, [file()]);
+
+        expect(petRepo.findOne).toHaveBeenCalledWith({ where: { id: 'pet-9', organizationId: 'org-1', isActive: true } });
+        expect(savedForm()).toEqual(expect.objectContaining({ desiredPetId: 'pet-9', desiredAnimal: 'Mel' }));
+      });
+
+      it.each([
+        ['adotado nesse meio-tempo', { id: 'pet-9', name: 'Mel', status: PetStatus.ADOTADO }],
+        ['em processo com outra ficha', { id: 'pet-9', name: 'Mel', status: PetStatus.EM_PROCESSO }],
+        ['de outra organização ou removido', null],
+      ])('recusa pet %s', async (_case, pet) => {
+        petRepo.findOne.mockResolvedValue(pet);
+
+        await expect(service.create({ ...baseDto(), desiredPetId: 'pet-9' }, [file()])).rejects.toThrow(
+          'O animal escolhido não está mais disponível para adoção. Escolha outro.',
+        );
+        expect(formRepo.save).not.toHaveBeenCalled();
+      });
+
+      it('sem pet escolhido mantém a descrição livre', async () => {
+        await service.create({ ...baseDto(), desiredAnimal: 'Um cachorro adulto e calmo' }, [file()]);
+
+        expect(petRepo.findOne).not.toHaveBeenCalled();
+        expect(savedForm()).toEqual(expect.objectContaining({ desiredAnimal: 'Um cachorro adulto e calmo' }));
+        expect(savedForm().desiredPetId).toBeUndefined();
+      });
+    });
+
     it('apaga a ficha e os arquivos enviados quando o upload falha', async () => {
       storage.uploadPrivate.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('storage fora'));
 
@@ -266,8 +298,21 @@ describe('AdoptionFormService', () => {
 
       expect(formRepo.findOne).toHaveBeenCalledWith({
         where: { id: 'form-1', organizationId: 'org-1', isActive: true },
-        relations: { fotos: true, pet: { fotos: true } },
+        relations: { fotos: true, pet: { fotos: true }, desiredPet: { fotos: true } },
       });
+    });
+
+    it('devolve o pet escolhido no formulário resumido', async () => {
+      formRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        fotos: [],
+        desiredPetId: 'pet-9',
+        desiredPet: { id: 'pet-9', name: 'Mel', species: 'Cachorro', status: 'DISPONIVEL', fotos: [{ url: 'u', createdAt: new Date(1) }] },
+      });
+
+      const form = await service.findOne('form-1', 'org-1');
+
+      expect(form.desiredPet).toEqual({ id: 'pet-9', name: 'Mel', species: 'Cachorro', fotos: [{ url: 'u' }] });
     });
 
     it('devolve o pet vinculado resumido', async () => {

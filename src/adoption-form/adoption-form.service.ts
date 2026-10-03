@@ -108,6 +108,14 @@ export class AdoptionFormService implements OnModuleInit {
     if (!organization) throw new BadRequestException('Organização não encontrada.');
 
     const form = this.formRepository.create({ ...dto, birthDate: localDate(dto.birthDate), state: dto.state.toUpperCase() });
+    if (dto.desiredPetId) {
+      // O pet pode ter sido adotado entre abrir o formulário e enviar
+      const pet = await this.petRepository.findOne({ where: { id: dto.desiredPetId, organizationId: dto.organizationId, isActive: true } });
+      if (!pet || pet.status !== PetStatus.DISPONIVEL) {
+        throw new BadRequestException('O animal escolhido não está mais disponível para adoção. Escolha outro.');
+      }
+      form.desiredAnimal = pet.name;
+    }
     this.normalizeAnswers(form);
 
     const saved = await this.formRepository.save(form);
@@ -147,7 +155,7 @@ export class AdoptionFormService implements OnModuleInit {
   async findOne(id: string, organizationId: string) {
     const form = await this.getForm(id, organizationId, true);
     await this.signPhotoUrls([form]);
-    return { ...form, pet: this.petSummary(form.pet) };
+    return { ...form, pet: this.petSummary(form.pet), desiredPet: this.petSummary(form.desiredPet) };
   }
 
   // Kanban: todas as colunas sempre presentes, até 50 fichas resumidas por coluna
@@ -408,7 +416,7 @@ export class AdoptionFormService implements OnModuleInit {
   private async getForm(id: string, organizationId: string, withPet = false) {
     const form = await this.formRepository.findOne({
       where: { id, organizationId, isActive: true },
-      relations: withPet ? { fotos: true, pet: { fotos: true } } : { fotos: true },
+      relations: withPet ? { fotos: true, pet: { fotos: true }, desiredPet: { fotos: true } } : { fotos: true },
     });
     if (!form) throw new NotFoundException('Ficha de adoção não encontrada.');
     return this.sortPhotos(form);

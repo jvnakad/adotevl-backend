@@ -77,6 +77,25 @@ const check = async <T extends object>(cls: new () => T, payload: object) => {
   return { instance, errors, fields: errors.map((e) => e.property) };
 };
 
+describe('CreateAdoptionFormDto — pet escolhido', () => {
+  it('desiredPetId é opcional e "" conta como não informado', async () => {
+    const dto = plainToInstance(CreateAdoptionFormDto, multipart({ desiredPetId: '' }));
+    expect((await validate(dto)).map((error) => error.property)).not.toContain('desiredPetId');
+    expect(dto.desiredPetId).toBeUndefined();
+  });
+
+  it('recusa desiredPetId que não é UUID', async () => {
+    const errors = await validate(plainToInstance(CreateAdoptionFormDto, multipart({ desiredPetId: 'mel' })));
+    expect(errors.find((error) => error.property === 'desiredPetId').constraints).toEqual({ isUuid: 'Animal escolhido inválido.' });
+  });
+
+  it('equipe não troca o pet escolhido pela edição da ficha (campo fora do DTO de edição)', async () => {
+    const dto = plainToInstance(UpdateAdoptionFormDto, { desiredPetId: '1b4e28ba-2fa1-41d2-883f-0016d3cca427' });
+    const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    expect(errors.map((error) => error.property)).toEqual(['desiredPetId']);
+  });
+});
+
 describe('CreateAdoptionFormDto', () => {
   it('aceita a ficha do front e converte tipos', async () => {
     const { instance, errors } = await check(CreateAdoptionFormDto, multipart());

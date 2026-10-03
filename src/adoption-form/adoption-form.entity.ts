@@ -255,6 +255,14 @@ export class AdoptionForm {
   @Column({ name: 'reviewed_at', type: 'timestamptz', nullable: true })
   reviewedAt: Date;
 
+  // Pet escolhido pelo adotante no formulário público (sugestão; quem reserva o pet é o termo de adoção)
+  @ManyToOne(() => Pet, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'desired_pet_id' })
+  desiredPet: Pet;
+
+  @Column({ name: 'desired_pet_id', nullable: true })
+  desiredPetId: string;
+
   // Pet escolhido no contrato; SET NULL para a exclusão de um pet não apagar a ficha
   @ManyToOne(() => Pet, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'pet_id' })

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { FindOptionsOrder, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { Pet } from './pet.entity';
@@ -30,7 +30,11 @@ export class PetService {
     return { ...saved, fotos: [] };
   }
 
-  async findAll(pagination: PaginationDto, filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string; status?: string } = {}) {
+  async findAll(
+    pagination: PaginationDto,
+    filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string; status?: string } = {},
+    order?: FindOptionsOrder<Pet>,
+  ) {
     const where: any = { isActive: true };
     if (filters.organizationId) where.organizationId = filters.organizationId;
     if (filters.species) where.species = filters.species;
@@ -38,19 +42,22 @@ export class PetService {
     if (filters.size) where.size = filters.size;
     if (filters.castration !== undefined) where.castration = filters.castration === 'true';
     if (filters.status) where.status = filters.status;
-    const result = await paginate(this.petRepository, pagination, where, { fotos: true });
+    const result = await paginate(this.petRepository, pagination, where, { fotos: true }, order);
     result.data.forEach((pet) => this.sortPhotos(pet));
     return result;
   }
 
   // Versão para o site público: só os campos exibidos, sem dados internos nem storagePath
   async findAllPublic(pagination: PaginationDto, filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string; status?: string } = {}) {
-    const result = await this.findAll(pagination, filters);
+    // Ordem por nome: a lista alimenta o select de animais do formulário de adoção
+    const result = await this.findAll(pagination, filters, { name: 'ASC' });
     return {
       ...result,
       data: result.data.map((pet) => ({
         id: pet.id,
         name: pet.name,
+        species: pet.species,
+        animal: pet.animal ?? null,
         sex: pet.sex,
         age: pet.age,
         size: pet.size,

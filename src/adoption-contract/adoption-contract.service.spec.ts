@@ -654,6 +654,22 @@ describe('AdoptionContractService', () => {
       expect(recordedEvents()).toEqual([expect.objectContaining({ type: AdoptionHistoryType.CONTRATO_ASSINADO })]);
     });
 
+    it('documento que sumiu do Autentique avisa quem clicou em atualizar', async () => {
+      autentique.getDocument.mockResolvedValue(null);
+
+      await expect(service.syncSignatureByForm('form-1', 'org-1')).rejects.toThrow(
+        'Documento não encontrado no Autentique (excluído ou expirado). Cancele o envio e envie o termo de adoção novamente.',
+      );
+      expect(tx.contract.update).not.toHaveBeenCalled();
+    });
+
+    it('webhook de documento que sumiu do Autentique é ignorado sem erro', async () => {
+      autentique.getDocument.mockResolvedValue(null);
+
+      await expect(service.syncSignatureByDocument('doc-1')).resolves.toBe(true);
+      expect(tx.contract.update).not.toHaveBeenCalled();
+    });
+
     it('contrato nunca enviado', async () => {
       contractRepo.findOne.mockResolvedValue(storedContract());
 

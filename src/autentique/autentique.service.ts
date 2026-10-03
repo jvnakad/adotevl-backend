@@ -132,8 +132,9 @@ export class AutentiqueService {
     return data.document ? toDocument(data.document) : null;
   }
 
+  // Documento que já não existe (excluído no painel, sandbox expirado) conta como excluído
   async deleteDocument(id: string) {
-    await this.request(JSON.stringify({ query: DELETE_DOCUMENT, variables: { id } }));
+    await this.request(JSON.stringify({ query: DELETE_DOCUMENT, variables: { id } }), ['document_not_found']);
   }
 
   // PDF assinado (com a folha de assinaturas) gerado pelo Autentique

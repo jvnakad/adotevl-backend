@@ -93,6 +93,12 @@ describe('AutentiqueService', () => {
     await expect(service.getDocument('doc-x')).resolves.toBeNull();
   });
 
+  it('excluir documento que já não existe não é erro', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ errors: [{ message: 'document_not_found' }], data: { deleteDocument: null } }));
+
+    await expect(service.deleteDocument('doc-x')).resolves.toBeUndefined();
+  });
+
   it('erro do GraphQL vira 502 com a mensagem do Autentique', async () => {
     fetchMock.mockResolvedValue(jsonResponse({ errors: [{ message: 'unauthenticated' }] }, 401));
 

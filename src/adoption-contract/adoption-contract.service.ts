@@ -261,7 +261,10 @@ export class AdoptionContractService {
     this.assertCanView(form);
     const contract = await this.contractRepository.findOne({ where: { adoptionFormId: form.id } });
     if (!contract?.autentiqueDocumentId) throw new BadRequestException('O termo de adoção ainda não foi enviado para assinatura.');
-    await this.syncSignature(contract, form);
+    // No webhook o documento sumido só é ignorado; aqui quem clicou precisa saber o que fazer
+    if ((await this.syncSignature(contract, form)) === 'not_found') {
+      throw new NotFoundException('Documento não encontrado no Autentique (excluído ou expirado). Cancele o envio e envie o termo de adoção novamente.');
+    }
     return this.findByForm(formId, organizationId, userId);
   }
 
@@ -276,12 +279,12 @@ export class AdoptionContractService {
   }
 
   // Idempotente: só age enquanto a assinatura está pendente
-  private async syncSignature(contract: AdoptionContract, form: AdoptionForm) {
+  private async syncSignature(contract: AdoptionContract, form: AdoptionForm): Promise<'not_found' | void> {
     if (contract.signatureStatus !== ContractSignatureStatus.PENDENTE) return;
     const document = await this.autentiqueService.getDocument(contract.autentiqueDocumentId);
     if (!document) {
       this.logger.warn(`Documento ${contract.autentiqueDocumentId} não encontrado no Autentique.`);
-      return;
+      return 'not_found';
     }
     const signature = document.signatures.find((item) => item.email === contract.signatureEmail);
     if (!signature) return;

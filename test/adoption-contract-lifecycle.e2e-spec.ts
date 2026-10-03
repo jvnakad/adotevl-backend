@@ -260,50 +260,52 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     const multa = reset.body.clauses.find((c) => c.key === 'multa');
     expect(multa.content).toBe(multa.originalContent);
 
-    // 11. Gera o PDF: versão 1, ficha continua em APROVADO
-    const generated = await auth(api().post(`/adoption-forms/${formId}/contract/generate`));
+    // 11. Gera a versão 1: já vai para o Autentique (associação assina na hora) e a ficha fica aguardando
+    const generated = await auth(api().post(`/adoption-forms/${formId}/contract/generate`), volunteerToken);
     expect(generated.status).toBe(201);
     expect(generated.body.version).toBe(1);
     expect(generated.body.pdfUrl).toContain(`contracts/${formId}/v1.pdf`);
-    expect(generated.body.versions).toEqual([expect.objectContaining({ version: 1, userName: 'Usuário ADMIN Contrato' })]);
-    expect(generated.body.generatedAt).toBeDefined();
+    expect(generated.body.versions).toEqual([expect.objectContaining({ version: 1, userName: 'Usuário VOLUNTEER Contrato' })]);
+    expect(generated.body.signature).toEqual(expect.objectContaining({ status: 'PENDENTE', email: 'carla.contrato@teste.com', version: 1, signedPdfUrl: null }));
+    const firstDocumentId = [...autentique.documents.keys()].pop();
+    expect(autentique.documents.get(firstDocumentId).organizationSigned).toBe(true);
 
     const afterGenerate = await auth(api().get(`/adoption-forms/${formId}`));
-    expect(afterGenerate.body.status).toBe('APROVADO');
+    expect(afterGenerate.body.status).toBe('AGUARDANDO_ASSINATURA');
     expect(afterGenerate.body.pet).toEqual(expect.objectContaining({ id: rex.id, name: 'Rex' }));
 
-    // 12a. Concluir nunca é manual: só a assinatura conclui
+    // 12a. Concluir nunca é manual e voluntário não tira a ficha de Aguardando assinatura
     const notSigned = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'CONCLUIDA' });
     expect(notSigned.status).toBe(400);
     expect(notSigned.body.message).toBe('A adoção é concluída automaticamente quando o adotante assina o termo de adoção.');
-    expect((await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'AGUARDANDO_ASSINATURA' })).status).toBe(400);
+    expect((await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'APROVADO' })).status).toBe(403);
 
-    // 12b. Envia para assinatura: ficha aguardando, contrato só leitura
-    const sent = await auth(api().post(`/adoption-forms/${formId}/contract/signature`), volunteerToken);
-    expect(sent.status).toBe(201);
-    expect(sent.body.signature).toEqual(expect.objectContaining({ status: 'PENDENTE', email: 'carla.contrato@teste.com', version: 1, signedPdfUrl: null }));
+    // 12b. Editar e gerar a versão 2 enquanto aguarda: a versão 1 é cancelada no Autentique e a 2 é enviada
+    const editedWhileWaiting = await auth(api().put(`/adoption-forms/${formId}/contract`)).send({
+      data: { ...generated.body.data, signature: { city: 'Curitiba/PR', date: '2026-10-03' } },
+    });
+    expect(editedWhileWaiting.status).toBe(200);
+    const regenerated = await auth(api().post(`/adoption-forms/${formId}/contract/generate`));
+    expect(regenerated.status).toBe(201);
+    expect(regenerated.body.version).toBe(2);
+    expect(regenerated.body.signature).toEqual(expect.objectContaining({ status: 'PENDENTE', version: 2 }));
+    expect(autentique.documents.has(firstDocumentId)).toBe(false);
+    const secondDocumentId = [...autentique.documents.keys()].pop();
+    expect(secondDocumentId).not.toBe(firstDocumentId);
     expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('AGUARDANDO_ASSINATURA');
-    const lockedEdit = await auth(api().put(`/adoption-forms/${formId}/contract`)).send({ data: {} });
-    expect(lockedEdit.status).toBe(400);
-    expect(lockedEdit.body.message).toBe('O termo de adoção já foi enviado para assinatura e não pode mais ser alterado.');
-    expect((await auth(api().post(`/adoption-forms/${formId}/contract/signature`))).status).toBe(400);
-    const firstDocumentId = [...autentique.documents.keys()].pop();
-    // A associação já assinou no envio; falta só o adotante
-    expect(autentique.documents.get(firstDocumentId).organizationSigned).toBe(true);
-    // Voluntário não tira a ficha de Aguardando assinatura
-    const volunteerReopen = await auth(api().patch(`/adoption-forms/${formId}/status`), volunteerToken).send({ status: 'APROVADO' });
-    expect(volunteerReopen.status).toBe(403);
 
     // 12c. Cancelar envio: só ADMIN; ficha volta para Aprovado e o documento some do Autentique
     expect((await auth(api().delete(`/adoption-forms/${formId}/contract/signature`), volunteerToken)).status).toBe(403);
     const cancelled = await auth(api().delete(`/adoption-forms/${formId}/contract/signature`));
     expect(cancelled.status).toBe(200);
     expect(cancelled.body.signature.status).toBe('CANCELADO');
-    expect(autentique.documents.has(firstDocumentId)).toBe(false);
+    expect(autentique.documents.has(secondDocumentId)).toBe(false);
     expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('APROVADO');
 
-    // 12d. Reenvia; sincronizar antes de assinar não muda nada
-    expect((await auth(api().post(`/adoption-forms/${formId}/contract/signature`))).status).toBe(201);
+    // 12d. Gera a versão 3 (reenvia); sincronizar antes de assinar não muda nada
+    const third = await auth(api().post(`/adoption-forms/${formId}/contract/generate`));
+    expect(third.status).toBe(201);
+    expect(third.body.version).toBe(3);
     const documentId = [...autentique.documents.keys()].pop();
     const pending = await auth(api().post(`/adoption-forms/${formId}/contract/signature/sync`));
     expect(pending.status).toBe(201);
@@ -321,7 +323,7 @@ describe('Fluxo do termo de adoção (e2e)', () => {
 
     const signedContract = await auth(api().get(`/adoption-forms/${formId}/contract`));
     expect(signedContract.body.signature).toEqual(expect.objectContaining({ status: 'ASSINADO', signedAt: expect.any(String) }));
-    expect(signedContract.body.signature.signedPdfUrl).toContain(`contracts/${formId}/assinado-v1.pdf`);
+    expect(signedContract.body.signature.signedPdfUrl).toContain(`contracts/${formId}/assinado-v3.pdf`);
     expect((await auth(api().get(`/adoption-forms/${formId}`))).body.status).toBe('CONCLUIDA');
     const signedBoard = await auth(api().get('/adoption-forms/board?search=carla'));
     expect(signedBoard.body.columns.find((c) => c.status === 'CONCLUIDA').items.map((i) => i.id)).toEqual([formId]);

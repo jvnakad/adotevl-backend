@@ -144,6 +144,9 @@ export class AdoptionContractService {
     return this.findByForm(formId, organizationId, userId);
   }
 
+  // Gera a nova versão do PDF e já envia ao Autentique: a associação assina na hora (conta do token, linha
+  // "Representante legal"), o adotante recebe o link por e-mail e a ficha vai para Aguardando assinatura.
+  // Com um envio pendente, a versão anterior é cancelada no Autentique.
   async generate(formId: string, organizationId: string, userId: string = null) {
     const form = await this.getForm(formId, organizationId);
     this.assertEditable(form);
@@ -151,6 +154,13 @@ export class AdoptionContractService {
     if (!contract.petId) throw new BadRequestException('Vincule um pet antes de gerar o termo de adoção.');
     if (!contract.data?.adopter?.name?.trim() || !contract.data?.adopter?.cpf?.trim()) {
       throw new BadRequestException('Preencha o nome e o CPF do adotante antes de gerar o termo de adoção.');
+    }
+    const name = contract.data.adopter.name.trim();
+    const email = (contract.data.adopter.email?.trim() || form.email)?.toLowerCase();
+    if (!email) throw new BadRequestException('Informe o e-mail do adotante antes de gerar o termo de adoção.');
+    const organization = await this.autentiqueService.getAccount();
+    if (email === organization.email) {
+      throw new BadRequestException('O e-mail do adotante não pode ser o da conta do Autentique da associação.');
     }
 
     const pet = await this.petRepository.findOne({ where: { id: contract.petId }, relations: { fotos: true } });
@@ -165,15 +175,53 @@ export class AdoptionContractService {
     const storagePath = `contracts/${form.id}/v${version}.pdf`;
     await this.storageService.uploadPrivate(storagePath, buffer, 'application/pdf');
 
+    let documentId: string = null;
     try {
+      const document = await this.autentiqueService.createDocument({
+        name: `Termo de Adoção - ${name} - v${version}`,
+        pdf: buffer,
+        fileName: `termo-de-adocao-v${version}.pdf`,
+        signers: [
+          { name: organization.name, email: organization.email, position: organizationSignature },
+          { name, email, position: adopterSignature },
+        ],
+      });
+      documentId = document.id;
+      try {
+        await this.autentiqueService.signDocument(document.id);
+      } catch (error) {
+        this.logger.error(`Falha ao assinar o documento ${document.id} pela associação: ${error?.message}`);
+        throw new BadGatewayException('Não foi possível assinar o termo de adoção pela associação no Autentique. Tente novamente.');
+      }
+      // A lista também traz a associação: o adotante é achado pelo e-mail
+      const signature = document.signatures.find((item) => item.email === email);
+
+      const previousDocumentId = contract.signatureStatus === ContractSignatureStatus.PENDENTE ? contract.autentiqueDocumentId : null;
+      const statusChanged = form.status !== AdoptionFormStatus.AGUARDANDO_ASSINATURA;
       await this.save(
         form,
         userId,
         [
+          ...(previousDocumentId
+            ? [
+                {
+                  type: AdoptionHistoryType.ASSINATURA_CANCELADA,
+                  description: `Envio da versão ${contract.signatureVersion} cancelado: substituída pela versão ${version}`,
+                  metadata: { documentId: previousDocumentId, version: contract.signatureVersion, replacedBy: version },
+                },
+              ]
+            : []),
           {
             type: AdoptionHistoryType.CONTRATO_GERADO,
             description: `Termo de adoção gerado (versão ${version})`,
             metadata: { version, storagePath, fileName: `termo-adocao-v${version}.pdf` },
+          },
+          {
+            type: AdoptionHistoryType.CONTRATO_ENVIADO_ASSINATURA,
+            description: `Termo de adoção (versão ${version}) enviado para assinatura de ${email}`,
+            fromStatus: statusChanged ? form.status : null,
+            toStatus: statusChanged ? AdoptionFormStatus.AGUARDANDO_ASSINATURA : null,
+            metadata: { documentId: document.id, version, email },
           },
         ],
         async (manager) => {
@@ -183,90 +231,35 @@ export class AdoptionContractService {
             generatedAt: new Date(),
             adopterSignaturePosition: adopterSignature,
             organizationSignaturePosition: organizationSignature,
-            updatedBy: userId,
-          });
-          if (pet && pet.status !== PetStatus.EM_PROCESSO) {
-            await manager.getRepository(Pet).update({ id: pet.id, organizationId: form.organizationId }, { status: PetStatus.EM_PROCESSO, updatedBy: userId });
-          }
-        },
-      );
-    } catch (error) {
-      // PDF sem registro no banco não deve ficar no bucket
-      await this.storageService.removePrivate([storagePath]).catch(() => undefined);
-      throw error;
-    }
-    return this.findByForm(formId, organizationId, userId);
-  }
-
-  // Envia o PDF da versão atual ao Autentique: a associação assina na hora (conta do token, linha "Representante legal")
-  // e o adotante recebe o link por e-mail
-  async sendForSignature(formId: string, organizationId: string, userId: string = null) {
-    const form = await this.getForm(formId, organizationId);
-    if (form.status !== AdoptionFormStatus.APROVADO) {
-      throw new BadRequestException('Só é possível enviar para assinatura o termo de uma ficha aprovada.');
-    }
-    const contract = await this.ensureContract(form, userId);
-    if (!contract.pdfStoragePath) throw new BadRequestException('Gere o PDF do termo de adoção antes de enviar para assinatura.');
-    const name = contract.data?.adopter?.name?.trim() || form.fullName;
-    const email = (contract.data?.adopter?.email?.trim() || form.email)?.toLowerCase();
-    if (!email) throw new BadRequestException('Informe o e-mail do adotante antes de enviar para assinatura.');
-    const organization = await this.autentiqueService.getAccount();
-    if (email === organization.email) {
-      throw new BadRequestException('O e-mail do adotante não pode ser o da conta do Autentique da associação.');
-    }
-
-    const pdf = await this.storageService.downloadPrivate(contract.pdfStoragePath);
-    const document = await this.autentiqueService.createDocument({
-      name: `Termo de Adoção - ${name} - v${contract.version}`,
-      pdf,
-      fileName: `termo-de-adocao-v${contract.version}.pdf`,
-      signers: [
-        { name: organization.name, email: organization.email, position: contract.organizationSignaturePosition ?? null },
-        { name, email, position: contract.adopterSignaturePosition ?? null },
-      ],
-    });
-    try {
-      await this.autentiqueService.signDocument(document.id);
-    } catch (error) {
-      // Sem a assinatura da associação o documento não segue para o adotante
-      await this.autentiqueService.deleteDocument(document.id).catch(() => undefined);
-      this.logger.error(`Falha ao assinar o documento ${document.id} pela associação: ${error?.message}`);
-      throw new BadGatewayException('Não foi possível assinar o termo de adoção pela associação no Autentique. Tente novamente.');
-    }
-    // A lista também traz o dono da conta Autentique: o adotante é achado pelo e-mail
-    const signature = document.signatures.find((item) => item.email === email);
-
-    try {
-      await this.save(
-        form,
-        userId,
-        [
-          {
-            type: AdoptionHistoryType.CONTRATO_ENVIADO_ASSINATURA,
-            description: `Termo de adoção (versão ${contract.version}) enviado para assinatura de ${email}`,
-            fromStatus: form.status,
-            toStatus: AdoptionFormStatus.AGUARDANDO_ASSINATURA,
-            metadata: { documentId: document.id, version: contract.version, email },
-          },
-        ],
-        async (manager) => {
-          await manager.getRepository(AdoptionContract).update(contract.id, {
             autentiqueDocumentId: document.id,
             signatureStatus: ContractSignatureStatus.PENDENTE,
             signatureLink: signature?.link ?? null,
             signatureEmail: email,
-            signatureVersion: contract.version,
+            signatureVersion: version,
             signatureSentAt: new Date(),
             signedAt: null,
             signedPdfStoragePath: null,
             updatedBy: userId,
           });
-          await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA, updatedBy: userId });
+          if (statusChanged) {
+            await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA, updatedBy: userId });
+          }
+          if (pet && pet.status !== PetStatus.EM_PROCESSO) {
+            await manager.getRepository(Pet).update({ id: pet.id, organizationId: form.organizationId }, { status: PetStatus.EM_PROCESSO, updatedBy: userId });
+          }
         },
       );
+
+      // Versão anterior só sai do Autentique depois que a nova está gravada
+      if (previousDocumentId) {
+        await this.autentiqueService.deleteDocument(previousDocumentId).catch((error) => {
+          this.logger.warn(`Não foi possível excluir a versão anterior ${previousDocumentId} no Autentique: ${error?.message}`);
+        });
+      }
     } catch (error) {
-      // Documento sem registro no banco não deve continuar aguardando assinatura no Autentique
-      await this.autentiqueService.deleteDocument(document.id).catch(() => undefined);
+      // Nada fica pela metade: sem registro no banco, o PDF sai do bucket e o documento novo do Autentique
+      await this.storageService.removePrivate([storagePath]).catch(() => undefined);
+      if (documentId) await this.autentiqueService.deleteDocument(documentId).catch(() => undefined);
       throw error;
     }
     return this.findByForm(formId, organizationId, userId);
@@ -535,9 +528,6 @@ export class AdoptionContractService {
     this.assertCanView(form);
     if (form.status === AdoptionFormStatus.CONCLUIDA) {
       throw new BadRequestException('Adoção concluída: o termo de adoção não pode mais ser alterado.');
-    }
-    if (form.status === AdoptionFormStatus.AGUARDANDO_ASSINATURA) {
-      throw new BadRequestException('O termo de adoção já foi enviado para assinatura e não pode mais ser alterado.');
     }
   }
 

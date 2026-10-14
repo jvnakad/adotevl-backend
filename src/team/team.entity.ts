@@ -24,6 +24,10 @@ export class Team {
   @Column({ name: 'organization_id' })
   organizationId: string;
 
+  /** Equipe de sistema "Admin": Editar em tudo, não pode ser editada, renomeada nem desativada. Uma por organização. */
+  @Column({ name: 'is_admin', default: false })
+  isAdmin: boolean;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 

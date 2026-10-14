@@ -39,6 +39,8 @@ import { MailService } from '../src/mail/mail.service';
 import { StorageService } from '../src/storage/storage.service';
 import { AutentiqueService } from '../src/autentique/autentique.service';
 import { WebhooksModule } from '../src/webhooks/webhooks.module';
+import { TeamPermission } from '../src/team/team-permission.entity';
+import { AccessModule } from '../src/access/access.module';
 
 class MockMailService {
   async sendConfirmationEmail() {}
@@ -134,7 +136,7 @@ class MockAutentiqueModule {}
       type: 'postgres',
       url: process.env.DATABASE_URL,
       entities: [
-        Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer,
+        Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
         AdoptionHistoryEvent, AdoptionContract,
       ],
@@ -148,6 +150,7 @@ class MockAutentiqueModule {}
     PetModule,
     MedicalRecordModule,
     TeamModule,
+    AccessModule,
     VolunteerModule,
     CampaignModule,
     FinancialModule,

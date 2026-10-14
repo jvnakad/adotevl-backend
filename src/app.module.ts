@@ -41,6 +41,8 @@ import { AdoptionContractModule } from './adoption-contract/adoption-contract.mo
 import { AdoptionContract } from './adoption-contract/adoption-contract.entity';
 import { AutentiqueModule } from './autentique/autentique.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { TeamPermission } from './team/team-permission.entity';
+import { AccessModule } from './access/access.module';
 
 @Module({
   imports: [
@@ -49,7 +51,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),
@@ -60,6 +62,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     PetModule,
     MedicalRecordModule,
     TeamModule,
+    AccessModule,
     VolunteerModule,
     CampaignModule,
     FinancialModule,

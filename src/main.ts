@@ -6,7 +6,8 @@ import { AppModule } from './app.module';
 import { isLocalStorage, LOCAL_UPLOADS_DIR } from './storage/storage.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  // rawBody: o webhook do Autentique valida a assinatura HMAC sobre o corpo original
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
 

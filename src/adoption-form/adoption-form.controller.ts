@@ -67,7 +67,7 @@ export class AdoptionFormController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
     summary: 'Listar fichas de adoção',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Lista as fichas da organização do usuário, mais recentes primeiro. Filtros: status (PENDENTE, EM_ANALISE, APROVADO, REPROVADO, CONTRATO_GERADO, CONCLUIDA), search (nome, email ou CPF)',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Lista as fichas da organização do usuário, mais recentes primeiro. Filtros: status (PENDENTE, APROVADO, REPROVADO, AGUARDANDO_ASSINATURA, CONCLUIDA), search (nome, email ou CPF)',
   })
   findAll(
     @Query() pagination: PaginationDto,
@@ -85,7 +85,7 @@ export class AdoptionFormController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
     summary: 'Kanban das fichas de adoção',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Colunas na ordem PENDENTE, EM_ANALISE, APROVADO, CONTRATO_GERADO, CONCLUIDA, REPROVADO, com total e até 50 fichas resumidas (mais recentes primeiro). Filtro: search (nome, email ou CPF).',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Colunas na ordem PENDENTE, APROVADO, AGUARDANDO_ASSINATURA, CONCLUIDA, REPROVADO, com total e até 50 fichas resumidas (mais recentes primeiro). Filtro: search (nome, email ou CPF).',
   })
   board(@Request() req, @Query('search') search?: string) {
     return this.adoptionFormService.board(req.user.organizationId, search);
@@ -125,7 +125,7 @@ export class AdoptionFormController {
   @ApiOperation({
     summary: 'Mover ficha de adoção (status e observações)',
     description:
-      'Perfis permitidos: ADMIN, VOLUNTEER. PENDENTE/EM_ANALISE/APROVADO/REPROVADO são livres entre si; CONTRATO_GERADO só pela geração do contrato; CONCLUIDA só a partir de CONTRATO_GERADO (pet vira ADOTADO); de CONTRATO_GERADO/CONCLUIDA só volta para APROVADO e apenas ADMIN.',
+      'Perfis permitidos: ADMIN, VOLUNTEER. PENDENTE/APROVADO/REPROVADO são livres entre si; AGUARDANDO_ASSINATURA só pelo envio do termo ao Autentique; CONCLUIDA só quando o adotante assina (pet vira ADOTADO); de AGUARDANDO_ASSINATURA/CONCLUIDA só volta para APROVADO e apenas ADMIN (envio pendente no Autentique é cancelado).',
   })
   updateStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAdoptionFormStatusDto, @Request() req) {
     return this.adoptionFormService.updateStatus(id, dto, req.user.organizationId, req.user.id, req.user.profileName);

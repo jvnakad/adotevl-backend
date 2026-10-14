@@ -14,19 +14,21 @@ import { AdoptionFormPhoto } from './adoption-form-photo.entity';
 
 export enum AdoptionFormStatus {
   PENDENTE = 'PENDENTE',
+  // Legado: não é mais usado (fichas migradas para PENDENTE); continua no enum por causa do histórico
   EM_ANALISE = 'EM_ANALISE',
   APROVADO = 'APROVADO',
   REPROVADO = 'REPROVADO',
+  // Legado: o termo é gerado com a ficha em APROVADO (fichas migradas para APROVADO); continua por causa do histórico
   CONTRATO_GERADO = 'CONTRATO_GERADO',
+  AGUARDANDO_ASSINATURA = 'AGUARDANDO_ASSINATURA',
   CONCLUIDA = 'CONCLUIDA',
 }
 
 // Ordem das colunas do kanban (GET /adoption-forms/board) e rótulos usados nas descrições do histórico
 export const ADOPTION_FORM_STATUS_ORDER: AdoptionFormStatus[] = [
   AdoptionFormStatus.PENDENTE,
-  AdoptionFormStatus.EM_ANALISE,
   AdoptionFormStatus.APROVADO,
-  AdoptionFormStatus.CONTRATO_GERADO,
+  AdoptionFormStatus.AGUARDANDO_ASSINATURA,
   AdoptionFormStatus.CONCLUIDA,
   AdoptionFormStatus.REPROVADO,
 ];
@@ -36,7 +38,8 @@ export const ADOPTION_FORM_STATUS_LABELS: Record<AdoptionFormStatus, string> = {
   EM_ANALISE: 'Em análise',
   APROVADO: 'Aprovado',
   REPROVADO: 'Reprovado',
-  CONTRATO_GERADO: 'Contrato gerado',
+  CONTRATO_GERADO: 'Termo gerado',
+  AGUARDANDO_ASSINATURA: 'Aguardando assinatura',
   CONCLUIDA: 'Concluída',
 };
 

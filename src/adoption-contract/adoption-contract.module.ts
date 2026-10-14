@@ -11,5 +11,6 @@ import { AdoptionContractController } from './adoption-contract.controller';
   imports: [TypeOrmModule.forFeature([AdoptionContract, AdoptionForm, Pet]), AdoptionHistoryModule],
   controllers: [AdoptionContractController],
   providers: [AdoptionContractService],
+  exports: [AdoptionContractService],
 })
 export class AdoptionContractModule {}

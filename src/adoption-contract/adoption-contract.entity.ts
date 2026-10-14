@@ -12,6 +12,7 @@ import { Organization } from '../organization/organization.entity';
 import { AdoptionForm } from '../adoption-form/adoption-form.entity';
 import { Pet } from '../pet/pet.entity';
 import { StoredClause } from './contract-numbering';
+import type { SignaturePosition } from './contract-pdf.builder';
 
 export interface ContractAdopterData {
   name: string;
@@ -51,6 +52,14 @@ export interface ContractData {
   signature: ContractSignatureData;
 }
 
+// Situação do envio para assinatura digital no Autentique (null = nunca enviado)
+export enum ContractSignatureStatus {
+  PENDENTE = 'PENDENTE',
+  ASSINADO = 'ASSINADO',
+  RECUSADO = 'RECUSADO',
+  CANCELADO = 'CANCELADO',
+}
+
 // Contrato (termo de adoção) da ficha: rascunho editável + PDFs gerados (versões no bucket privado)
 @Entity('adoption_contracts')
 export class AdoptionContract {
@@ -86,6 +95,39 @@ export class AdoptionContract {
 
   @Column({ name: 'generated_at', type: 'timestamptz', nullable: true })
   generatedAt: Date;
+
+  // Onde a linha "ADOTANTE" caiu no PDF atual: o Autentique carimba a assinatura ali
+  @Column({ name: 'adopter_signature_position', type: 'jsonb', nullable: true })
+  adopterSignaturePosition: SignaturePosition | null;
+
+  // Linha "Representante legal": a associação assina ali automaticamente no envio
+  @Column({ name: 'organization_signature_position', type: 'jsonb', nullable: true })
+  organizationSignaturePosition: SignaturePosition | null;
+
+  // Assinatura digital (Autentique): documento enviado = PDF da versão signatureVersion
+  @Column({ name: 'autentique_document_id', nullable: true, unique: true })
+  autentiqueDocumentId: string;
+
+  @Column({ name: 'signature_status', type: 'enum', enum: ContractSignatureStatus, nullable: true })
+  signatureStatus: ContractSignatureStatus;
+
+  @Column({ name: 'signature_link', nullable: true })
+  signatureLink: string;
+
+  @Column({ name: 'signature_email', nullable: true })
+  signatureEmail: string;
+
+  @Column({ name: 'signature_version', type: 'int', nullable: true })
+  signatureVersion: number;
+
+  @Column({ name: 'signature_sent_at', type: 'timestamptz', nullable: true })
+  signatureSentAt: Date;
+
+  @Column({ name: 'signed_at', type: 'timestamptz', nullable: true })
+  signedAt: Date;
+
+  @Column({ name: 'signed_pdf_storage_path', nullable: true })
+  signedPdfStoragePath: string;
 
   @ManyToOne(() => Organization, { nullable: false })
   @JoinColumn({ name: 'organization_id' })

@@ -37,6 +37,8 @@ import { AdoptionContract } from '../src/adoption-contract/adoption-contract.ent
 import { AdoptionContractModule } from '../src/adoption-contract/adoption-contract.module';
 import { MailService } from '../src/mail/mail.service';
 import { StorageService } from '../src/storage/storage.service';
+import { AutentiqueService } from '../src/autentique/autentique.service';
+import { WebhooksModule } from '../src/webhooks/webhooks.module';
 
 class MockMailService {
   async sendConfirmationEmail() {}
@@ -58,6 +60,9 @@ export class MockStorageService {
   async remove() {}
   async uploadPrivate() {}
   async removePrivate() {}
+  async downloadPrivate() {
+    return Buffer.from('%PDF-fake');
+  }
   async getSignedUrls(paths: string[]) {
     return Object.fromEntries(paths.map((path) => [path, `https://storage.test/signed/${path}`]));
   }
@@ -69,6 +74,58 @@ export class MockStorageService {
   exports: [StorageService],
 })
 class MockStorageModule {}
+
+// Autentique falso: documentos ficam em memória; o teste simula o adotante com adopterSigns/adopterRejects
+export class MockAutentiqueService {
+  documents = new Map<string, { email: string; name: string; signedAt: string | null; rejectedAt: string | null; organizationSigned: boolean }>();
+  account = { name: 'Associação Teste', email: 'associacao@autentique.test' };
+  private sequence = 0;
+
+  async getAccount() {
+    return this.account;
+  }
+  // O adotante é o signatário que não é a conta da associação
+  async createDocument({ signers }: { signers: { name: string; email: string }[] }) {
+    const id = `doc-${++this.sequence}`;
+    const adopter = signers.find((signer) => signer.email !== this.account.email);
+    this.documents.set(id, { email: adopter.email, name: adopter.name, signedAt: null, rejectedAt: null, organizationSigned: false });
+    return this.toDocument(id);
+  }
+  async signDocument(id: string) {
+    this.documents.get(id).organizationSigned = true;
+  }
+  async getDocument(id: string) {
+    return this.documents.has(id) ? this.toDocument(id) : null;
+  }
+  async deleteDocument(id: string) {
+    this.documents.delete(id);
+  }
+  async downloadFile() {
+    return Buffer.from('%PDF-signed');
+  }
+  adopterSigns(id: string) {
+    this.documents.get(id).signedAt = new Date().toISOString();
+  }
+  adopterRejects(id: string) {
+    this.documents.get(id).rejectedAt = new Date().toISOString();
+  }
+  private toDocument(id: string) {
+    const doc = this.documents.get(id);
+    return {
+      id,
+      name: 'Termo de Adoção',
+      signedFileUrl: `https://autentique.test/${id}/assinado.pdf`,
+      signatures: [{ publicId: `sig-${id}`, name: doc.name, email: doc.email, link: `https://assina.test/${id}`, viewedAt: null, signedAt: doc.signedAt, rejectedAt: doc.rejectedAt }],
+    };
+  }
+}
+
+@Global()
+@Module({
+  providers: [{ provide: AutentiqueService, useClass: MockAutentiqueService }],
+  exports: [AutentiqueService],
+})
+class MockAutentiqueModule {}
 
 @Module({
   imports: [
@@ -100,8 +157,10 @@ class MockStorageModule {}
     AdoptionFormModule,
     AdoptionHistoryModule,
     AdoptionContractModule,
+    WebhooksModule,
     MockMailModule,
     MockStorageModule,
+    MockAutentiqueModule,
   ],
 })
 export class TestAppModule {}

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Post, Put, Request, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
@@ -7,7 +7,7 @@ import { AdoptionContractService } from './adoption-contract.service';
 import { UpdateAdoptionContractDto } from './dto/update-adoption-contract.dto';
 
 // Rotas do contrato ficam sob a ficha: /adoption-forms/:id/contract
-@ApiTags('Contrato de adoção')
+@ApiTags('Termo de adoção')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('adoption-forms')
@@ -17,8 +17,8 @@ export class AdoptionContractController {
   @Get(':id/contract')
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
-    summary: 'Buscar contrato da ficha de adoção',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Ficha APROVADO, CONTRATO_GERADO ou CONCLUIDA. Na primeira chamada cria o rascunho a partir do modelo, pré-preenchido com a ficha e o pet vinculado.',
+    summary: 'Buscar termo de adoção da ficha',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Ficha APROVADO, AGUARDANDO_ASSINATURA ou CONCLUIDA. Na primeira chamada cria o rascunho a partir do modelo, pré-preenchido com a ficha e o pet vinculado.',
   })
   findOne(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.findByForm(id, req.user.organizationId, req.user.id);
@@ -27,7 +27,7 @@ export class AdoptionContractController {
   @Put(':id/contract')
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
-    summary: 'Salvar rascunho do contrato',
+    summary: 'Salvar rascunho do termo de adoção',
     description: 'Perfis permitidos: ADMIN, VOLUNTEER. Body { petId?, data?, clauses? }. clauses precisa conter todas as cláusulas; a de identificação do animal não pode ser removida. Cada alteração vira um evento no histórico.',
   })
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAdoptionContractDto, @Request() req) {
@@ -44,10 +44,30 @@ export class AdoptionContractController {
   @Post(':id/contract/generate')
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
-    summary: 'Gerar PDF do contrato',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Exige pet vinculado e nome/CPF do adotante. Gera nova versão (bucket privado), move a ficha APROVADO para CONTRATO_GERADO e deixa o pet EM_PROCESSO.',
+    summary: 'Gerar termo de adoção e enviar para assinatura',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Ficha APROVADO ou AGUARDANDO_ASSINATURA. Exige pet vinculado e nome/CPF/e-mail do adotante. Gera nova versão (bucket privado) e já envia ao Autentique: a associação assina na hora (linha Representante legal), o adotante recebe o link por e-mail e a ficha vai para AGUARDANDO_ASSINATURA. Envio pendente da versão anterior é cancelado.',
   })
   generate(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
     return this.contractService.generate(id, req.user.organizationId, req.user.id);
+  }
+
+  @Post(':id/contract/signature/sync')
+  @Roles('ADMIN', 'VOLUNTEER')
+  @ApiOperation({
+    summary: 'Atualizar status da assinatura',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Consulta o documento no Autentique: assinado → adoção CONCLUIDA (pet ADOTADO, PDF assinado salvo no bucket privado); recusado → volta para APROVADO.',
+  })
+  syncSignature(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.contractService.syncSignatureByForm(id, req.user.organizationId, req.user.id);
+  }
+
+  @Delete(':id/contract/signature')
+  @Roles('ADMIN')
+  @ApiOperation({
+    summary: 'Cancelar envio para assinatura',
+    description: 'Perfis permitidos: ADMIN. Ficha AGUARDANDO_ASSINATURA. Exclui o documento no Autentique e a ficha volta para APROVADO.',
+  })
+  cancelSignature(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.contractService.cancelSignature(id, req.user.organizationId, req.user.id);
   }
 }

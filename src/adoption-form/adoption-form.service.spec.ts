@@ -70,6 +70,9 @@ describe('AdoptionFormService', () => {
   let petRepo: MockRepository;
   let txFormRepo: MockRepository;
   let txPetRepo: MockRepository;
+  let txContractRepo: MockRepository;
+  let contractRepo: MockRepository;
+  let autentique: { deleteDocument: jest.Mock };
   let manager: { getRepository: jest.Mock };
   let history: { record: jest.Mock; resolveUserName: jest.Mock; findByForm: jest.Mock };
   let storage: { uploadPrivate: jest.Mock; removePrivate: jest.Mock; getSignedUrls: jest.Mock };
@@ -83,7 +86,10 @@ describe('AdoptionFormService', () => {
     // Repositórios usados dentro da transação do updateStatus
     txFormRepo = createMockRepository();
     txPetRepo = createMockRepository();
-    manager = { getRepository: jest.fn((entity) => (entity.name === 'Pet' ? txPetRepo : txFormRepo)) };
+    txContractRepo = createMockRepository();
+    manager = { getRepository: jest.fn((entity) => ({ Pet: txPetRepo, AdoptionContract: txContractRepo })[entity.name] ?? txFormRepo) };
+    contractRepo = createMockRepository();
+    autentique = { deleteDocument: jest.fn(async () => undefined) };
     (formRepo as any).manager = { transaction: jest.fn(async (work) => work(manager)) };
     history = {
       record: jest.fn(async () => undefined),
@@ -95,7 +101,7 @@ describe('AdoptionFormService', () => {
       removePrivate: jest.fn(async () => undefined),
       getSignedUrls: jest.fn(async (paths: string[]) => Object.fromEntries(paths.map((path) => [path, `https://signed/${path}`]))),
     };
-    service = new AdoptionFormService(formRepo as any, photoRepo as any, orgRepo as any, petRepo as any, storage as any, history as any);
+    service = new AdoptionFormService(formRepo as any, photoRepo as any, orgRepo as any, petRepo as any, storage as any, history as any, contractRepo as any, autentique as any);
 
     orgRepo.findOne.mockResolvedValue({ id: 'org-1' });
     formRepo.save.mockImplementation(async (data) => ({ id: 'form-1', status: AdoptionFormStatus.PENDENTE, createdAt: new Date('2026-09-30'), ...data }));
@@ -378,7 +384,7 @@ describe('AdoptionFormService', () => {
     });
 
     it('mantém as observações quando não são enviadas', async () => {
-      await service.updateStatus('form-1', { status: AdoptionFormStatus.EM_ANALISE }, 'org-1', 'user-1');
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1');
 
       expect(txFormRepo.update.mock.calls[0][1]).not.toHaveProperty('reviewNotes');
     });
@@ -403,8 +409,7 @@ describe('AdoptionFormService', () => {
     it.each([
       [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.REPROVADO],
       [AdoptionFormStatus.REPROVADO, AdoptionFormStatus.APROVADO],
-      [AdoptionFormStatus.APROVADO, AdoptionFormStatus.EM_ANALISE],
-      [AdoptionFormStatus.EM_ANALISE, AdoptionFormStatus.PENDENTE],
+      [AdoptionFormStatus.APROVADO, AdoptionFormStatus.PENDENTE],
     ])('permite mover livremente de %s para %s', async (from, to) => {
       formWith(from);
 
@@ -412,9 +417,9 @@ describe('AdoptionFormService', () => {
     });
 
     it('mesmo status só atualiza as observações e registra FICHA_EDITADA', async () => {
-      formRepo.findOne.mockResolvedValue({ id: 'form-1', organizationId: 'org-1', fullName: 'Maria', status: 'CONTRATO_GERADO', petId: 'pet-1', reviewNotes: 'Antiga', fotos: [] });
+      formRepo.findOne.mockResolvedValue({ id: 'form-1', organizationId: 'org-1', fullName: 'Maria', status: 'AGUARDANDO_ASSINATURA', petId: 'pet-1', reviewNotes: 'Antiga', fotos: [] });
 
-      await service.updateStatus('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO, reviewNotes: 'Nova' }, 'org-1', 'user-1', 'VOLUNTEER');
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA, reviewNotes: 'Nova' }, 'org-1', 'user-1', 'VOLUNTEER');
 
       expect(formRepo.update).toHaveBeenCalledWith('form-1', { reviewNotes: 'Nova', updatedBy: 'user-1' });
       expect(txFormRepo.update).not.toHaveBeenCalled();
@@ -436,39 +441,65 @@ describe('AdoptionFormService', () => {
       expect(history.record).not.toHaveBeenCalled();
     });
 
-    it('não permite mover manualmente para CONTRATO_GERADO', async () => {
+    it('CONTRATO_GERADO (legado) não é mais destino', async () => {
       formWith(AdoptionFormStatus.APROVADO);
 
       await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
-        'Gere o contrato para mover a ficha para Contrato gerado.',
+        'Movimentação de status não permitida.',
       );
       expect(txFormRepo.update).not.toHaveBeenCalled();
     });
 
-    it('só conclui a partir de CONTRATO_GERADO', async () => {
-      formWith(AdoptionFormStatus.APROVADO);
+    it.each([AdoptionFormStatus.APROVADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA])('não conclui manualmente a partir de %s', async (from) => {
+      formWith(from);
 
-      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONCLUIDA }, 'org-1')).rejects.toThrow(BadRequestException);
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONCLUIDA }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
+        'A adoção é concluída automaticamente quando o adotante assina o termo de adoção.',
+      );
+      expect(txFormRepo.update).not.toHaveBeenCalled();
     });
 
-    it('concluir marca o pet como ADOTADO e registra ADOCAO_CONCLUIDA', async () => {
-      formWith(AdoptionFormStatus.CONTRATO_GERADO, 'pet-1');
+    it('não permite mover manualmente para AGUARDANDO_ASSINATURA', async () => {
+      formWith(AdoptionFormStatus.APROVADO);
 
-      await service.updateStatus('form-1', { status: AdoptionFormStatus.CONCLUIDA }, 'org-1', 'user-1', 'VOLUNTEER');
-
-      expect(txPetRepo.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-1', organizationId: expect.any(String) }), { status: PetStatus.ADOTADO, adoptionDate: expect.any(Date), updatedBy: 'user-1' });
-      expect(recorded()).toEqual(
-        expect.objectContaining({ type: AdoptionHistoryType.ADOCAO_CONCLUIDA, fromStatus: 'CONTRATO_GERADO', toStatus: 'CONCLUIDA' }),
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
+        'Envie o termo de adoção para assinatura pela aba Termo de Adoção.',
       );
     });
 
-    it.each([AdoptionFormStatus.CONTRATO_GERADO, AdoptionFormStatus.CONCLUIDA])('de %s só volta para APROVADO', async (from) => {
+    it('EM_ANALISE (legado) não é mais destino', async () => {
+      formWith(AdoptionFormStatus.PENDENTE);
+
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.EM_ANALISE }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow('Movimentação de status não permitida.');
+    });
+
+    it('ADMIN voltando de AGUARDANDO_ASSINATURA para APROVADO cancela o documento no Autentique', async () => {
+      formWith(AdoptionFormStatus.AGUARDANDO_ASSINATURA, 'pet-1');
+      contractRepo.findOne.mockResolvedValue({ id: 'contract-1', autentiqueDocumentId: 'doc-1', signatureStatus: 'PENDENTE' });
+
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'ADMIN');
+
+      expect(autentique.deleteDocument).toHaveBeenCalledWith('doc-1');
+      expect(txContractRepo.update).toHaveBeenCalledWith({ adoptionFormId: 'form-1' }, { signatureStatus: 'CANCELADO', updatedBy: 'user-1' });
+      expect(recorded().metadata).toEqual(expect.objectContaining({ cancelledSignatureDocumentId: 'doc-1' }));
+    });
+
+    it('falha ao excluir no Autentique não impede voltar para APROVADO', async () => {
+      formWith(AdoptionFormStatus.AGUARDANDO_ASSINATURA);
+      contractRepo.findOne.mockResolvedValue({ id: 'contract-1', autentiqueDocumentId: 'doc-1', signatureStatus: 'PENDENTE' });
+      autentique.deleteDocument.mockRejectedValue(new Error('fora do ar'));
+
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'ADMIN')).resolves.toBeDefined();
+      expect(txFormRepo.update).toHaveBeenCalledWith('form-1', expect.objectContaining({ status: AdoptionFormStatus.APROVADO }));
+    });
+
+    it.each([AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('de %s só volta para APROVADO', async (from) => {
       formWith(from);
 
       await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.PENDENTE }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(BadRequestException);
     });
 
-    it.each([AdoptionFormStatus.CONTRATO_GERADO, AdoptionFormStatus.CONCLUIDA])('voltar de %s para APROVADO é só para ADMIN', async (from) => {
+    it.each([AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('voltar de %s para APROVADO é só para ADMIN', async (from) => {
       formWith(from, 'pet-1');
 
       await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'VOLUNTEER')).rejects.toThrow(ForbiddenException);
@@ -500,7 +531,7 @@ describe('AdoptionFormService', () => {
   });
 
   describe('board', () => {
-    it('devolve as 6 colunas na ordem do kanban, com no máximo 50 itens por coluna', async () => {
+    it('devolve as 5 colunas na ordem do kanban, com no máximo 50 itens por coluna', async () => {
       formRepo.findAndCount.mockImplementation(async ({ where }) =>
         where.status === 'APROVADO'
           ? [[{ id: 'f1', fullName: 'Maria', status: 'APROVADO', petId: 'pet-1', pet: { name: 'Rex' }, cpf: '1', reviewNotes: 'x' }], 1]
@@ -509,11 +540,11 @@ describe('AdoptionFormService', () => {
 
       const { columns } = await service.board('org-1');
 
-      expect(columns.map((column) => column.status)).toEqual(['PENDENTE', 'EM_ANALISE', 'APROVADO', 'CONTRATO_GERADO', 'CONCLUIDA', 'REPROVADO']);
+      expect(columns.map((column) => column.status)).toEqual(['PENDENTE', 'APROVADO', 'AGUARDANDO_ASSINATURA', 'CONCLUIDA', 'REPROVADO']);
       expect(formRepo.findAndCount).toHaveBeenCalledWith(
         expect.objectContaining({ where: { organizationId: 'org-1', isActive: true, status: 'PENDENTE' }, order: { updatedAt: 'DESC' }, take: 50 }),
       );
-      const approved = columns[2];
+      const approved = columns[1];
       expect(approved.total).toBe(1);
       expect(approved.items[0]).toEqual(expect.objectContaining({ id: 'f1', fullName: 'Maria', petId: 'pet-1', petName: 'Rex' }));
       expect(approved.items[0]).not.toHaveProperty('cpf');

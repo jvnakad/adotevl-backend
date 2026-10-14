@@ -124,6 +124,8 @@ Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFo
 ### pet
 - `GET /pets?search=` busca por nome ou raça (`animal`), ILike com OR, na rota autenticada e na pública.
 - Catálogo de espécies e raças em `src/pet/pet-catalog.ts`, exposto em `GET /pets/options` (público, antes de `:id`). O front não tem mais lista própria.
+- Nascimento: coluna `birth_date` (`date`, dia 1) exposta como `birthDate: 'YYYY-MM'` (transformer na entidade). Toda resposta de pet traz `ageLabel` calculado na hora em `pet-age.ts` (fuso de Brasília): "2 anos e 3 meses", "8 meses", "menos de 1 mês". `birthDate` é obrigatório no create **e** no update (formato AAAA-MM, sem mês futuro). Termo de adoção preenche "Idade do animal" com `petBirthWithAge` ("07/2024 (2 anos e 3 meses)").
+- `age` (anos) é legado: fica na entidade com `select: false` só porque `synchronize` apagaria a coluna antes da conversão; `PetService.onModuleInit` converte `age` → `birth_date` (mês do `created_at` − idade) e zera `age`.
 - `CreatePetDto`/`UpdatePetDto` validam `species` no catálogo e `animal` como raça da espécie enviada no mesmo payload (update que troca a raça manda a espécie junto).
 
 ### adoption-history

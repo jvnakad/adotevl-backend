@@ -2,6 +2,7 @@ import { AdoptionForm } from '../adoption-form/adoption-form.entity';
 import { Pet } from '../pet/pet.entity';
 import { ContractData } from './adoption-contract.entity';
 import { DEFAULT_SIGNATURE_CITY } from './contract-template';
+import { petBirthWithAge } from '../pet/pet-age';
 
 type Section = keyof ContractData;
 type FieldKind = 'text' | 'date' | 'boolean' | 'species' | 'sex';
@@ -144,7 +145,7 @@ export function prefillAnimalFromPet(data: ContractData, pet: Pet): ContractData
     species: speciesFromPet(pet),
     sex: sexFromPet(pet),
     breed: pet.animal ?? '',
-    age: pet.age !== null && pet.age !== undefined ? plural(pet.age, 'ano') : '',
+    age: petBirthWithAge(pet.birthDate ?? null),
     castrated: typeof pet.castration === 'boolean' ? pet.castration : null,
   };
   const animal = { ...data.animal };

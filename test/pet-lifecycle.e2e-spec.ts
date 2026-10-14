@@ -83,10 +83,14 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     const createRes = await request(app.getHttpServer())
       .post('/pets')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Bolinha', species: 'Cachorro', sex: 'M', organizationId: orgId });
+      .send({ name: 'Bolinha', species: 'Cachorro', sex: 'M', birthDate: '2020-01', organizationId: orgId });
     expect(createRes.status).toBe(201);
     const petId = createRes.body.id;
     expect(createRes.body.status).toBe('DISPONIVEL');
+    // Nascimento volta como mês/ano, com a idade calculada
+    expect(createRes.body.birthDate).toBe('2020-01');
+    expect(createRes.body.ageLabel).toMatch(/^\d+ anos/);
+    expect(createRes.body).not.toHaveProperty('age');
 
     // 2. Pet aparece na listagem geral
     const listRes = await request(app.getHttpServer())
@@ -103,11 +107,18 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     expect(filterRes.status).toBe(200);
     expect(filterRes.body.data.some(p => p.id === petId)).toBe(true);
 
-    // 4. Admin atualiza o status do pet para EM_PROCESSO
-    const updateRes = await request(app.getHttpServer())
+    // 4. Atualização sem nascimento é recusada (o formulário sempre envia)
+    const missingBirth = await request(app.getHttpServer())
       .put(`/pets/${petId}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ status: 'EM_PROCESSO' });
+    expect(missingBirth.status).toBe(400);
+
+    // 4.1 Admin atualiza o status do pet para EM_PROCESSO
+    const updateRes = await request(app.getHttpServer())
+      .put(`/pets/${petId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'EM_PROCESSO', birthDate: '2020-01' });
     expect(updateRes.status).toBe(200);
     expect(updateRes.body.status).toBe('EM_PROCESSO');
 
@@ -137,7 +148,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     const createRes = await request(app.getHttpServer())
       .post('/pets')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Mingau', species: 'Gato', sex: 'F', organizationId: orgId });
+      .send({ name: 'Mingau', species: 'Gato', sex: 'F', birthDate: '2022-05', organizationId: orgId });
     expect(createRes.status).toBe(201);
     expect(createRes.body.fotos).toEqual([]);
     const petId = createRes.body.id;

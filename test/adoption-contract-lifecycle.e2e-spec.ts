@@ -169,7 +169,7 @@ describe('Fluxo do termo de adoção (e2e)', () => {
   }, 30000);
 
   it('aprovar → contrato → remover cláusula → gerar → concluir → histórico', async () => {
-    const rex = await petRepo.save({ name: 'Rex', species: 'Cachorro', sex: 'Macho', animal: 'Vira-lata', age: 3, castration: true, organizationId: orgId });
+    const rex = await petRepo.save({ name: 'Rex', species: 'Cachorro', sex: 'Macho', animal: 'Vira-lata', birthDate: '2023-07', castration: true, organizationId: orgId });
     const adopted = await petRepo.save({ name: 'Bidu', species: 'Cachorro', sex: 'Macho', status: 'ADOTADO' as any, organizationId: orgId });
 
     // 1. Ficha pública entra como PENDENTE, com evento do formulário público

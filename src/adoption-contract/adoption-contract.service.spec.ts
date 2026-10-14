@@ -147,7 +147,7 @@ describe('AdoptionContractService', () => {
     it('sem pet vinculado, sugere o pet escolhido no formulário e preenche o animal sem reservar', async () => {
       formRepo.findOne.mockResolvedValue({ ...baseForm(AdoptionFormStatus.APROVADO), desiredPetId: 'pet-9' });
       contractRepo.findOne.mockResolvedValue(null);
-      petRepo.findOne.mockResolvedValue({ id: 'pet-9', name: 'Mel', species: 'Cachorro', sex: 'Fêmea', status: PetStatus.DISPONIVEL, age: 2, castration: true, fotos: [] });
+      petRepo.findOne.mockResolvedValue({ id: 'pet-9', name: 'Mel', species: 'Cachorro', sex: 'Fêmea', status: PetStatus.DISPONIVEL, birthDate: '2024-07', castration: true, fotos: [] });
 
       const contract = await service.findByForm('form-1', 'org-1', 'user-1');
 
@@ -179,7 +179,7 @@ describe('AdoptionContractService', () => {
     it('cria o rascunho do modelo pré-preenchido com a ficha e o pet vinculado', async () => {
       formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.APROVADO, 'pet-1'));
       contractRepo.findOne.mockResolvedValue(null);
-      petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', species: 'Cachorro', sex: 'Macho', animal: 'Vira-lata', age: 2, castration: true, fotos: [] });
+      petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', species: 'Cachorro', sex: 'Macho', animal: 'Vira-lata', birthDate: '2024-07', castration: true, fotos: [] });
 
       const contract = await service.findByForm('form-1', 'org-1', 'user-1');
 
@@ -196,7 +196,7 @@ describe('AdoptionContractService', () => {
         }),
       );
       expect(saved.data.adopter.age).toMatch(/^\d+ anos$/);
-      expect(saved.data.animal).toEqual(expect.objectContaining({ name: 'Rex', species: 'CANINA', sex: 'MACHO', breed: 'Vira-lata', age: '2 anos', castrated: true }));
+      expect(saved.data.animal).toEqual(expect.objectContaining({ name: 'Rex', species: 'CANINA', sex: 'MACHO', breed: 'Vira-lata', age: expect.stringMatching(/^07\/2024 \(\d+ anos?( e \d+ m(ês|eses))?\)$/), castrated: true }));
       expect(saved.data.signature).toEqual({ city: 'Curitiba/PR', date: null });
       expect(contract.clauses).toHaveLength(14);
       expect(contract.clauses[0]).toEqual(expect.objectContaining({ key: 'animal', locked: true }));

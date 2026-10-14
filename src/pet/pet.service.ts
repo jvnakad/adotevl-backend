@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsOrder, ILike, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -10,6 +10,7 @@ import { UpdatePetDto } from './dto/update-pet.dto';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
 import { StorageService } from '../storage/storage.service';
+import { petAgeLabel } from './pet-age';
 
 export const MAX_PET_PHOTOS = 10;
 export const MAX_PHOTO_SIZE = 5 * 1024 * 1024;
@@ -25,8 +26,17 @@ export interface PetFilters {
   search?: string;
 }
 
+// Idade antiga (anos inteiros) vira nascimento aproximado: mês do cadastro menos a idade
+const LEGACY_AGE_TO_BIRTH_DATE = `
+  UPDATE pets
+     SET birth_date = (date_trunc('month', created_at) - make_interval(years => age))::date,
+         age = NULL
+   WHERE age IS NOT NULL AND birth_date IS NULL`;
+
 @Injectable()
-export class PetService {
+export class PetService implements OnModuleInit {
+  private readonly logger = new Logger(PetService.name);
+
   constructor(
     @InjectRepository(Pet)
     private readonly petRepository: Repository<Pet>,
@@ -35,16 +45,22 @@ export class PetService {
     private readonly storageService: StorageService,
   ) {}
 
+  async onModuleInit() {
+    const [, affected] = await this.petRepository.query(LEGACY_AGE_TO_BIRTH_DATE);
+    if (affected) this.logger.log(`${affected} pet(s) com idade antiga convertido(s) para mês/ano de nascimento.`);
+  }
+
   async create(dto: CreatePetDto, createdBy: string = null) {
     const pet = this.petRepository.create({ ...dto, createdBy, updatedBy: createdBy });
     const saved = await this.petRepository.save(pet);
-    return { ...saved, fotos: [] };
+    return this.withAge({ ...saved, fotos: [] });
   }
 
   async findAll(
     pagination: PaginationDto,
     filters: PetFilters = {},
-    order?: FindOptionsOrder<Pet>,
+    // Padrão do painel: cadastrados mais recentes primeiro
+    order: FindOptionsOrder<Pet> = { createdAt: 'DESC' },
   ) {
     const where: any = { isActive: true };
     if (filters.organizationId) where.organizationId = filters.organizationId;
@@ -54,8 +70,7 @@ export class PetService {
     if (filters.castration !== undefined) where.castration = filters.castration === 'true';
     if (filters.status) where.status = filters.status;
     const result = await paginate(this.petRepository, pagination, this.searchWhere(where, filters.search), { fotos: true }, order);
-    result.data.forEach((pet) => this.sortPhotos(pet));
-    return result;
+    return { ...result, data: result.data.map((pet) => this.withAge(this.sortPhotos(pet))) };
   }
 
   // Versão para o site público: só os campos exibidos, sem dados internos nem storagePath
@@ -70,7 +85,8 @@ export class PetService {
         species: pet.species,
         animal: pet.animal ?? null,
         sex: pet.sex,
-        age: pet.age,
+        birthDate: pet.birthDate ?? null,
+        ageLabel: pet.ageLabel,
         size: pet.size,
         castration: pet.castration,
         about: pet.about,
@@ -82,7 +98,7 @@ export class PetService {
   async findOne(id: string) {
     const pet = await this.petRepository.findOne({ where: { id }, relations: { fotos: true } });
     if (!pet) throw new NotFoundException('Pet não encontrado.');
-    return this.sortPhotos(pet);
+    return this.withAge(this.sortPhotos(pet));
   }
 
   async update(id: string, dto: UpdatePetDto, updatedBy: string = null) {
@@ -151,6 +167,11 @@ export class PetService {
       { ...base, name: ILike(`%${search}%`) },
       { ...base, animal: ILike(`%${search}%`) },
     ];
+  }
+
+  // Idade sempre calculada na hora a partir do mês/ano de nascimento
+  private withAge<T extends Pick<Pet, 'birthDate'>>(pet: T) {
+    return { ...pet, ageLabel: petAgeLabel(pet.birthDate ?? null) };
   }
 
   private sortPhotos(pet: Pet) {

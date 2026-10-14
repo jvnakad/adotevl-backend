@@ -11,6 +11,17 @@ import {
 import { Organization } from '../organization/organization.entity';
 import { PetPhoto } from './pet-photo.entity';
 
+// Banco guarda o 1º dia do mês; a aplicação trabalha só com 'YYYY-MM'.
+// O driver pg pode devolver `date` como Date à meia-noite local: lê ano/mês locais.
+const birthMonthTransformer = {
+  to: (value?: string | null) => (value ? `${value}-01` : value),
+  from: (value: Date | string | null) => {
+    if (!value) return null;
+    if (!(value instanceof Date)) return String(value).slice(0, 7);
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}`;
+  },
+};
+
 export enum PetStatus {
   DISPONIVEL = 'DISPONIVEL',
   EM_PROCESSO = 'EM_PROCESSO',
@@ -31,7 +42,12 @@ export class Pet {
   @Column({ nullable: true })
   animal: string;
 
-  @Column({ nullable: true })
+  /** Mês/ano aproximado de nascimento ('YYYY-MM'). A idade é calculada na resposta (pet-age.ts). */
+  @Column({ name: 'birth_date', type: 'date', nullable: true, transformer: birthMonthTransformer })
+  birthDate: string | null;
+
+  /** Legado: idade em anos. Só é lido na conversão para birthDate (PetService.onModuleInit). */
+  @Column({ nullable: true, select: false })
   age: number;
 
   @Column()

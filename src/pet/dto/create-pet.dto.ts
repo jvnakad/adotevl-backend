@@ -1,6 +1,30 @@
-import { IsString, IsOptional, IsBoolean, IsInt, IsNumber, IsDateString, IsUUID, IsEnum, IsIn, registerDecorator, ValidationArguments } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsNumber, IsDateString, IsUUID, IsEnum, IsIn, registerDecorator, ValidationArguments } from 'class-validator';
 import { PetStatus } from '../pet.entity';
 import { isBreedOfSpecies, PET_SPECIES } from '../pet-catalog';
+import { BIRTH_MONTH_PATTERN, currentMonthInBrazil } from '../pet-age';
+
+const birthMonthError = (value: unknown) => {
+  if (value === undefined || value === null || value === '') return 'Informe o mês/ano de nascimento.';
+  if (typeof value !== 'string' || !BIRTH_MONTH_PATTERN.test(value)) return 'Nascimento deve estar no formato AAAA-MM.';
+  // 'YYYY-MM' compara certo como texto
+  if (value > currentMonthInBrazil()) return 'Nascimento não pode ser no futuro.';
+  return null;
+};
+
+// Mês/ano de nascimento obrigatório, sem futuro. Um validador só, para devolver uma mensagem por vez
+export function BirthMonth() {
+  return (object: object, propertyName: string) =>
+    registerDecorator({
+      name: 'birthMonth',
+      target: object.constructor,
+      propertyName,
+      options: { always: true },
+      validator: {
+        validate: (value: unknown) => birthMonthError(value) === null,
+        defaultMessage: (args: ValidationArguments) => birthMonthError(args.value),
+      },
+    });
+}
 
 export const PetSpecies = () => IsIn(PET_SPECIES, { message: 'Espécie inválida.' });
 
@@ -35,9 +59,8 @@ export class CreatePetDto {
   @IsOptional()
   animal?: string;
 
-  @IsInt({ message: 'A idade deve ser um número inteiro.' })
-  @IsOptional()
-  age?: number;
+  @BirthMonth()
+  birthDate: string;
 
   @IsString()
   sex: string;

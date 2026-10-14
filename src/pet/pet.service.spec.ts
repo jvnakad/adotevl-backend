@@ -13,6 +13,9 @@ describe('PetService', () => {
   let storage: { upload: jest.Mock; remove: jest.Mock };
   let service: PetService;
 
+  beforeAll(() => jest.useFakeTimers({ now: new Date('2026-10-14T12:00:00Z'), doNotFake: ['nextTick', 'setImmediate'] }));
+  afterAll(() => jest.useRealTimers());
+
   beforeEach(() => {
     petRepo = createMockRepository();
     photoRepo = createMockRepository();
@@ -21,12 +24,26 @@ describe('PetService', () => {
   });
 
   it('create registra auditoria e devolve fotos vazias', async () => {
-    const result = await service.create({ name: 'Bob', species: 'Cachorro', sex: 'Macho', organizationId: 'org-1' }, 'user-1');
+    const result = await service.create({ name: 'Bob', species: 'Cachorro', sex: 'Macho', birthDate: '2024-10', organizationId: 'org-1' }, 'user-1');
 
-    expect(result).toEqual(expect.objectContaining({ name: 'Bob', createdBy: 'user-1', updatedBy: 'user-1', fotos: [] }));
+    expect(result).toEqual(expect.objectContaining({ name: 'Bob', createdBy: 'user-1', updatedBy: 'user-1', fotos: [], ageLabel: '2 anos' }));
   });
 
   describe('findAll', () => {
+    it('lista os cadastrados mais recentes primeiro', async () => {
+      await service.findAll(pagination, { organizationId: 'org-1' });
+
+      expect(petRepo.findAndCount).toHaveBeenCalledWith(expect.objectContaining({ order: { createdAt: 'DESC' } }));
+    });
+
+    it('devolve a idade calculada a partir do nascimento', async () => {
+      petRepo.findAndCount.mockResolvedValue([[{ id: 'p1', birthDate: '2026-02', fotos: [] }, { id: 'p2', birthDate: null, fotos: [] }], 2]);
+
+      const result = await service.findAll(pagination);
+
+      expect(result.data.map((pet) => pet.ageLabel)).toEqual(['8 meses', null]);
+    });
+
     it('monta filtros, converte castration e carrega fotos', async () => {
       await service.findAll(pagination, { organizationId: 'org-1', species: 'Gato', castration: 'false', status: 'ADOTADO' });
 
@@ -71,17 +88,23 @@ describe('PetService', () => {
     });
   });
 
-  it('findAllPublic expõe só os campos do site', async () => {
+  it('findAllPublic expõe só os campos do site, com nascimento e idade calculada', async () => {
     petRepo.findAndCount.mockResolvedValue([
-      [{ id: 'p1', name: 'Bob', species: 'Cachorro', animal: 'Vira-lata', sex: 'Macho', age: 3, size: 'Medio', castration: true, about: 'Dócil', weight: 10, createdBy: 'u1', fotos: [{ id: 'f1', url: 'u', storagePath: 's', createdAt: new Date() }] }],
+      [{ id: 'p1', name: 'Bob', species: 'Cachorro', animal: 'Vira-lata', sex: 'Macho', birthDate: '2024-07', size: 'Medio', castration: true, about: 'Dócil', weight: 10, createdBy: 'u1', fotos: [{ id: 'f1', url: 'u', storagePath: 's', createdAt: new Date() }] }],
       1,
     ]);
 
     const result = await service.findAllPublic(pagination, { organizationId: 'org-1' });
 
-    expect(result.data[0]).toEqual({ id: 'p1', name: 'Bob', species: 'Cachorro', animal: 'Vira-lata', sex: 'Macho', age: 3, size: 'Medio', castration: true, about: 'Dócil', fotos: [{ url: 'u' }] });
+    expect(result.data[0]).toEqual({ id: 'p1', name: 'Bob', species: 'Cachorro', animal: 'Vira-lata', sex: 'Macho', birthDate: '2024-07', ageLabel: '2 anos e 3 meses', size: 'Medio', castration: true, about: 'Dócil', fotos: [{ url: 'u' }] });
     // Ordenado por nome para o select do formulário de adoção
     expect(petRepo.findAndCount).toHaveBeenCalledWith(expect.objectContaining({ order: { name: 'ASC' } }));
+  });
+
+  it('findOne devolve a idade calculada', async () => {
+    petRepo.findOne.mockResolvedValue({ id: 'p1', birthDate: '2025-09', fotos: [] });
+
+    expect((await service.findOne('p1')).ageLabel).toBe('1 ano e 1 mês');
   });
 
   it('findOne lança NotFoundException quando não existe', async () => {

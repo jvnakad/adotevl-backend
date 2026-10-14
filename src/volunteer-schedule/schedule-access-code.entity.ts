@@ -27,6 +27,10 @@ export class ScheduleAccessCode {
   @Column({ name: 'used_at', type: 'timestamptz', nullable: true })
   usedAt: Date | null;
 
+  /** Já marcou um horário: cada marcação pela LP exige um código novo */
+  @Column({ name: 'booked_at', type: 'timestamptz', nullable: true })
+  bookedAt: Date | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 }

@@ -73,7 +73,7 @@ export class ScheduleAccessService {
 
     await this.codeRepository.update(stored.id, { usedAt: now });
     const token = this.jwtService.sign(
-      { sub: user.id, organizationId: user.organizationId, scope: 'schedule' },
+      { sub: user.id, organizationId: user.organizationId, scope: 'schedule', codeId: stored.id },
       { secret: sessionSecret(), expiresIn: SESSION_TTL },
     );
     return { token, firstName: user.fullName.trim().split(/\s+/)[0] };
@@ -86,10 +86,20 @@ export class ScheduleAccessService {
       if (!token) throw new Error('sem token');
       const payload = this.jwtService.verify(token, { secret: sessionSecret() });
       if (payload?.scope !== 'schedule') throw new Error('escopo');
-      return { userId: payload.sub as string, organizationId: payload.organizationId as string };
+      return { userId: payload.sub as string, organizationId: payload.organizationId as string, codeId: payload.codeId as string | undefined };
     } catch {
       throw new UnauthorizedException('Sessão da agenda expirada. Peça um novo código.');
     }
+  }
+
+  /** Cada marcação pela LP exige um código novo: a sessão continua valendo para ver e desmarcar. */
+  async assertCanBook(codeId: string | undefined) {
+    const code = codeId ? await this.codeRepository.findOne({ where: { id: codeId } }) : null;
+    if (!code || code.bookedAt) throw new UnauthorizedException('Para marcar outro horário, confirme um novo código.');
+  }
+
+  async markBooked(codeId: string, now = new Date()) {
+    await this.codeRepository.update(codeId, { bookedAt: now });
   }
 
   /** Igual a `session`, mas sem token devolve null (GET público da agenda). */

@@ -41,10 +41,14 @@ export class PublicScheduleController {
 
   @Post('shifts')
   @UseGuards(ThrottlerGuard)
-  @ApiOperation({ summary: 'Marcar horário (LP)', description: 'Sessão da agenda. Mesmas regras do sistema.' })
-  book(@Body() dto: PublicCreateShiftDto, @Headers('authorization') authorization: string) {
-    const { userId, organizationId } = this.accessService.session(authorization);
-    return this.scheduleService.book({ ...dto, organizationId }, { id: userId, canManage: false });
+  @ApiOperation({ summary: 'Marcar horário (LP)', description: 'Sessão da agenda. Mesmas regras do sistema. Cada marcação consome o código: outro horário exige novo código (401).' })
+  async book(@Body() dto: PublicCreateShiftDto, @Headers('authorization') authorization: string) {
+    const { userId, organizationId, codeId } = this.accessService.session(authorization);
+    await this.accessService.assertCanBook(codeId);
+    const shift = await this.scheduleService.book({ ...dto, organizationId }, { id: userId, canManage: false });
+    // Só consome depois de marcar: erro de validação (horário cruzado, dia trancado) não gasta o código
+    await this.accessService.markBooked(codeId);
+    return shift;
   }
 
   @Delete('shifts/:id')

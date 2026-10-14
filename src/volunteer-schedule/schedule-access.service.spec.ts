@@ -79,7 +79,7 @@ describe('ScheduleAccessService', () => {
 
       const result = await service.verify('isa@teste.com', '482913', 'org-1', NOW);
 
-      expect(jwt.sign).toHaveBeenCalledWith({ sub: 'u1', organizationId: 'org-1', scope: 'schedule' }, expect.objectContaining({ expiresIn: '2h', secret: expect.stringContaining(':schedule') }));
+      expect(jwt.sign).toHaveBeenCalledWith({ sub: 'u1', organizationId: 'org-1', scope: 'schedule', codeId: 'c1' }, expect.objectContaining({ expiresIn: '2h', secret: expect.stringContaining(':schedule') }));
       expect(codeRepo.update).toHaveBeenCalledWith('c1', { usedAt: NOW });
       expect(result).toEqual({ token: 'session-token', firstName: 'Isa' });
     });
@@ -105,9 +105,9 @@ describe('ScheduleAccessService', () => {
 
   describe('sessão', () => {
     it('token da agenda vira o voluntário', () => {
-      jwt.verify.mockReturnValue({ sub: 'u1', organizationId: 'org-1', scope: 'schedule' });
+      jwt.verify.mockReturnValue({ sub: 'u1', organizationId: 'org-1', scope: 'schedule', codeId: 'c1' });
 
-      expect(service.session('Bearer session-token')).toEqual({ userId: 'u1', organizationId: 'org-1' });
+      expect(service.session('Bearer session-token')).toEqual({ userId: 'u1', organizationId: 'org-1', codeId: 'c1' });
       expect(jwt.verify).toHaveBeenCalledWith('session-token', expect.objectContaining({ secret: expect.stringContaining(':schedule') }));
     });
 
@@ -120,6 +120,29 @@ describe('ScheduleAccessService', () => {
       jwt.verify.mockReturnValueOnce({ sub: 'u1', organizationId: 'org-1' });
       expect(() => service.session('Bearer x')).toThrow(UnauthorizedException);
       expect(() => service.session(undefined)).toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('um código por marcação', () => {
+    const message = new UnauthorizedException('Para marcar outro horário, confirme um novo código.');
+
+    it('código ainda não usado para marcar libera a marcação', async () => {
+      codeRepo.findOne.mockResolvedValue({ id: 'c1', bookedAt: null });
+
+      await expect(service.assertCanBook('c1')).resolves.toBeUndefined();
+    });
+
+    it('código que já marcou um horário (ou sessão antiga sem código) é recusado', async () => {
+      codeRepo.findOne.mockResolvedValueOnce({ id: 'c1', bookedAt: NOW });
+      await expect(service.assertCanBook('c1')).rejects.toThrow(message);
+
+      await expect(service.assertCanBook(undefined)).rejects.toThrow(message);
+    });
+
+    it('marcação feita consome o código', async () => {
+      await service.markBooked('c1', NOW);
+
+      expect(codeRepo.update).toHaveBeenCalledWith('c1', { bookedAt: NOW });
     });
   });
 });

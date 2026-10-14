@@ -116,6 +116,10 @@ describe('Agenda de voluntariado (e2e)', () => {
     const booked = await request(server()).post('/public/schedule/shifts').set('Authorization', `Bearer ${session}`).send({ date: day, startTime: '14:00', endTime: '16:00' });
     expect(booked.status).toBe(201);
 
+    // Cada marcação pede um código novo; a sessão segue valendo para ver e desmarcar
+    const again = await request(server()).post('/public/schedule/shifts').set('Authorization', `Bearer ${session}`).send({ date: day, startTime: '16:30', endTime: '17:30' });
+    expect(again.status).toBe(401);
+
     const mine = await request(server()).get(`/public/schedule?organizationId=${orgId}&month=${month}`).set('Authorization', `Bearer ${session}`);
     expect(mine.body.shifts.filter((shift) => shift.mine)).toHaveLength(2);
 

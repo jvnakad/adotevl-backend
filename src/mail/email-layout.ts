@@ -94,6 +94,8 @@ type LayoutOptions = {
 
 export function emailLayout({ preheader, title, eyebrow, body }: LayoutOptions) {
   const landing = (process.env.LANDING_URL || 'http://localhost:4321').replace(/\/$/, '');
+  // Logo precisa de URL pública (Gmail não carrega localhost): em dev aponta para a LP publicada
+  const assets = (process.env.EMAIL_ASSET_URL || landing).replace(/\/$/, '');
   const year = new Date().getFullYear();
   return `<!doctype html>
 <html lang="pt-BR">
@@ -113,7 +115,7 @@ export function emailLayout({ preheader, title, eyebrow, body }: LayoutOptions) 
           <tr>
             <td align="center" style="padding:0 0 20px;">
               <a href="${landing}" style="text-decoration:none;">
-                <img src="${landing}/email/logo.png" width="140" alt="${ORG_CHANNELS.name}" style="display:block;width:140px;height:auto;border:0;font-family:${DISPLAY};font-size:22px;font-weight:800;color:${COLORS.brand};">
+                <img src="${assets}/email/logo.png" width="140" alt="${ORG_CHANNELS.name}" style="display:block;width:140px;height:auto;border:0;font-family:${DISPLAY};font-size:22px;font-weight:800;color:${COLORS.brand};">
               </a>
             </td>
           </tr>

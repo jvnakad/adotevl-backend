@@ -19,6 +19,7 @@ describe('MailService', () => {
     process.env.APP_URL = 'https://app.adotevl.org';
     process.env.LANDING_URL = 'https://adotevl.org';
     delete process.env.MAIL_DRIVER;
+    delete process.env.EMAIL_ASSET_URL;
     service = new MailService();
   });
 
@@ -100,6 +101,16 @@ describe('MailService', () => {
         expect(message.html).toContain('Curitiba/PR');
         expect(message.html).not.toContain('Rua ');
       }
+    });
+
+    it('EMAIL_ASSET_URL troca só a origem do logo (links seguem a LANDING_URL)', async () => {
+      process.env.EMAIL_ASSET_URL = 'https://lp-adoteapp.netlify.app/';
+
+      await service.sendShiftConfirmationEmail('isa@teste.com', 'Isa', { date: '2026-10-20', startTime: '09:00', endTime: '14:00', cancelToken: 'tok' });
+
+      const [message] = mockSend.mock.calls[0] as any[];
+      expect(message.html).toContain('src="https://lp-adoteapp.netlify.app/email/logo.png"');
+      expect(message.html).toContain('https://adotevl.org/?desmarcar=tok#agenda');
     });
 
     it('escapa o nome digitado no cadastro (HTML no e-mail)', async () => {

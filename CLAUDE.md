@@ -127,7 +127,7 @@ src/<feature>/
 
 ## E-mails (`src/mail`)
 - Todo e-mail usa `emailLayout` (`email-layout.ts`): tabelas + estilo inline, cores da LP, logo em `${LANDING_URL}/email/logo.png` (arquivo em `LP/public/email/logo.png`), rodapé com os canais da ONG (`ORG_CHANNELS`, espelha `LP/src/data/site.ts`). Nome vindo do cadastro passa por `escapeHtml`/`firstName`.
-- Env: `LANDING_URL` (logo e links), `APP_URL` (links do sistema), `MAIL_FROM`, `RESEND_API_KEY`.
+- Env: `LANDING_URL` (links e logo), `EMAIL_ASSET_URL` (opcional: origem só do logo — em dev a LP publicada, porque o Gmail não carrega localhost), `APP_URL` (links do sistema), `MAIL_FROM`, `RESEND_API_KEY`.
 - Desenvolvimento: `MAIL_DRIVER=smtp` + `SMTP_HOST`/`SMTP_PORT` envia por SMTP (nodemailer) para o Mailpit do adotevl-local (caixa em http://localhost:8025). Sem `MAIL_DRIVER` = Resend. Falha de envio vai para o log (`Logger`) e não derruba a ação.
 
 ## Módulos

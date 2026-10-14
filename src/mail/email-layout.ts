@@ -10,7 +10,8 @@ export const ORG_CHANNELS = {
   whatsapp: 'https://wa.me/5541995422456',
   phone: '(41) 99542-2456',
   email: 'adoteumviralatapr@gmail.com',
-  address: 'Rua Expedicionário Eliseu José Hipólito, 304 · Alto Boqueirão, Curitiba-PR',
+  // Só a cidade: o endereço do abrigo não vai em e-mail
+  city: 'Curitiba/PR',
 };
 
 const COLORS = {
@@ -128,7 +129,7 @@ export function emailLayout({ preheader, title, eyebrow, body }: LayoutOptions) 
                 <a href="${landing}" style="color:${COLORS.ink};font-weight:700;text-decoration:none;">Site</a>
               </p>
               <p style="margin:0;font-family:${FONT};font-size:12px;line-height:1.6;color:${COLORS.inkSoft};">
-                Associação ${ORG_CHANNELS.name} · ${ORG_CHANNELS.address}<br>© ${year}
+                Associação ${ORG_CHANNELS.name} · ${ORG_CHANNELS.city}<br>© ${year}
               </p>
             </td>
           </tr>

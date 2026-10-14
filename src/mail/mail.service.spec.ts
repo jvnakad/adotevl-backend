@@ -92,6 +92,8 @@ describe('MailService', () => {
       for (const [message] of mockSend.mock.calls as any[]) {
         expect(message.html).toContain('src="https://adotevl.org/email/logo.png"');
         expect(message.html).toContain('Amor não tem raça');
+        expect(message.html).toContain('Curitiba/PR');
+        expect(message.html).not.toContain('Rua ');
       }
     });
 

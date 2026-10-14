@@ -1,4 +1,5 @@
-import { Controller, Post, Get, Patch, Param, Body, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Param, Body, Query, Req, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AccessGuard } from '../access/access.guard';
@@ -7,6 +8,7 @@ import { AccessLevel, hasLevel, Screen } from '../access/access';
 import { AccessService } from '../access/access.service';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { CreateFloatingVolunteerDto } from './dto/create-floating-volunteer.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ApproveUserDto } from './dto/approve-user.dto';
@@ -21,9 +23,27 @@ export class UserController {
   ) {}
 
   @Post()
-  @ApiOperation({ summary: 'Cadastrar usuário', description: 'Rota pública (cadastro de voluntário). A conta fica aguardando aprovação.' })
-  create(@Body() dto: CreateUserDto) {
-    return this.userService.create(dto);
+  @UseGuards(ThrottlerGuard)
+  @ApiOperation({
+    summary: 'Cadastrar voluntário fixo',
+    description: 'Rota pública. Exige o questionário (exceto 1º usuário da organização). A conta fica aguardando confirmação do e-mail e aprovação.',
+  })
+  async create(@Body() dto: CreateUserDto) {
+    // Honeypot preenchido = robô: finge sucesso sem gravar
+    if (dto.website) return { id: null, email: dto.email };
+    const user = await this.userService.create(dto);
+    return { id: user.id, email: user.email };
+  }
+
+  @Post('floating')
+  @UseGuards(ThrottlerGuard)
+  @ApiOperation({
+    summary: 'Cadastrar voluntário volante',
+    description: 'Rota pública (modal da LP e /signup). Sem senha: a API gera uma aleatória. Já entra aprovado na equipe Voluntário Volante e recebe e-mail de boas-vindas.',
+  })
+  createFloating(@Body() dto: CreateFloatingVolunteerDto) {
+    if (dto.website) return { id: null, fullName: dto.fullName, email: dto.email };
+    return this.userService.createFloating(dto);
   }
 
   @Get()
@@ -34,6 +54,15 @@ export class UserController {
   findAll(@Query() pagination: PaginationDto, @Query('isApproved') isApproved?: string, @Query('teamId') teamId?: string) {
     const approved = isApproved !== undefined ? isApproved === 'true' : undefined;
     return this.userService.findAll(pagination, { isApproved: approved, teamId: teamId || undefined });
+  }
+
+  @Get(':id/application')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @RequireAccess(Screen.VOLUNTEERS, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Questionário do voluntário fixo', description: 'Acesso: Voluntários (Visualizar).' })
+  findApplication(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
+    return this.userService.findApplication(id, req.user.organizationId);
   }
 
   @Get(':id')

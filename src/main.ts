@@ -9,6 +9,8 @@ async function bootstrap() {
   // rawBody: o webhook do Autentique valida a assinatura HMAC sobre o corpo original
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.enableCors();
+  // Atrás do proxy do Railway: req.ip = IP do cliente (limite de cadastros por IP)
+  app.set('trust proxy', 1);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
 
   // Em dev com STORAGE_DRIVER=local os arquivos enviados ficam em ./uploads

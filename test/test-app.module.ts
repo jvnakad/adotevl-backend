@@ -45,11 +45,13 @@ import { AutentiqueService } from '../src/autentique/autentique.service';
 import { WebhooksModule } from '../src/webhooks/webhooks.module';
 import { TeamPermission } from '../src/team/team-permission.entity';
 import { AccessModule } from '../src/access/access.module';
+import { VolunteerApplication } from '../src/volunteer-application/volunteer-application.entity';
 
 class MockMailService {
   async sendConfirmationEmail() {}
   async sendApprovalEmail() {}
   async sendPasswordResetEmail() {}
+  async sendFloatingWelcomeEmail() {}
 }
 
 @Global()
@@ -142,7 +144,7 @@ class MockAutentiqueModule {}
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication,
       ],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
@@ -197,3 +199,27 @@ export async function cleanupAccess(app: INestApplication, organizationId: strin
   await dataSource.query('DELETE FROM volunteers WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [organizationId]);
   await dataSource.query('DELETE FROM teams WHERE organization_id = $1', [organizationId]);
 }
+
+/** Questionário válido do voluntário fixo (POST /users). */
+export const VOLUNTEER_APPLICATION = {
+  city: 'Curitiba',
+  neighborhood: 'Boqueirão',
+  referralSources: ['INSTAGRAM'],
+  interestAreas: ['EVENTOS', 'OUTROS'],
+  interestOther: 'Lar temporário',
+  aboutYou: 'Gosto de cuidar de bichos.',
+  strengthWeakness: 'Ansiosa e dedicada.',
+  unpaidWorkFeeling: 'Faço por amor.',
+  strayAnimalsFeeling: 'QUERO_MUDAR',
+  loyalty: 'SIM',
+  witnessedAbuse: true,
+  pressureHandling: 'CONSIGO',
+  stressReaction: 'PACIFICA',
+  roadkillActions: ['PESQUISA_HOSPITAIS', 'VAI_AO_LOCAL'],
+  emergencyRescueHelp: 'Divulgo e busco lar temporário.',
+  debtActions: ['RIFA'],
+  availablePeriods: ['NOITE'],
+  tools: ['CANVA', 'INSTAGRAM'],
+  shelterVisit: 'SIM',
+  acceptsInterview: true,
+};

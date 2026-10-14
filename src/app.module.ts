@@ -38,6 +38,7 @@ import { AdoptionFormPhoto } from './adoption-form/adoption-form-photo.entity';
 import { AdoptionHistoryModule } from './adoption-history/adoption-history.module';
 import { AdoptionHistoryEvent } from './adoption-history/adoption-history.entity';
 import { AdoptionContractModule } from './adoption-contract/adoption-contract.module';
+import { VolunteerApplication } from './volunteer-application/volunteer-application.entity';
 import { AdoptionContract } from './adoption-contract/adoption-contract.entity';
 import { AutentiqueModule } from './autentique/autentique.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
@@ -51,7 +52,7 @@ import { AccessModule } from './access/access.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),

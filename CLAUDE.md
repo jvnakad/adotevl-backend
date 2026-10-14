@@ -110,6 +110,18 @@ src/<feature>/
 - Migração no boot (`AccessMigrationService`, idempotente): garante a equipe Admin; aprovados sem equipe vão para a equipe do perfil (Admin / Financeiro / Voluntário Fixo, com o acesso antigo); equipes anteriores às permissões (`access_configured_at` null) recebem o acesso antigo dos perfis dos membros; equipe Admin vazia recebe os usuários de perfil ADMIN; por último cria, sem acesso, as equipes padrão que ainda faltarem.
 - E2E: `joinTeam(app, user, 'ADMIN' | permissões)` e `cleanupAccess(app, orgId)` em `test/test-app.module.ts`.
 
+## Cadastro de voluntário (`src/user`, `src/volunteer-application`)
+- **Fixo** — `POST /users` (público): dados + senha + `consent: true` + `application` (questionário, `VolunteerApplicationDto`; obrigatório exceto para o 1º usuário da organização). Grava `volunteer_applications` (1:1 com o usuário), fica aguardando confirmação do e-mail e aprovação (o modal do front já sugere a equipe Voluntário Fixo). Responde só `{ id, email }`.
+- **Volante** — `POST /users/floating` (público, modal da LP e `/signup?tipo=volante`): nome, e-mail, CPF, celular, nascimento, `consent`. Sem senha: a API grava uma aleatória (bcrypt de 24 bytes) só para o login aceitar; já nasce confirmado, aprovado e na equipe Voluntário Volante (`TeamService.systemTeam`) e recebe `sendFloatingWelcomeEmail`. Vira fixo trocando a equipe + "Esqueci a senha".
+- Idade (`volunteer-age.ts`, dia de hoje em Brasília): mínimo 16; 16–17 exigem `guardianName`, `guardianPhone` e `guardianConsent: true` (colunas `guardian_*` no usuário); maior de idade grava responsável `null`. `consent_at` = aceite LGPD.
+- Opções do questionário em `volunteer-application.options.ts` (espelha `src/constants/volunteerSignupOptions.ts` do front). "Outros" exige texto (`referralOther`/`interestOther`); `NENHUM`, `PREFERE_NAO_VER` e `PREFERE_NAO_PARTICIPAR` são exclusivas.
+- Anti-spam nas duas rotas: `ThrottlerGuard` (`SIGNUP_RATE_LIMIT` por minuto por IP, padrão 5; `trust proxy` no `main.ts`) e honeypot `website` (preenchido → responde sucesso sem gravar).
+- `GET /users/:id/application` (Voluntários Visualizar, escopo da organização). `GET /users` devolve `hasApplication`.
+
+## E-mails (`src/mail`)
+- Todo e-mail usa `emailLayout` (`email-layout.ts`): tabelas + estilo inline, cores da LP, logo em `${LANDING_URL}/email/logo.png` (arquivo em `LP/public/email/logo.png`), rodapé com os canais da ONG (`ORG_CHANNELS`, espelha `LP/src/data/site.ts`). Nome vindo do cadastro passa por `escapeHtml`/`firstName`.
+- Env: `LANDING_URL` (logo e links), `APP_URL` (links do sistema), `MAIL_FROM`, `RESEND_API_KEY`.
+
 ## Módulos
 organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), adoption-history, adoption-contract, autentique, webhooks, mail, storage.
 

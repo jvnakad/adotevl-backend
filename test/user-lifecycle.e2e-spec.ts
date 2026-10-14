@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const request = require('supertest');
-import { TestAppModule, joinTeam, cleanupAccess } from './test-app.module';
+import { TestAppModule, joinTeam, cleanupAccess, VOLUNTEER_APPLICATION } from './test-app.module';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Profile } from '../src/profile/profile.entity';
 import { Organization } from '../src/organization/organization.entity';
@@ -89,13 +89,25 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
         cpf: '99988877700',
         email: 'voluntario.novo@teste.com',
         phone: '11900000002',
+        birthDate: '1990-04-20',
         password: 'senha123',
         profileId: volunteerProfile.id,
+        consent: true,
+        application: VOLUNTEER_APPLICATION,
         organizationId: orgId,
       });
     expect(createRes.status).toBe(201);
+    // Resposta pública não expõe hash da senha nem código de confirmação (o código chega por e-mail)
+    expect(createRes.body).toEqual({ id: expect.any(String), email: 'voluntario.novo@teste.com' });
     const userId = createRes.body.id;
-    const confirmationCode = createRes.body.confirmationCode;
+    const { confirmationCode } = await userRepo.findOne({ where: { id: userId } });
+
+    // Admin lê o questionário respondido no cadastro
+    const applicationRes = await request(app.getHttpServer())
+      .get(`/users/${userId}/application`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(applicationRes.status).toBe(200);
+    expect(applicationRes.body).toEqual(expect.objectContaining({ city: 'Curitiba', tools: ['CANVA', 'INSTAGRAM'] }));
 
     // 2. Confirma o e-mail via código
     const confirmRes = await request(app.getHttpServer())

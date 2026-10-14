@@ -122,6 +122,12 @@ export class TeamService {
     return admin;
   }
 
+  /** Equipe padrão da organização pela chave (cria as padrão que faltarem). */
+  async systemTeam(organizationId: string, systemKey: TeamSystemKey) {
+    await this.ensureDefaultTeams(organizationId);
+    return this.teamRepository.findOne({ where: { organizationId, systemKey } });
+  }
+
   private async permissionsOf(team: Team): Promise<ScreenPermissions> {
     if (team.isAdmin) return ADMIN_PERMISSIONS;
     const rows = await this.permissionRepository.find({ where: { teamId: team.id } });

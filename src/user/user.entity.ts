@@ -56,6 +56,20 @@ export class User {
   @Column({ name: 'organization_id' })
   organizationId: string;
 
+  /** Aceite LGPD no cadastro (uso dos dados para contato sobre voluntariado) */
+  @Column({ name: 'consent_at', type: 'timestamptz', nullable: true })
+  consentAt: Date | null;
+
+  // Menor de idade (16-17): responsável obrigatório no cadastro
+  @Column({ name: 'guardian_name', type: 'varchar', nullable: true })
+  guardianName: string | null;
+
+  @Column({ name: 'guardian_phone', type: 'varchar', nullable: true })
+  guardianPhone: string | null;
+
+  @Column({ name: 'guardian_consent_at', type: 'timestamptz', nullable: true })
+  guardianConsentAt: Date | null;
+
   @Column({ default: true })
   isActive: boolean;
 

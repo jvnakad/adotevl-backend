@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ILike } from 'typeorm';
 import { PetService, MAX_PET_PHOTOS } from './pet.service';
 import { PetStatus } from './pet.entity';
 import { createMockRepository, MockRepository, pagination } from '../testing/mock-repository';
@@ -34,6 +35,28 @@ describe('PetService', () => {
           where: { isActive: true, organizationId: 'org-1', species: 'Gato', castration: false, status: 'ADOTADO' },
           relations: { fotos: true },
         }),
+      );
+    });
+
+    it('busca por nome ou raça (animal) com OR, mantendo os demais filtros', async () => {
+      await service.findAll(pagination, { organizationId: 'org-1', species: 'Gato', search: '  persa ' });
+
+      const base = { isActive: true, organizationId: 'org-1', species: 'Gato' };
+      expect(petRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: [
+            { ...base, name: ILike('%persa%') },
+            { ...base, animal: ILike('%persa%') },
+          ],
+        }),
+      );
+    });
+
+    it('ignora busca vazia', async () => {
+      await service.findAll(pagination, { organizationId: 'org-1', search: '   ' });
+
+      expect(petRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { isActive: true, organizationId: 'org-1' } }),
       );
     });
 

@@ -1,11 +1,12 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsOrder, Repository } from 'typeorm';
+import { FindOptionsOrder, ILike, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { Pet } from './pet.entity';
 import { PetPhoto } from './pet-photo.entity';
 import { CreatePetDto } from './dto/create-pet.dto';
+import { UpdatePetDto } from './dto/update-pet.dto';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
 import { StorageService } from '../storage/storage.service';
@@ -13,6 +14,16 @@ import { StorageService } from '../storage/storage.service';
 export const MAX_PET_PHOTOS = 10;
 export const MAX_PHOTO_SIZE = 5 * 1024 * 1024;
 const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+export interface PetFilters {
+  organizationId?: string;
+  species?: string;
+  sex?: string;
+  size?: string;
+  castration?: string;
+  status?: string;
+  search?: string;
+}
 
 @Injectable()
 export class PetService {
@@ -32,7 +43,7 @@ export class PetService {
 
   async findAll(
     pagination: PaginationDto,
-    filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string; status?: string } = {},
+    filters: PetFilters = {},
     order?: FindOptionsOrder<Pet>,
   ) {
     const where: any = { isActive: true };
@@ -42,13 +53,13 @@ export class PetService {
     if (filters.size) where.size = filters.size;
     if (filters.castration !== undefined) where.castration = filters.castration === 'true';
     if (filters.status) where.status = filters.status;
-    const result = await paginate(this.petRepository, pagination, where, { fotos: true }, order);
+    const result = await paginate(this.petRepository, pagination, this.searchWhere(where, filters.search), { fotos: true }, order);
     result.data.forEach((pet) => this.sortPhotos(pet));
     return result;
   }
 
   // Versão para o site público: só os campos exibidos, sem dados internos nem storagePath
-  async findAllPublic(pagination: PaginationDto, filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string; status?: string } = {}) {
+  async findAllPublic(pagination: PaginationDto, filters: PetFilters = {}) {
     // Ordem por nome: a lista alimenta o select de animais do formulário de adoção
     const result = await this.findAll(pagination, filters, { name: 'ASC' });
     return {
@@ -74,7 +85,7 @@ export class PetService {
     return this.sortPhotos(pet);
   }
 
-  async update(id: string, dto: Partial<CreatePetDto>, updatedBy: string = null) {
+  async update(id: string, dto: UpdatePetDto, updatedBy: string = null) {
     // Fotos são gerenciadas pelos endpoints próprios; ignora caso o front reenvie o objeto completo
     const { fotos, ...data } = dto as Partial<CreatePetDto> & { fotos?: unknown };
     await this.petRepository.update(id, { ...data, updatedBy });
@@ -130,6 +141,16 @@ export class PetService {
     await this.storageService.remove([photo.storagePath]);
     await this.photoRepository.delete(photo.id);
     return { message: 'Foto removida com sucesso.' };
+  }
+
+  // Busca por nome ou raça: array no where vira OR, mantendo os demais filtros em cada ramo
+  private searchWhere(base: Record<string, unknown>, rawSearch?: string) {
+    const search = rawSearch?.trim();
+    if (!search) return base;
+    return [
+      { ...base, name: ILike(`%${search}%`) },
+      { ...base, animal: ILike(`%${search}%`) },
+    ];
   }
 
   private sortPhotos(pet: Pet) {

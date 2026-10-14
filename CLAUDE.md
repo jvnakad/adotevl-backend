@@ -116,10 +116,15 @@ Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFo
   - de `AGUARDANDO_ASSINATURA/CONCLUIDA` só volta para `APROVADO` e só ADMIN (403) → pet `EM_PROCESSO`, `adoptionDate` null; saindo de `AGUARDANDO_ASSINATURA` o documento é excluído no Autentique (best effort) e a assinatura fica `CANCELADO`.
 - `desiredPet`/`desiredPetId` (nullable, `SET NULL`): pet escolhido pelo adotante no select do formulário público (`GET /pets` público: só `DISPONIVEL`, ordem por nome, com `species`/`animal`). No `POST`, o pet precisa ser da organização, ativo e `DISPONIVEL` (senão 400 "não está mais disponível") e `desiredAnimal` vira o nome dele; sem pet, `desiredAnimal` é a descrição livre. Não entra no `UpdateAdoptionFormDto`. É só sugestão: o termo devolve `suggestedPetId` (pet ainda vinculável e termo sem pet) e preenche o animal na criação do rascunho; quem vincula/reserva é o `PUT` do termo.
 - `pet`/`petId` (nullable, `SET NULL`): pet escolhido no contrato. `GET :id` devolve `pet: { id, name, species, fotos[{url}] } | null`.
-- `GET /adoption-forms/board?search=` → `{ columns: [{ status, total, items }] }` (6 colunas, até 50 itens resumidos, `updatedAt DESC`). Declarada antes de `:id`.
+- `GET /adoption-forms/board?search=&status=` → `{ columns: [{ status, total, items }] }` (todas as colunas, até 50 itens resumidos, `updatedAt DESC`; com `status`, as demais colunas vêm vazias sem consultar o banco). Declarada antes de `:id`.
 - `GET /adoption-forms/:id/history` → eventos da ficha (`createdAt DESC`).
 - Toda ação da ficha grava histórico: criar (`FICHA_CRIADA`, usuário "Formulário público"), editar (`FICHA_EDITADA` com `metadata.fields` [{field,label,before,after}] — rótulos em `adoption-form-labels.ts`), fotos, remover.
 - `birthDate` é gravado com `localDate()` (meia-noite local): o TypeORM grava coluna `date` pelo dia local; `new Date('YYYY-MM-DD')` voltaria um dia em UTC-3. O driver pg devolve `date` como Date à meia-noite local — use `dateOnly()` de `adoption-contract/contract-data.ts`.
+
+### pet
+- `GET /pets?search=` busca por nome ou raça (`animal`), ILike com OR, na rota autenticada e na pública.
+- Catálogo de espécies e raças em `src/pet/pet-catalog.ts`, exposto em `GET /pets/options` (público, antes de `:id`). O front não tem mais lista própria.
+- `CreatePetDto`/`UpdatePetDto` validam `species` no catálogo e `animal` como raça da espécie enviada no mesmo payload (update que troca a raça manda a espécie junto).
 
 ### adoption-history
 - Entidade `adoption_history_events` (só insert): `adoptionFormId` (CASCADE), `organizationId`, `adopterName` (snapshot), `type` (`AdoptionHistoryType`), `fromStatus/toStatus`, `description` PT-BR pronta, `metadata` jsonb, `userId`, `userName` (snapshot). Índices (`organizationId`, `createdAt`) e (`adoptionFormId`).

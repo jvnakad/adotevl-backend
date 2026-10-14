@@ -8,6 +8,8 @@ import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
 import { Roles } from '../auth/roles.decorator';
 import { PetService, MAX_PET_PHOTOS, MAX_PHOTO_SIZE } from './pet.service';
 import { CreatePetDto } from './dto/create-pet.dto';
+import { UpdatePetDto } from './dto/update-pet.dto';
+import { PET_BREEDS_BY_SPECIES, PET_SPECIES } from './pet-catalog';
 
 @ApiTags('Pets')
 @Controller('pets')
@@ -26,7 +28,7 @@ export class PetController {
   @Get()
   @ApiBearerAuth()
   @UseGuards(OptionalJwtAuthGuard)
-  @ApiOperation({ summary: 'Listar pets', description: 'Rota pública. Sem login, filtra pelo organizationId da URL e retorna apenas os dados exibidos no site (id, name, sex, age, size, castration, about e url das fotos). Com login de ADMIN ou VOLUNTEER, usa a organização do usuário e retorna o pet completo. Filtros: organizationId, species, sex, size, castration (true/false), status (DISPONIVEL, EM_PROCESSO, ADOTADO)' })
+  @ApiOperation({ summary: 'Listar pets', description: 'Rota pública. Sem login, filtra pelo organizationId da URL e retorna apenas os dados exibidos no site (id, name, sex, age, size, castration, about e url das fotos). Com login de ADMIN ou VOLUNTEER, usa a organização do usuário e retorna o pet completo. Filtros: organizationId, species, sex, size, castration (true/false), status (DISPONIVEL, EM_PROCESSO, ADOTADO), search (nome ou raça)' })
   findAll(
     @Query() pagination: PaginationDto,
     @Request() req,
@@ -36,12 +38,20 @@ export class PetController {
     @Query('size') size?: string,
     @Query('castration') castration?: string,
     @Query('status') status?: string,
+    @Query('search') search?: string,
   ) {
     // Só ADMIN e VOLUNTEER recebem o pet completo; demais perfis e visitantes veem a versão pública
     if (['ADMIN', 'VOLUNTEER'].includes(req.user?.profileName)) {
-      return this.petService.findAll(pagination, { organizationId: req.user.organizationId, species, sex, size, castration, status });
+      return this.petService.findAll(pagination, { organizationId: req.user.organizationId, species, sex, size, castration, status, search });
     }
-    return this.petService.findAllPublic(pagination, { organizationId, species, sex, size, castration, status });
+    return this.petService.findAllPublic(pagination, { organizationId, species, sex, size, castration, status, search });
+  }
+
+  // Antes de :id para "options" não cair no ParseUUID/busca por id
+  @Get('options')
+  @ApiOperation({ summary: 'Catálogo de espécies e raças', description: 'Rota pública. Listas usadas nos selects do front e na validação do cadastro.' })
+  options() {
+    return { species: PET_SPECIES, breedsBySpecies: PET_BREEDS_BY_SPECIES };
   }
 
   @Get(':id')
@@ -58,7 +68,7 @@ export class PetController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({ summary: 'Atualizar pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
-  update(@Param('id') id: string, @Body() dto: Partial<CreatePetDto>, @Request() req) {
+  update(@Param('id') id: string, @Body() dto: UpdatePetDto, @Request() req) {
     return this.petService.update(id, dto, req.user.id);
   }
 

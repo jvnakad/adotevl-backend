@@ -1,14 +1,37 @@
-import { IsString, IsOptional, IsBoolean, IsInt, IsNumber, IsDateString, IsUUID, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsBoolean, IsInt, IsNumber, IsDateString, IsUUID, IsEnum, IsIn, registerDecorator, ValidationArguments } from 'class-validator';
 import { PetStatus } from '../pet.entity';
+import { isBreedOfSpecies, PET_SPECIES } from '../pet-catalog';
+
+export const PetSpecies = () => IsIn(PET_SPECIES, { message: 'Espécie inválida.' });
+
+// Raça precisa pertencer à espécie enviada no mesmo payload (no update parcial, quem troca a raça manda a espécie junto)
+export function BreedOfSpecies() {
+  return (object: object, propertyName: string) =>
+    registerDecorator({
+      name: 'breedOfSpecies',
+      target: object.constructor,
+      propertyName,
+      validator: {
+        validate: (value: unknown, args: ValidationArguments) => {
+          const { species } = args.object as { species?: string };
+          return typeof value === 'string' && !!species && isBreedOfSpecies(species, value);
+        },
+        defaultMessage: (args: ValidationArguments) => {
+          const { species } = args.object as { species?: string };
+          return species ? `Raça inválida para a espécie ${species}.` : 'Informe a espécie junto com a raça.';
+        },
+      },
+    });
+}
 
 export class CreatePetDto {
   @IsString()
   name: string;
 
-  @IsString()
+  @PetSpecies()
   species: string;
 
-  @IsString()
+  @BreedOfSpecies()
   @IsOptional()
   animal?: string;
 

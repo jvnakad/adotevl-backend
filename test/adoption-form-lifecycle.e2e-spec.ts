@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const request = require('supertest');
-import { TestAppModule } from './test-app.module';
+import { TestAppModule, joinTeam, cleanupAccess } from './test-app.module';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Profile } from '../src/profile/profile.entity';
 import { Organization } from '../src/organization/organization.entity';
@@ -101,7 +101,7 @@ describe('Fluxo de ciclo de vida da ficha de adoção (e2e)', () => {
   };
 
   const createAdmin = async (email: string, cpf: string, organizationId: string, profileId: string) => {
-    await userRepo.save({
+    const admin = await userRepo.save({
       fullName: 'Admin Ficha Adoção',
       cpf,
       email,
@@ -113,6 +113,7 @@ describe('Fluxo de ciclo de vida da ficha de adoção (e2e)', () => {
       isApproved: true,
       isActive: true,
     });
+    await joinTeam(app, admin, 'ADMIN');
     const loginRes = await request(app.getHttpServer()).post('/auth/login').send({ email, password: 'senha123' });
     return loginRes.body.access_token;
   };
@@ -121,6 +122,7 @@ describe('Fluxo de ciclo de vida da ficha de adoção (e2e)', () => {
     const org = await orgRepo.findOne({ where: { cnpj } });
     if (!org) return;
     await formRepo.delete({ organizationId: org.id });
+    await cleanupAccess(app, org.id);
     await userRepo.delete({ organizationId: org.id });
     await orgRepo.delete({ id: org.id });
   };

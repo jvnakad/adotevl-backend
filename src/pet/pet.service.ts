@@ -1,21 +1,42 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsOrder, Repository } from 'typeorm';
+import { FindOptionsOrder, ILike, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { Pet } from './pet.entity';
 import { PetPhoto } from './pet-photo.entity';
 import { CreatePetDto } from './dto/create-pet.dto';
+import { UpdatePetDto } from './dto/update-pet.dto';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
 import { StorageService } from '../storage/storage.service';
+import { petAgeLabel } from './pet-age';
 
 export const MAX_PET_PHOTOS = 10;
 export const MAX_PHOTO_SIZE = 5 * 1024 * 1024;
 const ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
+export interface PetFilters {
+  organizationId?: string;
+  species?: string;
+  sex?: string;
+  size?: string;
+  castration?: string;
+  status?: string;
+  search?: string;
+}
+
+// Idade antiga (anos inteiros) vira nascimento aproximado: mês do cadastro menos a idade
+const LEGACY_AGE_TO_BIRTH_DATE = `
+  UPDATE pets
+     SET birth_date = (date_trunc('month', created_at) - make_interval(years => age))::date,
+         age = NULL
+   WHERE age IS NOT NULL AND birth_date IS NULL`;
+
 @Injectable()
-export class PetService {
+export class PetService implements OnModuleInit {
+  private readonly logger = new Logger(PetService.name);
+
   constructor(
     @InjectRepository(Pet)
     private readonly petRepository: Repository<Pet>,
@@ -24,16 +45,22 @@ export class PetService {
     private readonly storageService: StorageService,
   ) {}
 
+  async onModuleInit() {
+    const [, affected] = await this.petRepository.query(LEGACY_AGE_TO_BIRTH_DATE);
+    if (affected) this.logger.log(`${affected} pet(s) com idade antiga convertido(s) para mês/ano de nascimento.`);
+  }
+
   async create(dto: CreatePetDto, createdBy: string = null) {
     const pet = this.petRepository.create({ ...dto, createdBy, updatedBy: createdBy });
     const saved = await this.petRepository.save(pet);
-    return { ...saved, fotos: [] };
+    return this.withAge({ ...saved, fotos: [] });
   }
 
   async findAll(
     pagination: PaginationDto,
-    filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string; status?: string } = {},
-    order?: FindOptionsOrder<Pet>,
+    filters: PetFilters = {},
+    // Padrão do painel: cadastrados mais recentes primeiro
+    order: FindOptionsOrder<Pet> = { createdAt: 'DESC' },
   ) {
     const where: any = { isActive: true };
     if (filters.organizationId) where.organizationId = filters.organizationId;
@@ -42,13 +69,12 @@ export class PetService {
     if (filters.size) where.size = filters.size;
     if (filters.castration !== undefined) where.castration = filters.castration === 'true';
     if (filters.status) where.status = filters.status;
-    const result = await paginate(this.petRepository, pagination, where, { fotos: true }, order);
-    result.data.forEach((pet) => this.sortPhotos(pet));
-    return result;
+    const result = await paginate(this.petRepository, pagination, this.searchWhere(where, filters.search), { fotos: true }, order);
+    return { ...result, data: result.data.map((pet) => this.withAge(this.sortPhotos(pet))) };
   }
 
   // Versão para o site público: só os campos exibidos, sem dados internos nem storagePath
-  async findAllPublic(pagination: PaginationDto, filters: { organizationId?: string; species?: string; sex?: string; size?: string; castration?: string; status?: string } = {}) {
+  async findAllPublic(pagination: PaginationDto, filters: PetFilters = {}) {
     // Ordem por nome: a lista alimenta o select de animais do formulário de adoção
     const result = await this.findAll(pagination, filters, { name: 'ASC' });
     return {
@@ -59,7 +85,8 @@ export class PetService {
         species: pet.species,
         animal: pet.animal ?? null,
         sex: pet.sex,
-        age: pet.age,
+        birthDate: pet.birthDate ?? null,
+        ageLabel: pet.ageLabel,
         size: pet.size,
         castration: pet.castration,
         about: pet.about,
@@ -71,10 +98,10 @@ export class PetService {
   async findOne(id: string) {
     const pet = await this.petRepository.findOne({ where: { id }, relations: { fotos: true } });
     if (!pet) throw new NotFoundException('Pet não encontrado.');
-    return this.sortPhotos(pet);
+    return this.withAge(this.sortPhotos(pet));
   }
 
-  async update(id: string, dto: Partial<CreatePetDto>, updatedBy: string = null) {
+  async update(id: string, dto: UpdatePetDto, updatedBy: string = null) {
     // Fotos são gerenciadas pelos endpoints próprios; ignora caso o front reenvie o objeto completo
     const { fotos, ...data } = dto as Partial<CreatePetDto> & { fotos?: unknown };
     await this.petRepository.update(id, { ...data, updatedBy });
@@ -130,6 +157,23 @@ export class PetService {
     await this.storageService.remove([photo.storagePath]);
     await this.photoRepository.delete(photo.id);
     return { message: 'Foto removida com sucesso.' };
+  }
+
+  // Busca por nome ou raça: array no where vira OR, mantendo os demais filtros em cada ramo
+  private searchWhere(base: Record<string, unknown>, rawSearch?: string) {
+    const search = rawSearch?.trim();
+    if (!search) return base;
+    return [
+      { ...base, name: ILike(`%${search}%`) },
+      { ...base, animal: ILike(`%${search}%`) },
+    ];
+  }
+
+  // Idade sempre calculada na hora a partir do mês/ano de nascimento
+  private withAge<T extends Pick<Pet, 'birthDate'>>(pet: T) {
+    // `age` é legado: o retorno do save traz a coluna mesmo com select: false
+    const { age: _legacyAge, ...rest } = pet as T & { age?: number };
+    return { ...rest, ageLabel: petAgeLabel(pet.birthDate ?? null) };
   }
 
   private sortPhotos(pet: Pet) {

@@ -1,4 +1,8 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, INestApplication } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { TeamService } from '../src/team/team.service';
+import { TeamMembershipService } from '../src/team/team-membership.service';
+import { ScreenPermissions } from '../src/access/access';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { Organization } from '../src/organization/organization.entity';
@@ -39,11 +43,26 @@ import { MailService } from '../src/mail/mail.service';
 import { StorageService } from '../src/storage/storage.service';
 import { AutentiqueService } from '../src/autentique/autentique.service';
 import { WebhooksModule } from '../src/webhooks/webhooks.module';
+import { TeamPermission } from '../src/team/team-permission.entity';
+import { AccessModule } from '../src/access/access.module';
+import { VolunteerShift } from '../src/volunteer-schedule/volunteer-shift.entity';
+import { ScheduleLock } from '../src/volunteer-schedule/schedule-lock.entity';
+import { ScheduleAccessCode } from '../src/volunteer-schedule/schedule-access-code.entity';
+import { VolunteerScheduleModule } from '../src/volunteer-schedule/volunteer-schedule.module';
+import { VolunteerApplication } from '../src/volunteer-application/volunteer-application.entity';
 
 class MockMailService {
   async sendConfirmationEmail() {}
   async sendApprovalEmail() {}
   async sendPasswordResetEmail() {}
+  async sendFloatingWelcomeEmail() {}
+  async sendShiftConfirmationEmail() {}
+  async sendShiftCancelledByLockEmail() {}
+  // Último código enviado por e-mail (o e2e da agenda lê daqui)
+  lastScheduleCode: string | null = null;
+  async sendScheduleCodeEmail(_to: string, _name: string, code: string) {
+    this.lastScheduleCode = code;
+  }
 }
 
 @Global()
@@ -134,9 +153,9 @@ class MockAutentiqueModule {}
       type: 'postgres',
       url: process.env.DATABASE_URL,
       entities: [
-        Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer,
+        Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode,
       ],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
@@ -148,6 +167,7 @@ class MockAutentiqueModule {}
     PetModule,
     MedicalRecordModule,
     TeamModule,
+    AccessModule,
     VolunteerModule,
     CampaignModule,
     FinancialModule,
@@ -157,6 +177,7 @@ class MockAutentiqueModule {}
     AdoptionFormModule,
     AdoptionHistoryModule,
     AdoptionContractModule,
+    VolunteerScheduleModule,
     WebhooksModule,
     MockMailModule,
     MockStorageModule,
@@ -164,3 +185,53 @@ class MockAutentiqueModule {}
   ],
 })
 export class TestAppModule {}
+
+// ---- Acesso por equipe nas suítes e2e ----
+
+type TestUser = { id: string; fullName: string; cpf: string; organizationId: string; birthDate?: Date };
+
+/**
+ * Coloca o usuário numa equipe: 'ADMIN' = equipe Admin da organização (acesso total);
+ * um objeto de permissões = equipe própria do usuário com aquele acesso (ex.: o antigo perfil VOLUNTEER).
+ */
+export async function joinTeam(app: INestApplication, user: TestUser, access: 'ADMIN' | ScreenPermissions) {
+  const teams = app.get(TeamService);
+  const team =
+    access === 'ADMIN'
+      ? await teams.ensureAdminTeam(user.organizationId)
+      : await teams.create({ name: `Equipe ${user.fullName}`, organizationId: user.organizationId });
+  if (access !== 'ADMIN') await teams.setPermissions(team.id, access);
+  await app.get(TeamMembershipService).assign({ birthDate: null, ...user }, team.id, null);
+  return team;
+}
+
+/** Remove voluntários e equipes da organização (antes de apagar os usuários: FK de volunteers.user_id). */
+export async function cleanupAccess(app: INestApplication, organizationId: string) {
+  const dataSource = app.get(DataSource);
+  await dataSource.query('DELETE FROM volunteers WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [organizationId]);
+  await dataSource.query('DELETE FROM teams WHERE organization_id = $1', [organizationId]);
+}
+
+/** Questionário válido do voluntário fixo (POST /users). */
+export const VOLUNTEER_APPLICATION = {
+  city: 'Curitiba',
+  neighborhood: 'Boqueirão',
+  referralSources: ['INSTAGRAM'],
+  interestAreas: ['EVENTOS', 'OUTROS'],
+  interestOther: 'Lar temporário',
+  aboutYou: 'Gosto de cuidar de bichos.',
+  strengthWeakness: 'Ansiosa e dedicada.',
+  unpaidWorkFeeling: 'Faço por amor.',
+  strayAnimalsFeeling: 'QUERO_MUDAR',
+  loyalty: 'SIM',
+  witnessedAbuse: true,
+  pressureHandling: 'CONSIGO',
+  stressReaction: 'PACIFICA',
+  roadkillActions: ['PESQUISA_HOSPITAIS', 'VAI_AO_LOCAL'],
+  emergencyRescueHelp: 'Divulgo e busco lar temporário.',
+  debtActions: ['RIFA'],
+  availablePeriods: ['NOITE'],
+  tools: ['CANVA', 'INSTAGRAM'],
+  shelterVisit: 'SIM',
+  acceptsInterview: true,
+};

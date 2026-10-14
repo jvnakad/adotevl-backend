@@ -68,10 +68,10 @@ src/<feature>/
 
 ### Controllers
 - `@ApiTags('<Nome em PT>')`, `@Controller('<rota-kebab-plural>')`.
-- Rota protegida: `@ApiBearerAuth()` + `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles('ADMIN', ...)`.
-- `@ApiOperation({ summary: '...', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })` — sempre listar os perfis; rotas públicas dizem "Rota pública".
+- Rota protegida: `@ApiBearerAuth()` + `@UseGuards(JwtAuthGuard, AccessGuard)` + `@RequireAccess(Screen.X, AccessLevel.VIEW|EDIT)` (ou `@AdminOnly()` para ações só da equipe Admin). `@Roles`/`RolesGuard` são legado — não usar.
+- `@ApiOperation({ summary: '...', description: 'Acesso: Pets (Editar)' })` — sempre dizer a tela e o nível ("Somente equipe Admin" / "Qualquer usuário logado" / "Rota pública").
 - Usuário logado: `req.user` = `{ id, email, profileId, profileName, organizationId }`. Passar `req.user.id` para `createdBy/updatedBy` e filtrar por `req.user.organizationId`.
-- Perfis: `ADMIN`, `FINANCIAL`, `VOLUNTEER` (seed automático em `ProfileService.onModuleInit`).
+- Perfis `ADMIN`/`FINANCIAL`/`VOLUNTEER` são **legado**: ficam no usuário e no JWT, mas não dão acesso. O acesso vem da equipe (ver "Acesso por equipe").
 - Ids de rota: `ParseUUIDPipe`.
 
 ### Services
@@ -98,6 +98,38 @@ src/<feature>/
 - Commits Conventional Commits em inglês (`feat: add pet photos upload...`, `fix: ...`, `refactor: ...`).
 - CI (`.github/workflows/test.yml`): `npm ci` + `npm test` + `npm run test:e2e` com Postgres 15.
 
+## Acesso por equipe (`src/access`, `src/team`)
+- Usuário ↔ equipe via `volunteers.teamId` (1 voluntário ativo por usuário). Sem equipe ativa = 403 em toda rota protegida.
+- Telas em `access.ts` (`Screen`, `SCREENS` com rótulo, tela mãe e `viewOnly`): Pets, Prontuário (mãe Pets), Adotantes, Termo de adoção e Histórico de adoção (mãe Adotantes; histórico só Visualizar), Campanhas, Parceiros, Voluntários, Equipes, Financeiro, Contas bancárias (mãe Financeiro). Níveis `NONE`/`VIEW`/`EDIT`. `GET /access/screens` devolve o catálogo.
+- `team_permissions` (equipe, tela, nível; sem linha = Sem acesso). `TeamService.setPermissions` substitui a matriz, recusa Editar em tela `viewOnly` e sub-tela sem Visualizar na mãe; marca `teams.access_configured_at`.
+- Equipe **Admin** (`teams.is_admin`, uma por organização, `TeamService.ensureAdminTeam`): Editar em tudo (inclusive telas futuras), não pode ser renomeada nem ter a matriz alterada, sempre com ao menos 1 membro ativo (`TeamMembershipService`).
+- **Equipes padrão** (`teams.system_key`, `TeamService.ensureDefaultTeams`): Admin, Financeiro, Voluntário Fixo e Voluntário Volante existem sempre em toda organização (criadas no boot e no cadastro do primeiro usuário). Nome travado; Financeiro/Fixo/Volante nascem sem acesso e têm a matriz editável. Equipe já existente com o mesmo nome é adotada como padrão (mantém membros e acesso).
+- `AccessGuard` lê equipe e permissões do banco a cada requisição (`AccessService.forUser`) — mudança vale na hora — e põe em `req.access`. `/auth/me` devolve `access: { teamId, teamName, isAdmin, permissions }`.
+- Só a equipe Admin: matriz de permissões, aprovar/reprovar usuário (`PATCH /users/:id/approve` exige `teamId`), trocar equipe (`PATCH /users/:id/team`), remover ficha, cancelar assinatura, voltar ficha do termo para Aprovado, desativar pet, organizações, endereços e perfis.
+- Primeiro usuário de uma organização entra na equipe Admin no cadastro. Cadastro público não escolhe perfil (grava VOLUNTEER legado).
+- Migração no boot (`AccessMigrationService`, idempotente): garante a equipe Admin; aprovados sem equipe vão para a equipe do perfil (Admin / Financeiro / Voluntário Fixo, com o acesso antigo); equipes anteriores às permissões (`access_configured_at` null) recebem o acesso antigo dos perfis dos membros; equipe Admin vazia recebe os usuários de perfil ADMIN; por último cria, sem acesso, as equipes padrão que ainda faltarem.
+- E2E: `joinTeam(app, user, 'ADMIN' | permissões)` e `cleanupAccess(app, orgId)` em `test/test-app.module.ts`.
+
+## Cadastro de voluntário (`src/user`, `src/volunteer-application`)
+- **Fixo** — `POST /users` (público): dados + senha + `consent: true` + `application` (questionário, `VolunteerApplicationDto`; obrigatório exceto para o 1º usuário da organização). Grava `volunteer_applications` (1:1 com o usuário), fica aguardando confirmação do e-mail e aprovação (o modal do front já sugere a equipe Voluntário Fixo). Responde só `{ id, email }`.
+- **Volante** — `POST /users/floating` (público, modal da LP e `/signup?tipo=volante`): nome, e-mail, CPF, celular, nascimento, `consent`. Sem senha: a API grava uma aleatória (bcrypt de 24 bytes) só para o login aceitar; já nasce confirmado, aprovado e na equipe Voluntário Volante (`TeamService.systemTeam`) e recebe `sendFloatingWelcomeEmail`. Vira fixo trocando a equipe + "Esqueci a senha".
+- Idade (`volunteer-age.ts`, dia de hoje em Brasília): mínimo 16; 16–17 exigem `guardianName`, `guardianPhone` e `guardianConsent: true` (colunas `guardian_*` no usuário); maior de idade grava responsável `null`. `consent_at` = aceite LGPD.
+- Opções do questionário em `volunteer-application.options.ts` (espelha `src/constants/volunteerSignupOptions.ts` do front). "Outros" exige texto (`referralOther`/`interestOther`); `NENHUM`, `PREFERE_NAO_VER` e `PREFERE_NAO_PARTICIPAR` são exclusivas.
+- Anti-spam nas duas rotas: `ThrottlerGuard` (`SIGNUP_RATE_LIMIT` por minuto por IP, padrão 5; `trust proxy` no `main.ts`) e honeypot `website` (preenchido → responde sucesso sem gravar).
+- `GET /users/:id/application` (Voluntários Visualizar, escopo da organização). `GET /users` devolve `hasApplication`.
+
+## Agenda de voluntariado (`src/volunteer-schedule`)
+- `volunteer_shifts` (usuário, dia `date` como 'YYYY-MM-DD' via `dateColumnTransformer`, `start_time`/`end_time` 'HH:MM', `notes`, `cancel_token` do link do e-mail, `cancelled_at`/`cancel_reason` = soft cancel) e `schedule_locks` (dia trancado com `message`, único por organização).
+- Regras (`schedule-time.ts`, fuso de Brasília): 08:00–18:00 em passos de 30 min, todos os dias; de amanhã até 60 dias; sem limite de vagas; a mesma pessoa pode marcar mais de uma vez no dia sem cruzar horários; voluntário altera/desmarca o próprio até 24h antes; quem gerencia (Agenda: Editar ou equipe Admin) ignora as 24h e marca/remove por qualquer voluntário ativo.
+- Tela `SCHEDULE` ("Agenda") na matriz. `GET /schedule?month=` devolve `{ shifts, locks }`: nome só para a equipe Admin; o próprio vem como "Você" (`mine`), os demais "Voluntário" (sem `id`/`notes`). `POST/PATCH/DELETE /schedule/shifts`, `POST/DELETE /schedule/locks` (trancar desmarca quem estava no dia e manda `sendShiftCancelledByLockEmail`), `GET /schedule/volunteers` (Editar).
+- LP (`/public/schedule`): `GET` público sem nomes; `POST code` (`{ status }`: `SENT`; `NOT_VOLUNTEER` → a LP abre o cadastro de volante e, cadastrado, pede o código sozinha; `PENDING` = em análise/inativo. Só voluntário aprovado e ativo recebe; 6 dígitos com hash, 10 min, 5 tentativas, pedido novo invalida os anteriores) → `POST verify` → `{ token, firstName }` (JWT de 2h com segredo `${JWT_SECRET}:schedule` e `scope: 'schedule'`: não vale como login do sistema) → `POST/DELETE shifts` com `Authorization: Bearer`. **Cada marcação consome o código** (`schedule_access_codes.booked_at`, `codeId` no token): outro horário exige novo código (401); a sessão segue valendo para ver/desmarcar. `POST cancel { token }` = link "Desmarcar" do e-mail (`${LANDING_URL}/?desmarcar=<token>#agenda`). Throttler nas rotas de escrita.
+- E2E: `MockMailService.lastScheduleCode` guarda o último código enviado.
+
+## E-mails (`src/mail`)
+- Todo e-mail usa `emailLayout` (`email-layout.ts`): tabelas + estilo inline, cores da LP, logo em `${LANDING_URL}/email/logo.png` (arquivo em `LP/public/email/logo.png`), rodapé com os canais da ONG (`ORG_CHANNELS`, espelha `LP/src/data/site.ts`). Nome vindo do cadastro passa por `escapeHtml`/`firstName`.
+- Env: `LANDING_URL` (links e logo), `EMAIL_ASSET_URL` (opcional: origem só do logo — em dev a LP publicada, porque o Gmail não carrega localhost), `APP_URL` (links do sistema), `MAIL_FROM`, `RESEND_API_KEY`.
+- Desenvolvimento: `MAIL_DRIVER=smtp` + `SMTP_HOST`/`SMTP_PORT` envia por SMTP (nodemailer) para o Mailpit do adotevl-local (caixa em http://localhost:8025). Sem `MAIL_DRIVER` = Resend. Falha de envio vai para o log (`Logger`) e não derruba a ação.
+
 ## Módulos
 organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), adoption-history, adoption-contract, autentique, webhooks, mail, storage.
 
@@ -116,10 +148,17 @@ Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFo
   - de `AGUARDANDO_ASSINATURA/CONCLUIDA` só volta para `APROVADO` e só ADMIN (403) → pet `EM_PROCESSO`, `adoptionDate` null; saindo de `AGUARDANDO_ASSINATURA` o documento é excluído no Autentique (best effort) e a assinatura fica `CANCELADO`.
 - `desiredPet`/`desiredPetId` (nullable, `SET NULL`): pet escolhido pelo adotante no select do formulário público (`GET /pets` público: só `DISPONIVEL`, ordem por nome, com `species`/`animal`). No `POST`, o pet precisa ser da organização, ativo e `DISPONIVEL` (senão 400 "não está mais disponível") e `desiredAnimal` vira o nome dele; sem pet, `desiredAnimal` é a descrição livre. Não entra no `UpdateAdoptionFormDto`. É só sugestão: o termo devolve `suggestedPetId` (pet ainda vinculável e termo sem pet) e preenche o animal na criação do rascunho; quem vincula/reserva é o `PUT` do termo.
 - `pet`/`petId` (nullable, `SET NULL`): pet escolhido no contrato. `GET :id` devolve `pet: { id, name, species, fotos[{url}] } | null`.
-- `GET /adoption-forms/board?search=` → `{ columns: [{ status, total, items }] }` (6 colunas, até 50 itens resumidos, `updatedAt DESC`). Declarada antes de `:id`.
+- `GET /adoption-forms/board?search=&status=` → `{ columns: [{ status, total, items }] }` (todas as colunas, até 50 itens resumidos, `updatedAt DESC`; com `status`, as demais colunas vêm vazias sem consultar o banco). Declarada antes de `:id`.
 - `GET /adoption-forms/:id/history` → eventos da ficha (`createdAt DESC`).
 - Toda ação da ficha grava histórico: criar (`FICHA_CRIADA`, usuário "Formulário público"), editar (`FICHA_EDITADA` com `metadata.fields` [{field,label,before,after}] — rótulos em `adoption-form-labels.ts`), fotos, remover.
 - `birthDate` é gravado com `localDate()` (meia-noite local): o TypeORM grava coluna `date` pelo dia local; `new Date('YYYY-MM-DD')` voltaria um dia em UTC-3. O driver pg devolve `date` como Date à meia-noite local — use `dateOnly()` de `adoption-contract/contract-data.ts`.
+
+### pet
+- `GET /pets?search=` busca por nome ou raça (`animal`), ILike com OR, na rota autenticada e na pública.
+- Catálogo de espécies e raças em `src/pet/pet-catalog.ts`, exposto em `GET /pets/options` (público, antes de `:id`). O front não tem mais lista própria.
+- Nascimento: coluna `birth_date` (`date`, dia 1) exposta como `birthDate: 'YYYY-MM'` (transformer na entidade). Toda resposta de pet traz `ageLabel` calculado na hora em `pet-age.ts` (fuso de Brasília): "2 anos e 3 meses", "8 meses", "menos de 1 mês". `birthDate` é obrigatório no create **e** no update (formato AAAA-MM, sem mês futuro). Termo de adoção preenche "Idade do animal" com `petBirthWithAge` ("07/2024 (2 anos e 3 meses)").
+- `age` (anos) é legado: fica na entidade com `select: false` só porque `synchronize` apagaria a coluna antes da conversão; `PetService.onModuleInit` converte `age` → `birth_date` (mês do `created_at` − idade) e zera `age`.
+- `CreatePetDto`/`UpdatePetDto` validam `species` no catálogo e `animal` como raça da espécie enviada no mesmo payload (update que troca a raça manda a espécie junto).
 
 ### adoption-history
 - Entidade `adoption_history_events` (só insert): `adoptionFormId` (CASCADE), `organizationId`, `adopterName` (snapshot), `type` (`AdoptionHistoryType`), `fromStatus/toStatus`, `description` PT-BR pronta, `metadata` jsonb, `userId`, `userName` (snapshot). Índices (`organizationId`, `createdAt`) e (`adoptionFormId`).

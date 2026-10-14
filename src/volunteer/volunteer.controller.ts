@@ -1,41 +1,44 @@
 import { Controller, Post, Get, Put, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/roles.decorator';
+import { AccessGuard } from '../access/access.guard';
+import { AdminOnly, RequireAccess } from '../access/access.decorator';
+import { AccessLevel, Screen } from '../access/access';
 import { VolunteerService } from './volunteer.service';
 import { CreateVolunteerDto } from './dto/create-volunteer.dto';
 import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Voluntários')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN')
+@UseGuards(JwtAuthGuard, AccessGuard)
 @Controller('volunteers')
 export class VolunteerController {
   constructor(private readonly volunteerService: VolunteerService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Cadastrar voluntário', description: 'Perfis permitidos: ADMIN' })
+  @RequireAccess(Screen.VOLUNTEERS, AccessLevel.EDIT)
+  @ApiOperation({ summary: 'Cadastrar voluntário', description: 'Acesso: Voluntários (Editar)' })
   create(@Body() dto: CreateVolunteerDto, @Request() req) {
     return this.volunteerService.create(dto, req.user.id);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar voluntários', description: 'Perfis permitidos: ADMIN. Filtros: teamId' })
+  @RequireAccess(Screen.VOLUNTEERS, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Listar voluntários', description: 'Acesso: Voluntários (Visualizar). Filtros: teamId' })
   findAll(@Query() pagination: PaginationDto, @Query('teamId') teamId?: string) {
     return this.volunteerService.findAll(pagination, { teamId });
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Buscar voluntário por ID', description: 'Perfis permitidos: ADMIN, VOLUNTEER (próprio registro)' })
+  @RequireAccess(Screen.VOLUNTEERS, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Buscar voluntário por ID', description: 'Acesso: Voluntários (Visualizar)(próprio registro)' })
   findOne(@Param('id') id: string) {
     return this.volunteerService.findOne(id);
   }
 
   @Put(':id')
-  @ApiOperation({ summary: 'Atualizar voluntário', description: 'Perfis permitidos: ADMIN' })
+  @RequireAccess(Screen.VOLUNTEERS, AccessLevel.EDIT)
+  @ApiOperation({ summary: 'Atualizar voluntário', description: 'Acesso: Voluntários (Editar)' })
   update(@Param('id') id: string, @Body() dto: Partial<CreateVolunteerDto>, @Request() req) {
     return this.volunteerService.update(id, dto, req.user.id);
   }

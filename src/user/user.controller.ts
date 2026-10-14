@@ -1,94 +1,137 @@
-import { Controller, Post, Get, Patch, Param, Body, Query, Req, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Param, Body, Query, Req, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+import { ThrottlerGuard } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/roles.decorator';
+import { AccessGuard } from '../access/access.guard';
+import { AdminOnly, RequireAccess } from '../access/access.decorator';
+import { AccessLevel, hasLevel, Screen } from '../access/access';
+import { AccessService } from '../access/access.service';
 import { UserService } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
+import { CreateFloatingVolunteerDto } from './dto/create-floating-volunteer.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { ApproveUserDto } from './dto/approve-user.dto';
 import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Usuários')
 @Controller('users')
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly accessService: AccessService,
+  ) {}
 
   @Post()
-  @ApiOperation({ summary: 'Criar usuário', description: 'Perfis permitidos: ADMIN' })
-  create(@Body() dto: CreateUserDto) {
-    return this.userService.create(dto);
+  @UseGuards(ThrottlerGuard)
+  @ApiOperation({
+    summary: 'Cadastrar voluntário fixo',
+    description: 'Rota pública. Exige o questionário (exceto 1º usuário da organização). A conta fica aguardando confirmação do e-mail e aprovação.',
+  })
+  async create(@Body() dto: CreateUserDto) {
+    // Honeypot preenchido = robô: finge sucesso sem gravar
+    if (dto.website) return { id: null, email: dto.email };
+    const user = await this.userService.create(dto);
+    return { id: user.id, email: user.email };
+  }
+
+  @Post('floating')
+  @UseGuards(ThrottlerGuard)
+  @ApiOperation({
+    summary: 'Cadastrar voluntário volante',
+    description: 'Rota pública (modal da LP e /signup). Sem senha: a API gera uma aleatória. Já entra aprovado na equipe Voluntário Volante e recebe e-mail de boas-vindas.',
+  })
+  createFloating(@Body() dto: CreateFloatingVolunteerDto) {
+    if (dto.website) return { id: null, fullName: dto.fullName, email: dto.email };
+    return this.userService.createFloating(dto);
   }
 
   @Get()
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Listar usuários', description: 'Perfis permitidos: ADMIN' })
-  findAll(@Query() pagination: PaginationDto, @Query('isApproved') isApproved?: string) {
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @RequireAccess(Screen.VOLUNTEERS, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Listar usuários', description: 'Acesso: Voluntários (Visualizar). Filtros: isApproved, teamId. Cada usuário vem com a equipe.' })
+  findAll(@Query() pagination: PaginationDto, @Query('isApproved') isApproved?: string, @Query('teamId') teamId?: string) {
     const approved = isApproved !== undefined ? isApproved === 'true' : undefined;
-    return this.userService.findAll(pagination, approved);
+    return this.userService.findAll(pagination, { isApproved: approved, teamId: teamId || undefined });
+  }
+
+  @Get(':id/application')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @RequireAccess(Screen.VOLUNTEERS, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Questionário do voluntário fixo', description: 'Acesso: Voluntários (Visualizar).' })
+  findApplication(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
+    return this.userService.findApplication(id, req.user.organizationId);
   }
 
   @Get(':id')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'FINANCIAL', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Buscar usuário por ID', description: 'Perfis permitidos: ADMIN, FINANCIAL, VOLUNTEER' })
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Buscar usuário por ID', description: 'Qualquer usuário logado.' })
   findOne(@Param('id') id: string) {
     return this.userService.findOne(id);
   }
 
   @Patch(':id')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'FINANCIAL', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Atualizar usuário', description: 'Perfis permitidos: ADMIN (qualquer usuário), FINANCIAL e VOLUNTEER (apenas o próprio perfil)' })
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Req() req) {
-    return this.userService.update(id, dto, req.user.id, req.user.profileName);
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Atualizar usuário', description: 'Próprio perfil: qualquer usuário. Outros usuários: Voluntários (Editar).' })
+  async update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Req() req) {
+    const access = await this.accessService.forUser(req.user.id);
+    const canManage = !!access && (access.isAdmin || hasLevel(access.permissions[Screen.VOLUNTEERS], AccessLevel.EDIT));
+    return this.userService.update(id, dto, req.user.id, canManage);
   }
 
   @Patch(':id/activate')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Ativar usuário', description: 'Perfis permitidos: ADMIN' })
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @RequireAccess(Screen.VOLUNTEERS, AccessLevel.EDIT)
+  @ApiOperation({ summary: 'Ativar usuário', description: 'Acesso: Voluntários (Editar).' })
   activate(@Param('id') id: string, @Req() req) {
     return this.userService.activate(id, req.user.id);
   }
 
   @Patch(':id/approve')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Aprovar usuário', description: 'Perfis permitidos: ADMIN' })
-  approve(@Param('id') id: string, @Req() req) {
-    return this.userService.approve(id, req.user.id);
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @AdminOnly()
+  @ApiOperation({ summary: 'Aprovar usuário', description: 'Somente equipe Admin. Exige a equipe do voluntário (teamId).' })
+  approve(@Param('id') id: string, @Body() dto: ApproveUserDto, @Req() req) {
+    return this.userService.approve(id, dto.teamId, req.user.id);
   }
 
   @Patch(':id/reject')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Rejeitar usuário', description: 'Perfis permitidos: ADMIN' })
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @AdminOnly()
+  @ApiOperation({ summary: 'Rejeitar/desativar usuário', description: 'Somente equipe Admin. Não desativa o último membro da equipe Admin.' })
   reject(@Param('id') id: string, @Req() req) {
     return this.userService.reject(id, req.user.id);
   }
 
+  @Patch(':id/team')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @AdminOnly()
+  @ApiOperation({ summary: 'Trocar equipe do usuário', description: 'Somente equipe Admin. A equipe Admin precisa de ao menos um membro ativo.' })
+  changeTeam(@Param('id') id: string, @Body() dto: ApproveUserDto, @Req() req) {
+    return this.userService.changeTeam(id, dto.teamId, req.user.id);
+  }
+
   @Patch(':id/reset-password')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Resetar senha do usuário', description: 'Perfis permitidos: ADMIN' })
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @RequireAccess(Screen.VOLUNTEERS, AccessLevel.EDIT)
+  @ApiOperation({ summary: 'Resetar senha do usuário', description: 'Acesso: Voluntários (Editar).' })
   resetPassword(@Param('id') id: string) {
     return this.userService.resetPassword(id);
   }
 
   @Patch('me/password')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'FINANCIAL', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Alterar própria senha', description: 'Perfis permitidos: ADMIN, FINANCIAL, VOLUNTEER' })
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Alterar própria senha', description: 'Qualquer usuário logado.' })
   changePassword(@Body() dto: ChangePasswordDto, @Req() req) {
     return this.userService.changePassword(req.user.id, dto);
   }

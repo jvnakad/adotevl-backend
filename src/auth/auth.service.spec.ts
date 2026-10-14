@@ -6,6 +6,7 @@ jest.mock('bcryptjs', () => ({ compare: jest.fn() }));
 
 describe('AuthService', () => {
   let userService: { findByEmail: jest.Mock; findOne: jest.Mock };
+  let accessService: { forUser: jest.Mock };
   let jwtService: { sign: jest.Mock };
   let service: AuthService;
 
@@ -27,7 +28,8 @@ describe('AuthService', () => {
     jest.clearAllMocks();
     userService = { findByEmail: jest.fn(), findOne: jest.fn() };
     jwtService = { sign: jest.fn(() => 'jwt-token') };
-    service = new AuthService(userService as any, jwtService as any);
+    accessService = { forUser: jest.fn(async () => null) };
+    service = new AuthService(userService as any, jwtService as any, accessService as any);
   });
 
   describe('login', () => {
@@ -89,6 +91,23 @@ describe('AuthService', () => {
       expect(result).not.toHaveProperty('password');
       expect(result).not.toHaveProperty('confirmationCode');
       expect(result).toEqual(expect.objectContaining({ id: 'u1', email: 'ana@teste.com' }));
+    });
+
+    it('devolve a equipe e as permissões do usuário (o front monta menu e botões com elas)', async () => {
+      userService.findOne.mockResolvedValue(activeUser);
+      const access = { teamId: 't1', teamName: 'Resgate', isAdmin: false, permissions: { PETS: 'EDIT' } };
+      accessService.forUser.mockResolvedValue(access);
+
+      const result = await service.me('u1');
+
+      expect(accessService.forUser).toHaveBeenCalledWith('u1');
+      expect(result).toEqual(expect.objectContaining({ access }));
+    });
+
+    it('sem equipe devolve access null', async () => {
+      userService.findOne.mockResolvedValue(activeUser);
+
+      expect((await service.me('u1')).access).toBeNull();
     });
   });
 });

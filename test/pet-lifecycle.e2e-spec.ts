@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const request = require('supertest');
-import { TestAppModule } from './test-app.module';
+import { TestAppModule, joinTeam, cleanupAccess } from './test-app.module';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Profile } from '../src/profile/profile.entity';
 import { Organization } from '../src/organization/organization.entity';
@@ -38,6 +38,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     const existingOrg = await orgRepo.findOne({ where: { cnpj: '33333333333333' } });
     if (existingOrg) {
       await petRepo.delete({ organizationId: existingOrg.id });
+      await cleanupAccess(app, existingOrg.id);
       await userRepo.delete({ organizationId: existingOrg.id });
       await orgRepo.delete({ id: existingOrg.id });
     }
@@ -52,7 +53,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     orgId = org.id;
 
     const hashed = await bcrypt.hash('senha123', 10);
-    await userRepo.save({
+    const admin = await userRepo.save({
       fullName: 'Admin Pet Lifecycle',
       cpf: '55544433300',
       email: 'admin.pet.lifecycle@teste.com',
@@ -64,6 +65,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
       isApproved: true,
       isActive: true,
     });
+    await joinTeam(app, admin, 'ADMIN');
 
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
@@ -73,6 +75,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
 
   afterAll(async () => {
     await petRepo.delete({ organizationId: orgId });
+    await cleanupAccess(app, orgId);
     await userRepo.delete({ organizationId: orgId });
     await orgRepo.delete({ id: orgId });
     await app.close();
@@ -83,10 +86,14 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     const createRes = await request(app.getHttpServer())
       .post('/pets')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Bolinha', species: 'Cachorro', sex: 'M', organizationId: orgId });
+      .send({ name: 'Bolinha', species: 'Cachorro', sex: 'M', birthDate: '2020-01', organizationId: orgId });
     expect(createRes.status).toBe(201);
     const petId = createRes.body.id;
     expect(createRes.body.status).toBe('DISPONIVEL');
+    // Nascimento volta como mês/ano, com a idade calculada
+    expect(createRes.body.birthDate).toBe('2020-01');
+    expect(createRes.body.ageLabel).toMatch(/^\d+ anos/);
+    expect(createRes.body).not.toHaveProperty('age');
 
     // 2. Pet aparece na listagem geral
     const listRes = await request(app.getHttpServer())
@@ -103,11 +110,18 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     expect(filterRes.status).toBe(200);
     expect(filterRes.body.data.some(p => p.id === petId)).toBe(true);
 
-    // 4. Admin atualiza o status do pet para EM_PROCESSO
-    const updateRes = await request(app.getHttpServer())
+    // 4. Atualização sem nascimento é recusada (o formulário sempre envia)
+    const missingBirth = await request(app.getHttpServer())
       .put(`/pets/${petId}`)
       .set('Authorization', `Bearer ${adminToken}`)
       .send({ status: 'EM_PROCESSO' });
+    expect(missingBirth.status).toBe(400);
+
+    // 4.1 Admin atualiza o status do pet para EM_PROCESSO
+    const updateRes = await request(app.getHttpServer())
+      .put(`/pets/${petId}`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ status: 'EM_PROCESSO', birthDate: '2020-01' });
     expect(updateRes.status).toBe(200);
     expect(updateRes.body.status).toBe('EM_PROCESSO');
 
@@ -137,7 +151,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     const createRes = await request(app.getHttpServer())
       .post('/pets')
       .set('Authorization', `Bearer ${adminToken}`)
-      .send({ name: 'Mingau', species: 'Gato', sex: 'F', organizationId: orgId });
+      .send({ name: 'Mingau', species: 'Gato', sex: 'F', birthDate: '2022-05', organizationId: orgId });
     expect(createRes.status).toBe(201);
     expect(createRes.body.fotos).toEqual([]);
     const petId = createRes.body.id;

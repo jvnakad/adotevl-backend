@@ -38,9 +38,16 @@ import { AdoptionFormPhoto } from './adoption-form/adoption-form-photo.entity';
 import { AdoptionHistoryModule } from './adoption-history/adoption-history.module';
 import { AdoptionHistoryEvent } from './adoption-history/adoption-history.entity';
 import { AdoptionContractModule } from './adoption-contract/adoption-contract.module';
+import { VolunteerShift } from './volunteer-schedule/volunteer-shift.entity';
+import { ScheduleLock } from './volunteer-schedule/schedule-lock.entity';
+import { ScheduleAccessCode } from './volunteer-schedule/schedule-access-code.entity';
+import { VolunteerScheduleModule } from './volunteer-schedule/volunteer-schedule.module';
+import { VolunteerApplication } from './volunteer-application/volunteer-application.entity';
 import { AdoptionContract } from './adoption-contract/adoption-contract.entity';
 import { AutentiqueModule } from './autentique/autentique.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { TeamPermission } from './team/team-permission.entity';
+import { AccessModule } from './access/access.module';
 
 @Module({
   imports: [
@@ -49,7 +56,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),
@@ -60,6 +67,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     PetModule,
     MedicalRecordModule,
     TeamModule,
+    AccessModule,
     VolunteerModule,
     CampaignModule,
     FinancialModule,
@@ -71,6 +79,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     AdoptionFormModule,
     AdoptionHistoryModule,
     AdoptionContractModule,
+    VolunteerScheduleModule,
     AutentiqueModule,
     WebhooksModule,
   ],

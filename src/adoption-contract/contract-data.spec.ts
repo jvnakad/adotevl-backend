@@ -1,6 +1,23 @@
-import { ageFromBirthDate, dateOnly, sanitizeContractData, emptyContractData, speciesFromPet, sexFromPet } from './contract-data';
+import { ageFromBirthDate, dateOnly, sanitizeContractData, emptyContractData, speciesFromPet, sexFromPet, prefillAnimalFromPet } from './contract-data';
 
 describe('contract-data', () => {
+  describe('prefillAnimalFromPet', () => {
+    beforeAll(() => jest.useFakeTimers({ now: new Date('2026-10-14T12:00:00Z') }));
+    afterAll(() => jest.useRealTimers());
+
+    it('preenche a idade do animal com mês/ano de nascimento e idade calculada', () => {
+      const data = prefillAnimalFromPet(emptyContractData(), { name: 'Rex', species: 'Cachorro', birthDate: '2024-07' } as any);
+
+      expect(data.animal.age).toBe('07/2024 (2 anos e 3 meses)');
+    });
+
+    it('pet sem nascimento deixa a idade em branco', () => {
+      const data = prefillAnimalFromPet(emptyContractData(), { name: 'Rex', species: 'Cachorro', birthDate: null } as any);
+
+      expect(data.animal.age).toBe('');
+    });
+  });
+
   it('dateOnly trata meia-noite local (driver pg) e meia-noite UTC', () => {
     expect(dateOnly(new Date(1992, 2, 15))).toBe('1992-03-15');
     expect(dateOnly(new Date('1992-03-15'))).toBe('1992-03-15');

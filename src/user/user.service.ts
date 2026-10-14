@@ -6,19 +6,25 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { randomUUID } from 'crypto';
+import { In, Repository } from 'typeorm';
+import { randomBytes, randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { User } from './user.entity';
 import { Profile } from '../profile/profile.entity';
 import { Organization } from '../organization/organization.entity';
 import { CreateUserDto } from './dto/create-user.dto';
+import { CreateFloatingVolunteerDto } from './dto/create-floating-volunteer.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { MailService } from '../mail/mail.service';
 import { JwtService } from '@nestjs/jwt';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
+import { TeamMembershipService } from '../team/team-membership.service';
+import { TeamService } from '../team/team.service';
+import { TeamSystemKey } from '../team/team.entity';
+import { guardianFields } from './volunteer-age';
+import { VolunteerApplication } from '../volunteer-application/volunteer-application.entity';
 
 @Injectable()
 export class UserService {
@@ -31,9 +37,88 @@ export class UserService {
     private readonly organizationRepository: Repository<Organization>,
     private readonly mailService: MailService,
     private readonly jwtService: JwtService,
+    private readonly membership: TeamMembershipService,
+    private readonly teams: TeamService,
+    @InjectRepository(VolunteerApplication)
+    private readonly applicationRepository: Repository<VolunteerApplication>,
   ) {}
 
   async create(dto: CreateUserDto, createdBy: string = null) {
+    const guardian = guardianFields(dto);
+    await this.assertCanRegister(dto);
+
+    const isFirstUser = !(await this.userRepository.findOne({ where: { organizationId: dto.organizationId } }));
+    // Voluntário fixo responde o questionário; o admin inicial da organização não
+    if (!isFirstUser && !dto.application) throw new BadRequestException('Preencha o questionário de voluntário fixo.');
+    // Perfil é legado (o acesso vem da equipe): o cadastro não escolhe, só registra ADMIN/VOLUNTEER
+    const profileId = await this.legacyProfileId(isFirstUser ? 'ADMIN' : 'VOLUNTEER');
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+    const confirmationCode = randomUUID();
+
+    const user = this.userRepository.create({
+      fullName: dto.fullName,
+      cpf: dto.cpf,
+      email: dto.email,
+      phone: dto.phone,
+      birthDate: dto.birthDate as unknown as Date,
+      password: hashedPassword,
+      profileId,
+      organizationId: dto.organizationId,
+      isConfirmed: false,
+      confirmationCode,
+      consentAt: new Date(),
+      ...guardian,
+      isActive: true,
+      createdBy,
+      updatedBy: createdBy,
+    });
+
+    const saved = await this.userRepository.save(user);
+    if (dto.application) {
+      await this.applicationRepository.save(this.applicationRepository.create({ ...dto.application, userId: saved.id }));
+    }
+    // Primeiro usuário da organização administra tudo: cria as equipes padrão e entra na Admin
+    if (isFirstUser) {
+      const adminTeam = await this.teams.ensureDefaultTeams(dto.organizationId);
+      await this.membership.assign(saved, adminTeam.id, createdBy);
+    }
+    await this.mailService.sendConfirmationEmail(saved.email, saved.fullName, saved.confirmationCode);
+    return saved;
+  }
+
+  /** Volante: sem senha (gera uma aleatória só para o login aceitar), já aprovado e na equipe Voluntário Volante. */
+  async createFloating(dto: CreateFloatingVolunteerDto) {
+    const guardian = guardianFields(dto);
+    await this.assertCanRegister(dto);
+    const profileId = await this.legacyProfileId('VOLUNTEER');
+    const password = await bcrypt.hash(randomBytes(24).toString('base64url'), 10);
+
+    const saved = await this.userRepository.save(
+      this.userRepository.create({
+        fullName: dto.fullName,
+        cpf: dto.cpf,
+        email: dto.email,
+        phone: dto.phone,
+        birthDate: dto.birthDate as unknown as Date,
+        password,
+        profileId,
+        organizationId: dto.organizationId,
+        isConfirmed: true,
+        isApproved: true,
+        isActive: true,
+        consentAt: new Date(),
+        ...guardian,
+      }),
+    );
+    const team = await this.teams.systemTeam(dto.organizationId, TeamSystemKey.FLOATING_VOLUNTEER);
+    await this.membership.assign(saved, team.id, null);
+    await this.mailService.sendFloatingWelcomeEmail(saved.email, saved.fullName);
+    return { id: saved.id, fullName: saved.fullName, email: saved.email };
+  }
+
+  /** Email único no sistema, CPF único na organização e organização existente. */
+  private async assertCanRegister(dto: { email: string; cpf: string; organizationId: string }) {
     const emailExists = await this.userRepository.findOne({ where: { email: dto.email } });
     if (emailExists) {
       throw new ConflictException('Já existe um usuário cadastrado com este e-mail.');
@@ -50,41 +135,12 @@ export class UserService {
     if (!organization) {
       throw new NotFoundException('Organização não encontrada.');
     }
+  }
 
-    const isFirstUser = !(await this.userRepository.findOne({ where: { organizationId: dto.organizationId } }));
-    let profileId = dto.profileId;
-
-    if (isFirstUser) {
-      const admin = await this.profileRepository.findOne({ where: { name: 'ADMIN' } });
-      if (!admin) throw new BadRequestException('Perfil ADMIN não encontrado.');
-      profileId = admin.id;
-    } else {
-      const profile = await this.profileRepository.findOne({ where: { id: dto.profileId } });
-      if (!profile) throw new NotFoundException('Perfil não encontrado.');
-    }
-
-    const hashedPassword = await bcrypt.hash(dto.password, 10);
-    const confirmationCode = randomUUID();
-
-    const user = this.userRepository.create({
-      fullName: dto.fullName,
-      cpf: dto.cpf,
-      email: dto.email,
-      phone: dto.phone,
-      birthDate: dto.birthDate,
-      password: hashedPassword,
-      profileId,
-      organizationId: dto.organizationId,
-      isConfirmed: false,
-      confirmationCode,
-      isActive: true,
-      createdBy,
-      updatedBy: createdBy,
-    });
-
-    const saved = await this.userRepository.save(user);
-    await this.mailService.sendConfirmationEmail(saved.email, saved.fullName, saved.confirmationCode);
-    return saved;
+  private async legacyProfileId(name: 'ADMIN' | 'VOLUNTEER') {
+    const profile = await this.profileRepository.findOne({ where: { name } });
+    if (!profile) throw new BadRequestException(`Perfil ${name} não encontrado.`);
+    return profile.id;
   }
 
   async confirmAccount(confirmationCode: string) {
@@ -96,9 +152,30 @@ export class UserService {
     return this.userRepository.save(user);
   }
 
-  async findAll(pagination: PaginationDto, isApproved?: boolean) {
-    const where = isApproved !== undefined ? { isApproved } : {};
-    return paginate(this.userRepository, pagination, where);
+  async findAll(pagination: PaginationDto, filters: { isApproved?: boolean; teamId?: string } = {}) {
+    const where: Record<string, unknown> = {};
+    if (filters.isApproved !== undefined) where.isApproved = filters.isApproved;
+    // Equipe fica em volunteers.teamId: filtra pelos usuários dela
+    if (filters.teamId) where.id = In(await this.membership.userIdsOfTeam(filters.teamId));
+    const result = await paginate(this.userRepository, pagination, where);
+    const ids = result.data.map((user) => user.id);
+    const teams = await this.membership.teamsOf(ids);
+    const answered = new Set(
+      ids.length ? (await this.applicationRepository.find({ where: { userId: In(ids) }, select: { userId: true } })).map((row) => row.userId) : [],
+    );
+    return {
+      ...result,
+      data: result.data.map((user) => ({ ...user, team: teams.get(user.id) ?? null, hasApplication: answered.has(user.id) })),
+    };
+  }
+
+  /** Questionário do voluntário fixo (só da organização de quem consulta). */
+  async findApplication(userId: string, organizationId: string) {
+    const user = await this.userRepository.findOne({ where: { id: userId } });
+    if (!user || user.organizationId !== organizationId) throw new NotFoundException('Usuário não encontrado.');
+    const application = await this.applicationRepository.findOne({ where: { userId } });
+    if (!application) throw new NotFoundException('Este voluntário não respondeu o questionário.');
+    return application;
   }
 
   async findOne(id: string) {
@@ -109,11 +186,12 @@ export class UserService {
     return this.userRepository.findOne({ where: { email } });
   }
 
-  async update(id: string, dto: UpdateUserDto, updatedBy: string = null, requesterProfile: string = null) {
+  /** `canManage`: quem edita Voluntários altera qualquer usuário; os demais só o próprio perfil. */
+  async update(id: string, dto: UpdateUserDto, updatedBy: string = null, canManage = false) {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
 
-    const isAdmin = requesterProfile === 'ADMIN';
+    const isAdmin = canManage;
 
     if (!isAdmin && id !== updatedBy) {
       throw new ForbiddenException('Você só pode editar o próprio perfil.');
@@ -134,9 +212,11 @@ export class UserService {
     return this.userRepository.findOne({ where: { id } });
   }
 
-  async approve(id: string, updatedBy: string = null) {
+  /** Aprovar exige a equipe: é ela que define o acesso às telas. */
+  async approve(id: string, teamId: string, updatedBy: string = null) {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.membership.assign(user, teamId, updatedBy);
     await this.userRepository.update(id, { isApproved: true, updatedBy });
     const updated = await this.userRepository.findOne({ where: { id } });
     const payload = { sub: updated.id, email: updated.email, profileId: updated.profileId, profileName: updated.profile?.name, organizationId: updated.organizationId };
@@ -148,8 +228,16 @@ export class UserService {
   async reject(id: string, updatedBy: string = null) {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.membership.ensureNotLastAdmin(id);
     await this.userRepository.update(id, { isActive: false, updatedBy });
     return this.userRepository.findOne({ where: { id } });
+  }
+
+  async changeTeam(id: string, teamId: string, updatedBy: string = null) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.membership.assign(user, teamId, updatedBy);
+    return user;
   }
 
   async changePassword(id: string, dto: ChangePasswordDto) {

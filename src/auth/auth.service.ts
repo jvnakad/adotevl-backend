@@ -7,12 +7,14 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { UserService } from '../user/user.service';
 import { LoginDto } from './dto/login.dto';
+import { AccessService } from '../access/access.service';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly userService: UserService,
     private readonly jwtService: JwtService,
+    private readonly accessService: AccessService,
   ) {}
 
   async login(dto: LoginDto) {
@@ -58,6 +60,7 @@ export class AuthService {
     const user = await this.userService.findOne(userId);
     if (!user) throw new NotFoundException('Usuário não encontrado.');
     const { password, confirmationCode, ...result } = user;
-    return result;
+    // Equipe e permissões por tela: o front monta menu, rotas e botões com elas
+    return { ...result, access: await this.accessService.forUser(userId) };
   }
 }

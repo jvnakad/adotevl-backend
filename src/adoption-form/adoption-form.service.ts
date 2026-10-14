@@ -158,10 +158,12 @@ export class AdoptionFormService implements OnModuleInit {
     return { ...form, pet: this.petSummary(form.pet), desiredPet: this.petSummary(form.desiredPet) };
   }
 
-  // Kanban: todas as colunas sempre presentes, até 50 fichas resumidas por coluna
-  async board(organizationId: string, search?: string) {
+  // Kanban: todas as colunas sempre presentes, até 50 fichas resumidas por coluna.
+  // Com filtro de status, as demais colunas aparecem vazias (sem consultar o banco).
+  async board(organizationId: string, search?: string, statusFilter?: string) {
     const columns = await Promise.all(
       ADOPTION_FORM_STATUS_ORDER.map(async (status) => {
+        if (statusFilter && status !== statusFilter) return { status, total: 0, items: [] };
         const where = this.searchWhere({ organizationId, isActive: true, status }, search);
         const [forms, total] = await this.formRepository.findAndCount({
           where,
@@ -224,12 +226,12 @@ export class AdoptionFormService implements OnModuleInit {
     return this.findOne(id, organizationId);
   }
 
-  async updateStatus(id: string, dto: UpdateAdoptionFormStatusDto, organizationId: string, reviewedBy: string = null, profileName: string = null) {
+  async updateStatus(id: string, dto: UpdateAdoptionFormStatusDto, organizationId: string, reviewedBy: string = null, isAdmin = false) {
     const form = await this.getForm(id, organizationId);
     const from = form.status;
     const to = dto.status;
     if (from === to) return this.updateReviewNotes(form, dto.reviewNotes, reviewedBy);
-    this.validateTransition(from, to, profileName);
+    this.validateTransition(from, to, isAdmin);
 
     const userName = await this.historyService.resolveUserName(reviewedBy);
     const cancelledDocumentId = from === AdoptionFormStatus.AGUARDANDO_ASSINATURA ? await this.cancelPendingSignature(form.id) : null;
@@ -366,7 +368,7 @@ export class AdoptionFormService implements OnModuleInit {
   }
 
   // Regras de movimentação manual (PATCH :id/status); assinatura e conclusão só pelo fluxo do Autentique
-  private validateTransition(from: AdoptionFormStatus, to: AdoptionFormStatus, profileName: string) {
+  private validateTransition(from: AdoptionFormStatus, to: AdoptionFormStatus, isAdmin: boolean) {
     if (to === AdoptionFormStatus.CONCLUIDA) {
       throw new BadRequestException('A adoção é concluída automaticamente quando o adotante assina o termo de adoção.');
     }
@@ -377,8 +379,8 @@ export class AdoptionFormService implements OnModuleInit {
       if (to !== AdoptionFormStatus.APROVADO) {
         throw new BadRequestException(`Uma ficha em ${statusLabel(from)} só pode voltar para Aprovado.`);
       }
-      if (profileName !== 'ADMIN') {
-        throw new ForbiddenException('Somente administradores podem voltar uma ficha com termo de adoção para Aprovado.');
+      if (!isAdmin) {
+        throw new ForbiddenException('Somente a equipe Admin pode voltar uma ficha com termo de adoção para Aprovado.');
       }
       return;
     }

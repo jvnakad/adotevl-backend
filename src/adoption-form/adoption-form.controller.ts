@@ -85,10 +85,10 @@ export class AdoptionFormController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
     summary: 'Kanban das fichas de adoção',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Colunas na ordem PENDENTE, APROVADO, AGUARDANDO_ASSINATURA, CONCLUIDA, REPROVADO, com total e até 50 fichas resumidas (mais recentes primeiro). Filtro: search (nome, email ou CPF).',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Colunas na ordem PENDENTE, APROVADO, AGUARDANDO_ASSINATURA, CONCLUIDA, REPROVADO, com total e até 50 fichas resumidas (mais recentes primeiro). Filtros: search (nome, email ou CPF) e status (as demais colunas vêm vazias).',
   })
-  board(@Request() req, @Query('search') search?: string) {
-    return this.adoptionFormService.board(req.user.organizationId, search);
+  board(@Request() req, @Query('search') search?: string, @Query('status') status?: string) {
+    return this.adoptionFormService.board(req.user.organizationId, search, status);
   }
 
   @Get(':id/history')

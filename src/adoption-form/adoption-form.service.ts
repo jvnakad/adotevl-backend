@@ -158,10 +158,12 @@ export class AdoptionFormService implements OnModuleInit {
     return { ...form, pet: this.petSummary(form.pet), desiredPet: this.petSummary(form.desiredPet) };
   }
 
-  // Kanban: todas as colunas sempre presentes, até 50 fichas resumidas por coluna
-  async board(organizationId: string, search?: string) {
+  // Kanban: todas as colunas sempre presentes, até 50 fichas resumidas por coluna.
+  // Com filtro de status, as demais colunas aparecem vazias (sem consultar o banco).
+  async board(organizationId: string, search?: string, statusFilter?: string) {
     const columns = await Promise.all(
       ADOPTION_FORM_STATUS_ORDER.map(async (status) => {
+        if (statusFilter && status !== statusFilter) return { status, total: 0, items: [] };
         const where = this.searchWhere({ organizationId, isActive: true, status }, search);
         const [forms, total] = await this.formRepository.findAndCount({
           where,

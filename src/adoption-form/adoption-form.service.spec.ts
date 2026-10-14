@@ -602,6 +602,22 @@ describe('AdoptionFormService', () => {
       expect(where).toHaveLength(3);
       expect(where[0].fullName.value).toBe('%maria%');
     });
+
+    it('com status mantém todas as colunas, mas só a filtrada traz fichas', async () => {
+      formRepo.findAndCount.mockResolvedValue([[{ id: 'f1', fullName: 'Maria', status: 'REPROVADO' }], 1]);
+
+      const { columns } = await service.board('org-1', undefined, 'REPROVADO');
+
+      expect(columns.map((column) => [column.status, column.total, column.items.length])).toEqual([
+        ['PENDENTE', 0, 0],
+        ['APROVADO', 0, 0],
+        ['AGUARDANDO_ASSINATURA', 0, 0],
+        ['CONCLUIDA', 0, 0],
+        ['REPROVADO', 1, 1],
+      ]);
+      // Colunas fora do filtro nem consultam o banco
+      expect(formRepo.findAndCount).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('findHistory valida a ficha da organização antes de listar', async () => {

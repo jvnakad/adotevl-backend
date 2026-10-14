@@ -1,7 +1,9 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FindOperator } from 'typeorm';
 import { AdoptionFormService, MAX_ADOPTION_FORM_PHOTOS } from './adoption-form.service';
 import { AdoptionFormStatus } from './adoption-form.entity';
+import { PetStatus } from '../pet/pet.entity';
+import { AdoptionHistoryType } from '../adoption-history/adoption-history.entity';
 import { createMockRepository, MockRepository, pagination } from '../testing/mock-repository';
 
 const file = (name = 'casa.PNG', mimetype = 'image/png') =>
@@ -65,6 +67,11 @@ describe('AdoptionFormService', () => {
   let formRepo: MockRepository;
   let photoRepo: MockRepository;
   let orgRepo: MockRepository;
+  let petRepo: MockRepository;
+  let txFormRepo: MockRepository;
+  let txPetRepo: MockRepository;
+  let manager: { getRepository: jest.Mock };
+  let history: { record: jest.Mock; resolveUserName: jest.Mock; findByForm: jest.Mock };
   let storage: { uploadPrivate: jest.Mock; removePrivate: jest.Mock; getSignedUrls: jest.Mock };
   let service: AdoptionFormService;
 
@@ -72,18 +79,30 @@ describe('AdoptionFormService', () => {
     formRepo = createMockRepository();
     photoRepo = createMockRepository();
     orgRepo = createMockRepository();
+    petRepo = createMockRepository();
+    // Repositórios usados dentro da transação do updateStatus
+    txFormRepo = createMockRepository();
+    txPetRepo = createMockRepository();
+    manager = { getRepository: jest.fn((entity) => (entity.name === 'Pet' ? txPetRepo : txFormRepo)) };
+    (formRepo as any).manager = { transaction: jest.fn(async (work) => work(manager)) };
+    history = {
+      record: jest.fn(async () => undefined),
+      resolveUserName: jest.fn(async () => 'Ana Admin'),
+      findByForm: jest.fn(async () => []),
+    };
     storage = {
       uploadPrivate: jest.fn(async () => undefined),
       removePrivate: jest.fn(async () => undefined),
       getSignedUrls: jest.fn(async (paths: string[]) => Object.fromEntries(paths.map((path) => [path, `https://signed/${path}`]))),
     };
-    service = new AdoptionFormService(formRepo as any, photoRepo as any, orgRepo as any, storage as any);
+    service = new AdoptionFormService(formRepo as any, photoRepo as any, orgRepo as any, petRepo as any, storage as any, history as any);
 
     orgRepo.findOne.mockResolvedValue({ id: 'org-1' });
     formRepo.save.mockImplementation(async (data) => ({ id: 'form-1', status: AdoptionFormStatus.PENDENTE, createdAt: new Date('2026-09-30'), ...data }));
   });
 
   const savedForm = () => formRepo.save.mock.calls[0][0];
+  const recorded = (index = 0) => history.record.mock.calls[index][0];
 
   describe('create', () => {
     it('exige ao menos uma foto da residência', async () => {
@@ -105,7 +124,7 @@ describe('AdoptionFormService', () => {
     it('salva a ficha, envia as fotos e devolve só a confirmação', async () => {
       const result = await service.create(baseDto(), [file('sala.PNG'), file('quarto.png')]);
 
-      expect(savedForm()).toEqual(expect.objectContaining({ fullName: 'Maria', state: 'SP', birthDate: new Date('1990-05-10') }));
+      expect(savedForm()).toEqual(expect.objectContaining({ fullName: 'Maria', state: 'SP', birthDate: new Date(1990, 4, 10) }));
       expect(storage.uploadPrivate).toHaveBeenCalledTimes(2);
       expect(storage.uploadPrivate.mock.calls[0][0]).toMatch(/^adoption-forms\/form-1\/[0-9a-f-]{36}\.png$/);
       expect(photoRepo.save).toHaveBeenCalledWith([
@@ -114,6 +133,10 @@ describe('AdoptionFormService', () => {
       ]);
       expect(result).toEqual({ id: 'form-1', status: 'PENDENTE', createdAt: new Date('2026-09-30'), message: 'Ficha de adoção enviada com sucesso.' });
       expect(result).not.toHaveProperty('cpf');
+      expect(recorded()).toEqual(
+        expect.objectContaining({ type: AdoptionHistoryType.FICHA_CRIADA, toStatus: 'PENDENTE', description: 'Ficha enviada pelo formulário público' }),
+      );
+      expect(recorded().userId).toBeUndefined();
     });
 
     it('apaga a ficha e os arquivos enviados quando o upload falha', async () => {
@@ -235,7 +258,29 @@ describe('AdoptionFormService', () => {
 
       await service.findOne('form-1', 'org-1');
 
-      expect(formRepo.findOne).toHaveBeenCalledWith({ where: { id: 'form-1', organizationId: 'org-1', isActive: true }, relations: { fotos: true } });
+      expect(formRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'form-1', organizationId: 'org-1', isActive: true },
+        relations: { fotos: true, pet: { fotos: true } },
+      });
+    });
+
+    it('devolve o pet vinculado resumido', async () => {
+      formRepo.findOne.mockResolvedValue({
+        id: 'form-1',
+        fotos: [],
+        petId: 'pet-1',
+        pet: { id: 'pet-1', name: 'Rex', species: 'Cachorro', status: 'EM_PROCESSO', fotos: [{ url: 'https://p/2.png', createdAt: new Date(2) }, { url: 'https://p/1.png', createdAt: new Date(1) }] },
+      });
+
+      const form = await service.findOne('form-1', 'org-1');
+
+      expect(form.pet).toEqual({ id: 'pet-1', name: 'Rex', species: 'Cachorro', fotos: [{ url: 'https://p/1.png' }, { url: 'https://p/2.png' }] });
+    });
+
+    it('devolve pet null quando não há vínculo', async () => {
+      formRepo.findOne.mockResolvedValue({ id: 'form-1', fotos: [] });
+
+      expect((await service.findOne('form-1', 'org-1')).pet).toBeNull();
     });
 
     it('troca a URL das fotos por uma URL assinada', async () => {
@@ -271,8 +316,36 @@ describe('AdoptionFormService', () => {
       await service.update('form-1', { occupation: 'Engenheira', state: 'rj', birthDate: '1991-01-01', fotos: [] } as any, 'org-1', 'user-1');
 
       const saved = savedForm();
-      expect(saved).toEqual(expect.objectContaining({ occupation: 'Engenheira', state: 'RJ', birthDate: new Date('1991-01-01'), updatedBy: 'user-1' }));
+      expect(saved).toEqual(expect.objectContaining({ occupation: 'Engenheira', state: 'RJ', birthDate: new Date(1991, 0, 1), updatedBy: 'user-1' }));
       expect(saved).not.toHaveProperty('fotos');
+    });
+
+    it('registra FICHA_EDITADA com os campos alterados e rótulos', async () => {
+      formRepo.findOne.mockResolvedValue(existing());
+
+      await service.update('form-1', { occupation: 'Engenheira', state: 'rj', birthDate: '1990-05-10' } as any, 'org-1', 'user-1');
+
+      expect(recorded()).toEqual(
+        expect.objectContaining({
+          type: AdoptionHistoryType.FICHA_EDITADA,
+          description: 'Ficha editada: Profissão, UF',
+          userId: 'user-1',
+          metadata: {
+            fields: [
+              { field: 'occupation', label: 'Profissão', before: 'Designer', after: 'Engenheira' },
+              { field: 'state', label: 'UF', before: 'SP', after: 'RJ' },
+            ],
+          },
+        }),
+      );
+    });
+
+    it('não registra evento quando nada muda', async () => {
+      formRepo.findOne.mockResolvedValue(existing());
+
+      await service.update('form-1', { occupation: 'Designer' } as any, 'org-1', 'user-1');
+
+      expect(history.record).not.toHaveBeenCalled();
     });
 
     it('rejeita edição que deixa condicional sem resposta', async () => {
@@ -287,12 +360,15 @@ describe('AdoptionFormService', () => {
   });
 
   describe('updateStatus', () => {
-    beforeEach(() => formRepo.findOne.mockResolvedValue({ id: 'form-1', fotos: [] }));
+    const formWith = (status: AdoptionFormStatus, petId: string = null) =>
+      formRepo.findOne.mockResolvedValue({ id: 'form-1', organizationId: 'org-1', fullName: 'Maria', status, petId, fotos: [] });
 
-    it('grava status, observações e quem avaliou', async () => {
+    beforeEach(() => formWith(AdoptionFormStatus.PENDENTE));
+
+    it('grava status, observações e quem avaliou dentro da transação', async () => {
       await service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO, reviewNotes: 'Ok' }, 'org-1', 'user-1');
 
-      expect(formRepo.update).toHaveBeenCalledWith('form-1', {
+      expect(txFormRepo.update).toHaveBeenCalledWith('form-1', {
         status: 'APROVADO',
         reviewNotes: 'Ok',
         reviewedBy: 'user-1',
@@ -304,8 +380,159 @@ describe('AdoptionFormService', () => {
     it('mantém as observações quando não são enviadas', async () => {
       await service.updateStatus('form-1', { status: AdoptionFormStatus.EM_ANALISE }, 'org-1', 'user-1');
 
-      expect(formRepo.update.mock.calls[0][1]).not.toHaveProperty('reviewNotes');
+      expect(txFormRepo.update.mock.calls[0][1]).not.toHaveProperty('reviewNotes');
     });
+
+    it('registra STATUS_ALTERADO na mesma transação, com observações', async () => {
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.REPROVADO, reviewNotes: 'Sem tela' }, 'org-1', 'user-1');
+
+      expect(history.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: AdoptionHistoryType.STATUS_ALTERADO,
+          fromStatus: 'PENDENTE',
+          toStatus: 'REPROVADO',
+          description: 'Status alterado de Pendente para Reprovado',
+          metadata: { reviewNotes: 'Sem tela' },
+          userId: 'user-1',
+          userName: 'Ana Admin',
+        }),
+        manager,
+      );
+    });
+
+    it.each([
+      [AdoptionFormStatus.PENDENTE, AdoptionFormStatus.REPROVADO],
+      [AdoptionFormStatus.REPROVADO, AdoptionFormStatus.APROVADO],
+      [AdoptionFormStatus.APROVADO, AdoptionFormStatus.EM_ANALISE],
+      [AdoptionFormStatus.EM_ANALISE, AdoptionFormStatus.PENDENTE],
+    ])('permite mover livremente de %s para %s', async (from, to) => {
+      formWith(from);
+
+      await expect(service.updateStatus('form-1', { status: to }, 'org-1', 'user-1', 'VOLUNTEER')).resolves.toBeDefined();
+    });
+
+    it('mesmo status só atualiza as observações e registra FICHA_EDITADA', async () => {
+      formRepo.findOne.mockResolvedValue({ id: 'form-1', organizationId: 'org-1', fullName: 'Maria', status: 'CONTRATO_GERADO', petId: 'pet-1', reviewNotes: 'Antiga', fotos: [] });
+
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO, reviewNotes: 'Nova' }, 'org-1', 'user-1', 'VOLUNTEER');
+
+      expect(formRepo.update).toHaveBeenCalledWith('form-1', { reviewNotes: 'Nova', updatedBy: 'user-1' });
+      expect(txFormRepo.update).not.toHaveBeenCalled();
+      expect(txPetRepo.update).not.toHaveBeenCalled();
+      expect(recorded()).toEqual(
+        expect.objectContaining({
+          type: AdoptionHistoryType.FICHA_EDITADA,
+          description: 'Observações da avaliação atualizadas',
+          metadata: { fields: [{ field: 'reviewNotes', label: 'Observações', before: 'Antiga', after: 'Nova' }] },
+          userId: 'user-1',
+        }),
+      );
+    });
+
+    it('mesmo status sem mudar as observações não grava nada', async () => {
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.PENDENTE }, 'org-1');
+
+      expect(formRepo.update).not.toHaveBeenCalled();
+      expect(history.record).not.toHaveBeenCalled();
+    });
+
+    it('não permite mover manualmente para CONTRATO_GERADO', async () => {
+      formWith(AdoptionFormStatus.APROVADO);
+
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
+        'Gere o contrato para mover a ficha para Contrato gerado.',
+      );
+      expect(txFormRepo.update).not.toHaveBeenCalled();
+    });
+
+    it('só conclui a partir de CONTRATO_GERADO', async () => {
+      formWith(AdoptionFormStatus.APROVADO);
+
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONCLUIDA }, 'org-1')).rejects.toThrow(BadRequestException);
+    });
+
+    it('concluir marca o pet como ADOTADO e registra ADOCAO_CONCLUIDA', async () => {
+      formWith(AdoptionFormStatus.CONTRATO_GERADO, 'pet-1');
+
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.CONCLUIDA }, 'org-1', 'user-1', 'VOLUNTEER');
+
+      expect(txPetRepo.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-1', organizationId: expect.any(String) }), { status: PetStatus.ADOTADO, adoptionDate: expect.any(Date), updatedBy: 'user-1' });
+      expect(recorded()).toEqual(
+        expect.objectContaining({ type: AdoptionHistoryType.ADOCAO_CONCLUIDA, fromStatus: 'CONTRATO_GERADO', toStatus: 'CONCLUIDA' }),
+      );
+    });
+
+    it.each([AdoptionFormStatus.CONTRATO_GERADO, AdoptionFormStatus.CONCLUIDA])('de %s só volta para APROVADO', async (from) => {
+      formWith(from);
+
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.PENDENTE }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(BadRequestException);
+    });
+
+    it.each([AdoptionFormStatus.CONTRATO_GERADO, AdoptionFormStatus.CONCLUIDA])('voltar de %s para APROVADO é só para ADMIN', async (from) => {
+      formWith(from, 'pet-1');
+
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'VOLUNTEER')).rejects.toThrow(ForbiddenException);
+    });
+
+    it('ADMIN volta de CONCLUIDA para APROVADO e o pet volta para EM_PROCESSO', async () => {
+      formWith(AdoptionFormStatus.CONCLUIDA, 'pet-1');
+
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'ADMIN');
+
+      expect(txPetRepo.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-1', organizationId: expect.any(String) }), { status: PetStatus.EM_PROCESSO, adoptionDate: null, updatedBy: 'user-1' });
+    });
+
+    it('sair de APROVADO para REPROVADO libera o pet vinculado', async () => {
+      formWith(AdoptionFormStatus.APROVADO, 'pet-1');
+
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.REPROVADO }, 'org-1', 'user-1');
+
+      expect(txPetRepo.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-1', organizationId: expect.any(String) }), { status: PetStatus.DISPONIVEL, updatedBy: 'user-1' });
+    });
+
+    it('sem pet vinculado não mexe em pets', async () => {
+      formWith(AdoptionFormStatus.APROVADO);
+
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.REPROVADO }, 'org-1', 'user-1');
+
+      expect(txPetRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('board', () => {
+    it('devolve as 6 colunas na ordem do kanban, com no máximo 50 itens por coluna', async () => {
+      formRepo.findAndCount.mockImplementation(async ({ where }) =>
+        where.status === 'APROVADO'
+          ? [[{ id: 'f1', fullName: 'Maria', status: 'APROVADO', petId: 'pet-1', pet: { name: 'Rex' }, cpf: '1', reviewNotes: 'x' }], 1]
+          : [[], 0],
+      );
+
+      const { columns } = await service.board('org-1');
+
+      expect(columns.map((column) => column.status)).toEqual(['PENDENTE', 'EM_ANALISE', 'APROVADO', 'CONTRATO_GERADO', 'CONCLUIDA', 'REPROVADO']);
+      expect(formRepo.findAndCount).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { organizationId: 'org-1', isActive: true, status: 'PENDENTE' }, order: { updatedAt: 'DESC' }, take: 50 }),
+      );
+      const approved = columns[2];
+      expect(approved.total).toBe(1);
+      expect(approved.items[0]).toEqual(expect.objectContaining({ id: 'f1', fullName: 'Maria', petId: 'pet-1', petName: 'Rex' }));
+      expect(approved.items[0]).not.toHaveProperty('cpf');
+    });
+
+    it('aplica a busca em todas as colunas', async () => {
+      await service.board('org-1', 'maria');
+
+      const where = formRepo.findAndCount.mock.calls[0][0].where;
+      expect(where).toHaveLength(3);
+      expect(where[0].fullName.value).toBe('%maria%');
+    });
+  });
+
+  it('findHistory valida a ficha da organização antes de listar', async () => {
+    formRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.findHistory('form-1', 'org-2')).rejects.toThrow(NotFoundException);
+    expect(history.findByForm).not.toHaveBeenCalled();
   });
 
   it('remove faz soft delete dentro da organização', async () => {
@@ -316,6 +543,15 @@ describe('AdoptionFormService', () => {
     expect(formRepo.update).toHaveBeenCalledWith('form-1', { isActive: false, updatedBy: 'user-1' });
     expect(result.message).toBe('Ficha de adoção removida com sucesso.');
     expect(storage.removePrivate).not.toHaveBeenCalled();
+    expect(recorded()).toEqual(expect.objectContaining({ type: AdoptionHistoryType.FICHA_REMOVIDA, userId: 'user-1' }));
+  });
+
+  it('remove libera o pet reservado para a ficha', async () => {
+    formRepo.findOne.mockResolvedValue({ id: 'form-1', status: 'APROVADO', petId: 'pet-1', fotos: [] });
+
+    await service.remove('form-1', 'org-1', 'user-1');
+
+    expect(petRepo.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-1', organizationId: expect.any(String), status: PetStatus.EM_PROCESSO }), { status: PetStatus.DISPONIVEL, updatedBy: 'user-1' });
   });
 
   it('remove apaga as fotos da residência do storage e do banco', async () => {
@@ -354,6 +590,9 @@ describe('AdoptionFormService', () => {
       await service.addPhotos('form-1', [file()], 'org-1', 'user-1');
 
       expect(photoRepo.save).toHaveBeenCalledWith([expect.objectContaining({ adoptionFormId: 'form-1', createdBy: 'user-1' })]);
+      expect(recorded()).toEqual(
+        expect.objectContaining({ type: AdoptionHistoryType.FOTO_ADICIONADA, description: '1 foto adicionada', metadata: { count: 1 }, userId: 'user-1' }),
+      );
     });
   });
 
@@ -369,10 +608,11 @@ describe('AdoptionFormService', () => {
     it('remove do storage e do banco', async () => {
       photoRepo.findOne.mockResolvedValue({ id: 'f1', storagePath: 'adoption-forms/form-1/f1.png' });
 
-      await service.removePhoto('form-1', 'f1', 'org-1');
+      await service.removePhoto('form-1', 'f1', 'org-1', 'user-1');
 
       expect(storage.removePrivate).toHaveBeenCalledWith(['adoption-forms/form-1/f1.png']);
       expect(photoRepo.delete).toHaveBeenCalledWith('f1');
+      expect(recorded()).toEqual(expect.objectContaining({ type: AdoptionHistoryType.FOTO_REMOVIDA, metadata: { photoId: 'f1' }, userId: 'user-1' }));
     });
   });
 });

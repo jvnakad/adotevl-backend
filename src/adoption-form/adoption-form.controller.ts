@@ -67,7 +67,7 @@ export class AdoptionFormController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({
     summary: 'Listar fichas de adoção',
-    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Lista as fichas da organização do usuário, mais recentes primeiro. Filtros: status (PENDENTE, EM_ANALISE, APROVADO, REPROVADO), search (nome, email ou CPF)',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Lista as fichas da organização do usuário, mais recentes primeiro. Filtros: status (PENDENTE, EM_ANALISE, APROVADO, REPROVADO, CONTRATO_GERADO, CONCLUIDA), search (nome, email ou CPF)',
   })
   findAll(
     @Query() pagination: PaginationDto,
@@ -76,6 +76,28 @@ export class AdoptionFormController {
     @Query('search') search?: string,
   ) {
     return this.adoptionFormService.findAll(pagination, req.user.organizationId, { status, search });
+  }
+
+  // Declarada antes de ':id' para "board" não ser tratado como id
+  @Get('board')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'VOLUNTEER')
+  @ApiOperation({
+    summary: 'Kanban das fichas de adoção',
+    description: 'Perfis permitidos: ADMIN, VOLUNTEER. Colunas na ordem PENDENTE, EM_ANALISE, APROVADO, CONTRATO_GERADO, CONCLUIDA, REPROVADO, com total e até 50 fichas resumidas (mais recentes primeiro). Filtro: search (nome, email ou CPF).',
+  })
+  board(@Request() req, @Query('search') search?: string) {
+    return this.adoptionFormService.board(req.user.organizationId, search);
+  }
+
+  @Get(':id/history')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('ADMIN', 'VOLUNTEER')
+  @ApiOperation({ summary: 'Histórico da ficha de adoção', description: 'Perfis permitidos: ADMIN, VOLUNTEER. Eventos da ficha, mais recentes primeiro.' })
+  history(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.adoptionFormService.findHistory(id, req.user.organizationId);
   }
 
   @Get(':id')
@@ -100,9 +122,13 @@ export class AdoptionFormController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Avaliar ficha de adoção (status e observações)', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @ApiOperation({
+    summary: 'Mover ficha de adoção (status e observações)',
+    description:
+      'Perfis permitidos: ADMIN, VOLUNTEER. PENDENTE/EM_ANALISE/APROVADO/REPROVADO são livres entre si; CONTRATO_GERADO só pela geração do contrato; CONCLUIDA só a partir de CONTRATO_GERADO (pet vira ADOTADO); de CONTRATO_GERADO/CONCLUIDA só volta para APROVADO e apenas ADMIN.',
+  })
   updateStatus(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAdoptionFormStatusDto, @Request() req) {
-    return this.adoptionFormService.updateStatus(id, dto, req.user.organizationId, req.user.id);
+    return this.adoptionFormService.updateStatus(id, dto, req.user.organizationId, req.user.id, req.user.profileName);
   }
 
   @Delete(':id')
@@ -137,6 +163,6 @@ export class AdoptionFormController {
   @Roles('ADMIN', 'VOLUNTEER')
   @ApiOperation({ summary: 'Remover foto da ficha de adoção', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
   removePhoto(@Param('id', ParseUUIDPipe) id: string, @Param('photoId', ParseUUIDPipe) photoId: string, @Request() req) {
-    return this.adoptionFormService.removePhoto(id, photoId, req.user.organizationId);
+    return this.adoptionFormService.removePhoto(id, photoId, req.user.organizationId, req.user.id);
   }
 }

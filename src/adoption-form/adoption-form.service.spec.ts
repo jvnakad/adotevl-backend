@@ -458,13 +458,13 @@ describe('AdoptionFormService', () => {
     ])('permite mover livremente de %s para %s', async (from, to) => {
       formWith(from);
 
-      await expect(service.updateStatus('form-1', { status: to }, 'org-1', 'user-1', 'VOLUNTEER')).resolves.toBeDefined();
+      await expect(service.updateStatus('form-1', { status: to }, 'org-1', 'user-1', false)).resolves.toBeDefined();
     });
 
     it('mesmo status só atualiza as observações e registra FICHA_EDITADA', async () => {
       formRepo.findOne.mockResolvedValue({ id: 'form-1', organizationId: 'org-1', fullName: 'Maria', status: 'AGUARDANDO_ASSINATURA', petId: 'pet-1', reviewNotes: 'Antiga', fotos: [] });
 
-      await service.updateStatus('form-1', { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA, reviewNotes: 'Nova' }, 'org-1', 'user-1', 'VOLUNTEER');
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA, reviewNotes: 'Nova' }, 'org-1', 'user-1', false);
 
       expect(formRepo.update).toHaveBeenCalledWith('form-1', { reviewNotes: 'Nova', updatedBy: 'user-1' });
       expect(txFormRepo.update).not.toHaveBeenCalled();
@@ -489,7 +489,7 @@ describe('AdoptionFormService', () => {
     it('CONTRATO_GERADO (legado) não é mais destino', async () => {
       formWith(AdoptionFormStatus.APROVADO);
 
-      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONTRATO_GERADO }, 'org-1', 'user-1', true)).rejects.toThrow(
         'Movimentação de status não permitida.',
       );
       expect(txFormRepo.update).not.toHaveBeenCalled();
@@ -498,7 +498,7 @@ describe('AdoptionFormService', () => {
     it.each([AdoptionFormStatus.APROVADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA])('não conclui manualmente a partir de %s', async (from) => {
       formWith(from);
 
-      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONCLUIDA }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.CONCLUIDA }, 'org-1', 'user-1', true)).rejects.toThrow(
         'A adoção é concluída automaticamente quando o adotante assina o termo de adoção.',
       );
       expect(txFormRepo.update).not.toHaveBeenCalled();
@@ -507,7 +507,7 @@ describe('AdoptionFormService', () => {
     it('não permite mover manualmente para AGUARDANDO_ASSINATURA', async () => {
       formWith(AdoptionFormStatus.APROVADO);
 
-      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.AGUARDANDO_ASSINATURA }, 'org-1', 'user-1', true)).rejects.toThrow(
         'Envie o termo de adoção para assinatura pela aba Termo de Adoção.',
       );
     });
@@ -515,14 +515,14 @@ describe('AdoptionFormService', () => {
     it('EM_ANALISE (legado) não é mais destino', async () => {
       formWith(AdoptionFormStatus.PENDENTE);
 
-      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.EM_ANALISE }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow('Movimentação de status não permitida.');
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.EM_ANALISE }, 'org-1', 'user-1', true)).rejects.toThrow('Movimentação de status não permitida.');
     });
 
     it('ADMIN voltando de AGUARDANDO_ASSINATURA para APROVADO cancela o documento no Autentique', async () => {
       formWith(AdoptionFormStatus.AGUARDANDO_ASSINATURA, 'pet-1');
       contractRepo.findOne.mockResolvedValue({ id: 'contract-1', autentiqueDocumentId: 'doc-1', signatureStatus: 'PENDENTE' });
 
-      await service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'ADMIN');
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', true);
 
       expect(autentique.deleteDocument).toHaveBeenCalledWith('doc-1');
       expect(txContractRepo.update).toHaveBeenCalledWith({ adoptionFormId: 'form-1' }, { signatureStatus: 'CANCELADO', updatedBy: 'user-1' });
@@ -534,26 +534,26 @@ describe('AdoptionFormService', () => {
       contractRepo.findOne.mockResolvedValue({ id: 'contract-1', autentiqueDocumentId: 'doc-1', signatureStatus: 'PENDENTE' });
       autentique.deleteDocument.mockRejectedValue(new Error('fora do ar'));
 
-      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'ADMIN')).resolves.toBeDefined();
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', true)).resolves.toBeDefined();
       expect(txFormRepo.update).toHaveBeenCalledWith('form-1', expect.objectContaining({ status: AdoptionFormStatus.APROVADO }));
     });
 
     it.each([AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('de %s só volta para APROVADO', async (from) => {
       formWith(from);
 
-      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.PENDENTE }, 'org-1', 'user-1', 'ADMIN')).rejects.toThrow(BadRequestException);
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.PENDENTE }, 'org-1', 'user-1', true)).rejects.toThrow(BadRequestException);
     });
 
     it.each([AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA])('voltar de %s para APROVADO é só para ADMIN', async (from) => {
       formWith(from, 'pet-1');
 
-      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'VOLUNTEER')).rejects.toThrow(ForbiddenException);
+      await expect(service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', false)).rejects.toThrow(ForbiddenException);
     });
 
     it('ADMIN volta de CONCLUIDA para APROVADO e o pet volta para EM_PROCESSO', async () => {
       formWith(AdoptionFormStatus.CONCLUIDA, 'pet-1');
 
-      await service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', 'ADMIN');
+      await service.updateStatus('form-1', { status: AdoptionFormStatus.APROVADO }, 'org-1', 'user-1', true);
 
       expect(txPetRepo.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-1', organizationId: expect.any(String) }), { status: PetStatus.EM_PROCESSO, adoptionDate: null, updatedBy: 'user-1' });
     });

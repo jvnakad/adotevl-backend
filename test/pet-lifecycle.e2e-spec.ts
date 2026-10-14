@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const request = require('supertest');
-import { TestAppModule } from './test-app.module';
+import { TestAppModule, joinTeam, cleanupAccess } from './test-app.module';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Profile } from '../src/profile/profile.entity';
 import { Organization } from '../src/organization/organization.entity';
@@ -38,6 +38,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     const existingOrg = await orgRepo.findOne({ where: { cnpj: '33333333333333' } });
     if (existingOrg) {
       await petRepo.delete({ organizationId: existingOrg.id });
+      await cleanupAccess(app, existingOrg.id);
       await userRepo.delete({ organizationId: existingOrg.id });
       await orgRepo.delete({ id: existingOrg.id });
     }
@@ -52,7 +53,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
     orgId = org.id;
 
     const hashed = await bcrypt.hash('senha123', 10);
-    await userRepo.save({
+    const admin = await userRepo.save({
       fullName: 'Admin Pet Lifecycle',
       cpf: '55544433300',
       email: 'admin.pet.lifecycle@teste.com',
@@ -64,6 +65,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
       isApproved: true,
       isActive: true,
     });
+    await joinTeam(app, admin, 'ADMIN');
 
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
@@ -73,6 +75,7 @@ describe('Fluxo de ciclo de vida do pet (e2e)', () => {
 
   afterAll(async () => {
     await petRepo.delete({ organizationId: orgId });
+    await cleanupAccess(app, orgId);
     await userRepo.delete({ organizationId: orgId });
     await orgRepo.delete({ id: orgId });
     await app.close();

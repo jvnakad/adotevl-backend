@@ -1,4 +1,8 @@
-import { Module, Global } from '@nestjs/common';
+import { Module, Global, INestApplication } from '@nestjs/common';
+import { DataSource } from 'typeorm';
+import { TeamService } from '../src/team/team.service';
+import { TeamMembershipService } from '../src/team/team-membership.service';
+import { ScreenPermissions } from '../src/access/access';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { Organization } from '../src/organization/organization.entity';
@@ -167,3 +171,29 @@ class MockAutentiqueModule {}
   ],
 })
 export class TestAppModule {}
+
+// ---- Acesso por equipe nas suítes e2e ----
+
+type TestUser = { id: string; fullName: string; cpf: string; organizationId: string; birthDate?: Date };
+
+/**
+ * Coloca o usuário numa equipe: 'ADMIN' = equipe Admin da organização (acesso total);
+ * um objeto de permissões = equipe própria do usuário com aquele acesso (ex.: o antigo perfil VOLUNTEER).
+ */
+export async function joinTeam(app: INestApplication, user: TestUser, access: 'ADMIN' | ScreenPermissions) {
+  const teams = app.get(TeamService);
+  const team =
+    access === 'ADMIN'
+      ? await teams.ensureAdminTeam(user.organizationId)
+      : await teams.create({ name: `Equipe ${user.fullName}`, organizationId: user.organizationId });
+  if (access !== 'ADMIN') await teams.setPermissions(team.id, access);
+  await app.get(TeamMembershipService).assign({ birthDate: null, ...user }, team.id, null);
+  return team;
+}
+
+/** Remove voluntários e equipes da organização (antes de apagar os usuários: FK de volunteers.user_id). */
+export async function cleanupAccess(app: INestApplication, organizationId: string) {
+  const dataSource = app.get(DataSource);
+  await dataSource.query('DELETE FROM volunteers WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [organizationId]);
+  await dataSource.query('DELETE FROM teams WHERE organization_id = $1', [organizationId]);
+}

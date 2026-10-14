@@ -3,9 +3,11 @@ import { FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { PaginationDto } from '../common/pagination.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
+import { AccessGuard } from '../access/access.guard';
 import { OptionalJwtAuthGuard } from '../auth/optional-jwt-auth.guard';
-import { Roles } from '../auth/roles.decorator';
+import { AdminOnly, RequireAccess } from '../access/access.decorator';
+import { AccessLevel, hasLevel, Screen } from '../access/access';
+import { AccessService } from '../access/access.service';
 import { PetService, MAX_PET_PHOTOS, MAX_PHOTO_SIZE } from './pet.service';
 import { CreatePetDto } from './dto/create-pet.dto';
 import { UpdatePetDto } from './dto/update-pet.dto';
@@ -14,13 +16,16 @@ import { PET_BREEDS_BY_SPECIES, PET_SPECIES } from './pet-catalog';
 @ApiTags('Pets')
 @Controller('pets')
 export class PetController {
-  constructor(private readonly petService: PetService) {}
+  constructor(
+    private readonly petService: PetService,
+    private readonly accessService: AccessService,
+  ) {}
 
   @Post()
+  @RequireAccess(Screen.PETS, AccessLevel.EDIT)
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Cadastrar pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @ApiOperation({ summary: 'Cadastrar pet', description: 'Acesso: Pets (Editar)' })
   create(@Body() dto: CreatePetDto, @Request() req) {
     return this.petService.create(dto, req.user.id);
   }
@@ -28,8 +33,8 @@ export class PetController {
   @Get()
   @ApiBearerAuth()
   @UseGuards(OptionalJwtAuthGuard)
-  @ApiOperation({ summary: 'Listar pets', description: 'Rota pública. Sem login, filtra pelo organizationId da URL e retorna apenas os dados exibidos no site (id, name, sex, age, size, castration, about e url das fotos). Com login de ADMIN ou VOLUNTEER, usa a organização do usuário e retorna o pet completo. Filtros: organizationId, species, sex, size, castration (true/false), status (DISPONIVEL, EM_PROCESSO, ADOTADO), search (nome ou raça)' })
-  findAll(
+  @ApiOperation({ summary: 'Listar pets', description: 'Rota pública. Sem login, filtra pelo organizationId da URL e retorna apenas os dados exibidos no site (id, name, sex, age, size, castration, about e url das fotos). Com login e acesso a Pets (Visualizar), usa a organização do usuário e retorna o pet completo. Filtros: organizationId, species, sex, size, castration (true/false), status (DISPONIVEL, EM_PROCESSO, ADOTADO), search (nome ou raça)' })
+  async findAll(
     @Query() pagination: PaginationDto,
     @Request() req,
     @Query('organizationId') organizationId?: string,
@@ -40,8 +45,9 @@ export class PetController {
     @Query('status') status?: string,
     @Query('search') search?: string,
   ) {
-    // Só ADMIN e VOLUNTEER recebem o pet completo; demais perfis e visitantes veem a versão pública
-    if (['ADMIN', 'VOLUNTEER'].includes(req.user?.profileName)) {
+    // Quem visualiza Pets recebe o pet completo; demais usuários e visitantes veem a versão pública
+    const access = req.user ? await this.accessService.forUser(req.user.id) : null;
+    if (access && (access.isAdmin || hasLevel(access.permissions[Screen.PETS], AccessLevel.VIEW))) {
       return this.petService.findAll(pagination, { organizationId: req.user.organizationId, species, sex, size, castration, status, search });
     }
     return this.petService.findAllPublic(pagination, { organizationId, species, sex, size, castration, status, search });
@@ -55,36 +61,36 @@ export class PetController {
   }
 
   @Get(':id')
+  @RequireAccess(Screen.PETS, AccessLevel.VIEW)
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Buscar pet por ID', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @ApiOperation({ summary: 'Buscar pet por ID', description: 'Acesso: Pets (Visualizar)' })
   findOne(@Param('id') id: string) {
     return this.petService.findOne(id);
   }
 
   @Put(':id')
+  @RequireAccess(Screen.PETS, AccessLevel.EDIT)
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Atualizar pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @ApiOperation({ summary: 'Atualizar pet', description: 'Acesso: Pets (Editar)' })
   update(@Param('id') id: string, @Body() dto: UpdatePetDto, @Request() req) {
     return this.petService.update(id, dto, req.user.id);
   }
 
   @Delete(':id')
+  @AdminOnly()
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Desativar pet (soft delete)', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @ApiOperation({ summary: 'Desativar pet (soft delete)', description: 'Somente equipe Admin' })
   remove(@Param('id') id: string, @Request() req) {
     return this.petService.remove(id, req.user.id);
   }
 
   @Post(':id/photos')
+  @RequireAccess(Screen.PETS, AccessLevel.EDIT)
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'VOLUNTEER')
+  @UseGuards(JwtAuthGuard, AccessGuard)
   @UseInterceptors(FilesInterceptor('photos', MAX_PET_PHOTOS, { limits: { fileSize: MAX_PHOTO_SIZE } }))
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -93,16 +99,16 @@ export class PetController {
       properties: { photos: { type: 'array', items: { type: 'string', format: 'binary' } } },
     },
   })
-  @ApiOperation({ summary: 'Adicionar fotos ao pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER. Campo multipart "photos" (JPEG, PNG ou WEBP, até 5MB cada). Máximo de 10 fotos por pet. Retorna o pet com a lista "fotos" atualizada.' })
+  @ApiOperation({ summary: 'Adicionar fotos ao pet', description: 'Acesso: Pets (Editar). Campo multipart "photos" (JPEG, PNG ou WEBP, até 5MB cada). Máximo de 10 fotos por pet. Retorna o pet com a lista "fotos" atualizada.' })
   addPhotos(@Param('id', ParseUUIDPipe) id: string, @UploadedFiles() files: Express.Multer.File[], @Request() req) {
     return this.petService.addPhotos(id, files, req.user.id);
   }
 
   @Delete(':id/photos/:photoId')
+  @RequireAccess(Screen.PETS, AccessLevel.EDIT)
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles('ADMIN', 'VOLUNTEER')
-  @ApiOperation({ summary: 'Remover foto do pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @UseGuards(JwtAuthGuard, AccessGuard)
+  @ApiOperation({ summary: 'Remover foto do pet', description: 'Acesso: Pets (Editar)' })
   removePhoto(@Param('id', ParseUUIDPipe) id: string, @Param('photoId', ParseUUIDPipe) photoId: string) {
     return this.petService.removePhoto(id, photoId);
   }

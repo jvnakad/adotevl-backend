@@ -1,7 +1,9 @@
+import { AccessLevel } from '../src/access/access';
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const request = require('supertest');
+import { joinTeam, cleanupAccess } from './test-app.module';
 import { TestAppModule } from './test-app.module';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -95,7 +97,7 @@ describe('Fluxo do termo de adoção (e2e)', () => {
 
   const createUser = async (email: string, cpf: string, organizationId: string, profileName: string) => {
     const profile = await profileRepo.findOne({ where: { name: profileName } });
-    await userRepo.save({
+    const user = await userRepo.save({
       fullName: `Usuário ${profileName} Contrato`,
       cpf,
       email,
@@ -107,6 +109,14 @@ describe('Fluxo do termo de adoção (e2e)', () => {
       isApproved: true,
       isActive: true,
     });
+    // ADMIN = equipe Admin; VOLUNTEER = equipe com o acesso do antigo perfil (fichas, termo e pets, sem ações de Admin)
+    await joinTeam(
+      app,
+      user,
+      profileName === 'ADMIN'
+        ? 'ADMIN'
+        : { PETS: AccessLevel.EDIT, ADOPTERS: AccessLevel.EDIT, ADOPTION_CONTRACT: AccessLevel.EDIT, ADOPTION_HISTORY: AccessLevel.VIEW },
+    );
     const login = await api().post('/auth/login').send({ email, password: 'senha123' });
     return login.body.access_token;
   };
@@ -117,6 +127,7 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     // Fichas primeiro: histórico e contrato saem em cascata
     await formRepo.delete({ organizationId: org.id });
     await petRepo.delete({ organizationId: org.id });
+    await cleanupAccess(app, org.id);
     await userRepo.delete({ organizationId: org.id });
     await orgRepo.delete({ id: org.id });
   };

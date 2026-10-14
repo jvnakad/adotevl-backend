@@ -20,6 +20,7 @@ import { JwtService } from '@nestjs/jwt';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
 import { TeamMembershipService } from '../team/team-membership.service';
+import { TeamService } from '../team/team.service';
 
 @Injectable()
 export class UserService {
@@ -33,6 +34,7 @@ export class UserService {
     private readonly mailService: MailService,
     private readonly jwtService: JwtService,
     private readonly membership: TeamMembershipService,
+    private readonly teams: TeamService,
   ) {}
 
   async create(dto: CreateUserDto, createdBy: string = null) {
@@ -54,16 +56,13 @@ export class UserService {
     }
 
     const isFirstUser = !(await this.userRepository.findOne({ where: { organizationId: dto.organizationId } }));
-    let profileId = dto.profileId;
+    let profileId: string;
 
-    if (isFirstUser) {
-      const admin = await this.profileRepository.findOne({ where: { name: 'ADMIN' } });
-      if (!admin) throw new BadRequestException('Perfil ADMIN não encontrado.');
-      profileId = admin.id;
-    } else {
-      const profile = await this.profileRepository.findOne({ where: { id: dto.profileId } });
-      if (!profile) throw new NotFoundException('Perfil não encontrado.');
-    }
+    // Perfil é legado (o acesso vem da equipe): o cadastro não escolhe, só registra ADMIN/VOLUNTEER
+    const profileName = isFirstUser ? 'ADMIN' : 'VOLUNTEER';
+    const profile = await this.profileRepository.findOne({ where: { name: profileName } });
+    if (!profile) throw new BadRequestException(`Perfil ${profileName} não encontrado.`);
+    profileId = profile.id;
 
     const hashedPassword = await bcrypt.hash(dto.password, 10);
     const confirmationCode = randomUUID();
@@ -85,6 +84,11 @@ export class UserService {
     });
 
     const saved = await this.userRepository.save(user);
+    // Primeiro usuário da organização administra tudo: entra na equipe Admin
+    if (isFirstUser) {
+      const adminTeam = await this.teams.ensureAdminTeam(dto.organizationId);
+      await this.membership.assign(saved, adminTeam.id, createdBy);
+    }
     await this.mailService.sendConfirmationEmail(saved.email, saved.fullName, saved.confirmationCode);
     return saved;
   }

@@ -45,6 +45,7 @@ describe('TeamService', () => {
         { teamId: 't1', screen: Screen.PETS, level: AccessLevel.EDIT, updatedBy: 'admin-1' },
         { teamId: 't1', screen: Screen.MEDICAL_RECORDS, level: AccessLevel.VIEW, updatedBy: 'admin-1' },
       ]);
+      expect(repo.update).toHaveBeenCalledWith('t1', { accessConfiguredAt: expect.any(Date), updatedBy: 'admin-1' });
     });
 
     it('equipe Admin não pode ter permissões alteradas', async () => {
@@ -110,7 +111,7 @@ describe('TeamService', () => {
       const result = await service.create({ name: 'Resgate', organizationId: 'org-1' } as any, 'user-1');
 
       expect(repo.findOne).toHaveBeenCalledWith({ where: { name: 'Resgate', organizationId: 'org-1' } });
-      expect(result).toEqual(expect.objectContaining({ name: 'Resgate', createdBy: 'user-1' }));
+      expect(result).toEqual(expect.objectContaining({ name: 'Resgate', createdBy: 'user-1', accessConfiguredAt: expect.any(Date) }));
     });
 
     it('lança ConflictException com nome repetido na organização', async () => {

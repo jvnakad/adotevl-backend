@@ -13,6 +13,7 @@ describe('UserService', () => {
   let userRepo: MockRepository;
   let profileRepo: MockRepository;
   let orgRepo: MockRepository;
+  let teams: { ensureAdminTeam: jest.Mock };
   let membership: { assign: jest.Mock; ensureNotLastAdmin: jest.Mock; teamsOf: jest.Mock; userIdsOfTeam: jest.Mock };
   let mailService: { sendConfirmationEmail: jest.Mock; sendApprovalEmail: jest.Mock; sendPasswordResetEmail: jest.Mock };
   let jwtService: { sign: jest.Mock };
@@ -37,7 +38,8 @@ describe('UserService', () => {
     mailService = { sendConfirmationEmail: jest.fn(), sendApprovalEmail: jest.fn(), sendPasswordResetEmail: jest.fn() };
     jwtService = { sign: jest.fn(() => 'jwt-token') };
     membership = { assign: jest.fn(), ensureNotLastAdmin: jest.fn(), teamsOf: jest.fn(async () => new Map()), userIdsOfTeam: jest.fn(async () => []) };
-    service = new UserService(userRepo as any, profileRepo as any, orgRepo as any, mailService as any, jwtService as any, membership as any);
+    teams = { ensureAdminTeam: jest.fn(async () => ({ id: 't-admin' })) };
+    service = new UserService(userRepo as any, profileRepo as any, orgRepo as any, mailService as any, jwtService as any, membership as any, teams as any);
   });
 
   describe('create', () => {
@@ -85,6 +87,17 @@ describe('UserService', () => {
       expect(mailService.sendConfirmationEmail).toHaveBeenCalledWith('ana@teste.com', 'Ana', result.confirmationCode);
     });
 
+    it('primeiro usuário da organização entra na equipe Admin (acesso vem da equipe)', async () => {
+      mockUserLookups(null, null, null);
+      orgRepo.findOne.mockResolvedValue({ id: 'org-1' });
+      profileRepo.findOne.mockResolvedValue({ id: 'p-admin', name: 'ADMIN' });
+
+      const result = await service.create(dto, 'creator');
+
+      expect(teams.ensureAdminTeam).toHaveBeenCalledWith('org-1');
+      expect(membership.assign).toHaveBeenCalledWith(result, 't-admin', 'creator');
+    });
+
     it('lança BadRequestException quando o perfil ADMIN não existe para o primeiro usuário', async () => {
       mockUserLookups(null, null, null);
       orgRepo.findOne.mockResolvedValue({ id: 'org-1' });
@@ -93,24 +106,16 @@ describe('UserService', () => {
       await expect(service.create(dto)).rejects.toThrow(BadRequestException);
     });
 
-    it('demais usuários mantêm o perfil informado', async () => {
+    it('demais usuários recebem o perfil legado VOLUNTEER, sem escolher pelo cadastro', async () => {
       mockUserLookups(null, null, { id: 'existing' });
       orgRepo.findOne.mockResolvedValue({ id: 'org-1' });
-      profileRepo.findOne.mockResolvedValue({ id: 'p-volunteer' });
+      profileRepo.findOne.mockResolvedValue({ id: 'p-volunteer', name: 'VOLUNTEER' });
 
-      const result = await service.create(dto);
+      const result = await service.create({ ...dto, profileId: 'p-admin' });
 
-      expect(profileRepo.findOne).toHaveBeenCalledWith({ where: { id: 'p-volunteer' } });
+      expect(profileRepo.findOne).toHaveBeenCalledWith({ where: { name: 'VOLUNTEER' } });
       expect(result.profileId).toBe('p-volunteer');
-    });
-
-    it('lança NotFoundException quando o perfil informado não existe', async () => {
-      mockUserLookups(null, null, { id: 'existing' });
-      orgRepo.findOne.mockResolvedValue({ id: 'org-1' });
-      profileRepo.findOne.mockResolvedValue(null);
-
-      await expect(service.create(dto)).rejects.toThrow('Perfil não encontrado.');
-      expect(mailService.sendConfirmationEmail).not.toHaveBeenCalled();
+      expect(membership.assign).not.toHaveBeenCalled();
     });
   });
 

@@ -33,9 +33,10 @@ export class CreateUserDto {
   @IsDateString({}, { message: 'Informe uma data válida no formato YYYY-MM-DD.' })
   birthDate?: string;
 
+  // Legado: ignorado (o acesso vem da equipe definida na aprovação)
   @IsString()
-  @IsNotEmpty({ message: 'O perfil é obrigatório.' })
-  profileId: string;
+  @IsOptional()
+  profileId?: string;
 
   @IsString()
   @IsNotEmpty({ message: 'A organização é obrigatória.' })

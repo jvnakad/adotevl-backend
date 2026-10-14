@@ -23,7 +23,8 @@ export class TeamService {
   async create(dto: CreateTeamDto, createdBy: string = null) {
     const existing = await this.teamRepository.findOne({ where: { name: dto.name, organizationId: dto.organizationId } });
     if (existing) throw new ConflictException('Já existe uma equipe com este nome nesta organização.');
-    const team = this.teamRepository.create({ ...dto, createdBy, updatedBy: createdBy });
+    // Equipe nova já nasce no sistema de permissões: começa sem acesso a nenhuma tela
+    const team = this.teamRepository.create({ ...dto, accessConfiguredAt: new Date(), createdBy, updatedBy: createdBy });
     return this.teamRepository.save(team);
   }
 
@@ -69,6 +70,7 @@ export class TeamService {
       updatedBy,
     }));
     if (rows.length) await this.permissionRepository.save(rows);
+    await this.teamRepository.update(id, { accessConfiguredAt: new Date(), updatedBy });
     return this.findOne(id);
   }
 

@@ -68,10 +68,10 @@ src/<feature>/
 
 ### Controllers
 - `@ApiTags('<Nome em PT>')`, `@Controller('<rota-kebab-plural>')`.
-- Rota protegida: `@ApiBearerAuth()` + `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles('ADMIN', ...)`.
-- `@ApiOperation({ summary: '...', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })` — sempre listar os perfis; rotas públicas dizem "Rota pública".
+- Rota protegida: `@ApiBearerAuth()` + `@UseGuards(JwtAuthGuard, AccessGuard)` + `@RequireAccess(Screen.X, AccessLevel.VIEW|EDIT)` (ou `@AdminOnly()` para ações só da equipe Admin). `@Roles`/`RolesGuard` são legado — não usar.
+- `@ApiOperation({ summary: '...', description: 'Acesso: Pets (Editar)' })` — sempre dizer a tela e o nível ("Somente equipe Admin" / "Qualquer usuário logado" / "Rota pública").
 - Usuário logado: `req.user` = `{ id, email, profileId, profileName, organizationId }`. Passar `req.user.id` para `createdBy/updatedBy` e filtrar por `req.user.organizationId`.
-- Perfis: `ADMIN`, `FINANCIAL`, `VOLUNTEER` (seed automático em `ProfileService.onModuleInit`).
+- Perfis `ADMIN`/`FINANCIAL`/`VOLUNTEER` são **legado**: ficam no usuário e no JWT, mas não dão acesso. O acesso vem da equipe (ver "Acesso por equipe").
 - Ids de rota: `ParseUUIDPipe`.
 
 ### Services
@@ -97,6 +97,17 @@ src/<feature>/
 - Branches: `feat/<kebab-en>`, `fix/<kebab-en>`, a partir de `develop`. PR para `develop`; `develop` → `main` (merge em `main` sincroniza `develop` via Action).
 - Commits Conventional Commits em inglês (`feat: add pet photos upload...`, `fix: ...`, `refactor: ...`).
 - CI (`.github/workflows/test.yml`): `npm ci` + `npm test` + `npm run test:e2e` com Postgres 15.
+
+## Acesso por equipe (`src/access`, `src/team`)
+- Usuário ↔ equipe via `volunteers.teamId` (1 voluntário ativo por usuário). Sem equipe ativa = 403 em toda rota protegida.
+- Telas em `access.ts` (`Screen`, `SCREENS` com rótulo, tela mãe e `viewOnly`): Pets, Prontuário (mãe Pets), Adotantes, Termo de adoção e Histórico de adoção (mãe Adotantes; histórico só Visualizar), Campanhas, Parceiros, Voluntários, Equipes, Financeiro, Contas bancárias (mãe Financeiro). Níveis `NONE`/`VIEW`/`EDIT`. `GET /access/screens` devolve o catálogo.
+- `team_permissions` (equipe, tela, nível; sem linha = Sem acesso). `TeamService.setPermissions` substitui a matriz, recusa Editar em tela `viewOnly` e sub-tela sem Visualizar na mãe; marca `teams.access_configured_at`.
+- Equipe **Admin** (`teams.is_admin`, uma por organização, `TeamService.ensureAdminTeam`): Editar em tudo (inclusive telas futuras), não pode ser renomeada nem ter a matriz alterada, sempre com ao menos 1 membro ativo (`TeamMembershipService`).
+- `AccessGuard` lê equipe e permissões do banco a cada requisição (`AccessService.forUser`) — mudança vale na hora — e põe em `req.access`. `/auth/me` devolve `access: { teamId, teamName, isAdmin, permissions }`.
+- Só a equipe Admin: matriz de permissões, aprovar/reprovar usuário (`PATCH /users/:id/approve` exige `teamId`), trocar equipe (`PATCH /users/:id/team`), remover ficha, cancelar assinatura, voltar ficha do termo para Aprovado, desativar pet, organizações, endereços e perfis.
+- Primeiro usuário de uma organização entra na equipe Admin no cadastro. Cadastro público não escolhe perfil (grava VOLUNTEER legado).
+- Migração no boot (`AccessMigrationService`, idempotente): garante a equipe Admin; aprovados sem equipe vão para a equipe do perfil (Admin / "Financeiro" / "Voluntários", com o acesso antigo); equipes anteriores às permissões (`access_configured_at` null) recebem o acesso antigo dos perfis dos membros; equipe Admin vazia recebe os usuários de perfil ADMIN.
+- E2E: `joinTeam(app, user, 'ADMIN' | permissões)` e `cleanupAccess(app, orgId)` em `test/test-app.module.ts`.
 
 ## Módulos
 organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), adoption-history, adoption-contract, autentique, webhooks, mail, storage.

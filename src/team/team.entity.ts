@@ -28,6 +28,13 @@ export class Team {
   @Column({ name: 'is_admin', default: false })
   isAdmin: boolean;
 
+  /**
+   * Quando a matriz de permissões passou a valer (criação no sistema de equipes ou edição da matriz).
+   * null = equipe anterior às permissões: a migração dá a ela o acesso dos perfis antigos dos membros.
+   */
+  @Column({ name: 'access_configured_at', type: 'timestamptz', nullable: true })
+  accessConfiguredAt: Date | null;
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean;
 

@@ -13,7 +13,7 @@ describe('UserService', () => {
   let userRepo: MockRepository;
   let profileRepo: MockRepository;
   let orgRepo: MockRepository;
-  let teams: { ensureAdminTeam: jest.Mock };
+  let teams: { ensureDefaultTeams: jest.Mock };
   let membership: { assign: jest.Mock; ensureNotLastAdmin: jest.Mock; teamsOf: jest.Mock; userIdsOfTeam: jest.Mock };
   let mailService: { sendConfirmationEmail: jest.Mock; sendApprovalEmail: jest.Mock; sendPasswordResetEmail: jest.Mock };
   let jwtService: { sign: jest.Mock };
@@ -38,7 +38,7 @@ describe('UserService', () => {
     mailService = { sendConfirmationEmail: jest.fn(), sendApprovalEmail: jest.fn(), sendPasswordResetEmail: jest.fn() };
     jwtService = { sign: jest.fn(() => 'jwt-token') };
     membership = { assign: jest.fn(), ensureNotLastAdmin: jest.fn(), teamsOf: jest.fn(async () => new Map()), userIdsOfTeam: jest.fn(async () => []) };
-    teams = { ensureAdminTeam: jest.fn(async () => ({ id: 't-admin' })) };
+    teams = { ensureDefaultTeams: jest.fn(async () => ({ id: 't-admin' })) };
     service = new UserService(userRepo as any, profileRepo as any, orgRepo as any, mailService as any, jwtService as any, membership as any, teams as any);
   });
 
@@ -87,14 +87,14 @@ describe('UserService', () => {
       expect(mailService.sendConfirmationEmail).toHaveBeenCalledWith('ana@teste.com', 'Ana', result.confirmationCode);
     });
 
-    it('primeiro usuário da organização entra na equipe Admin (acesso vem da equipe)', async () => {
+    it('primeiro usuário da organização cria as equipes padrão e entra na Admin', async () => {
       mockUserLookups(null, null, null);
       orgRepo.findOne.mockResolvedValue({ id: 'org-1' });
       profileRepo.findOne.mockResolvedValue({ id: 'p-admin', name: 'ADMIN' });
 
       const result = await service.create(dto, 'creator');
 
-      expect(teams.ensureAdminTeam).toHaveBeenCalledWith('org-1');
+      expect(teams.ensureDefaultTeams).toHaveBeenCalledWith('org-1');
       expect(membership.assign).toHaveBeenCalledWith(result, 't-admin', 'creator');
     });
 

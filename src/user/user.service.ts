@@ -84,9 +84,9 @@ export class UserService {
     });
 
     const saved = await this.userRepository.save(user);
-    // Primeiro usuário da organização administra tudo: entra na equipe Admin
+    // Primeiro usuário da organização administra tudo: cria as equipes padrão e entra na Admin
     if (isFirstUser) {
-      const adminTeam = await this.teams.ensureAdminTeam(dto.organizationId);
+      const adminTeam = await this.teams.ensureDefaultTeams(dto.organizationId);
       await this.membership.assign(saved, adminTeam.id, createdBy);
     }
     await this.mailService.sendConfirmationEmail(saved.email, saved.fullName, saved.confirmationCode);

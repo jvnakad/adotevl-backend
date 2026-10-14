@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Team } from './team.entity';
+import { Team, TeamSystemKey } from './team.entity';
 import { TeamPermission } from './team-permission.entity';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { PaginationDto } from '../common/pagination.dto';
@@ -9,6 +9,13 @@ import { paginate } from '../common/paginate.helper';
 import { AccessLevel, ADMIN_PERMISSIONS, hasLevel, SCREEN_BY_KEY, SCREENS, ScreenPermissions } from '../access/access';
 
 export const ADMIN_TEAM_NAME = 'Admin';
+
+// Equipes padrão além da Admin: nascem sem acesso a nenhuma tela (o Admin define a matriz)
+export const DEFAULT_TEAMS: { systemKey: TeamSystemKey; name: string }[] = [
+  { systemKey: TeamSystemKey.FINANCIAL, name: 'Financeiro' },
+  { systemKey: TeamSystemKey.FIXED_VOLUNTEER, name: 'Voluntário Fixo' },
+  { systemKey: TeamSystemKey.FLOATING_VOLUNTEER, name: 'Voluntário Volante' },
+];
 const ADMIN_LOCKED = 'A equipe Admin tem acesso total e não pode ser alterada.';
 
 @Injectable()
@@ -43,6 +50,9 @@ export class TeamService {
   async update(id: string, dto: Partial<CreateTeamDto>, updatedBy: string = null) {
     const team = await this.findOne(id);
     if (team.isAdmin) throw new BadRequestException(ADMIN_LOCKED);
+    if (team.systemKey && dto.name !== undefined && dto.name !== team.name) {
+      throw new BadRequestException('Equipe padrão do sistema não pode ser renomeada.');
+    }
     await this.teamRepository.update(id, { ...dto, updatedBy });
     return this.findOne(id);
   }
@@ -77,14 +87,39 @@ export class TeamService {
   /** Garante a equipe de sistema Admin da organização (uma equipe já chamada "Admin" é promovida). */
   async ensureAdminTeam(organizationId: string) {
     const current = await this.teamRepository.findOne({ where: { organizationId, isAdmin: true } });
-    if (current) return current;
+    if (current) {
+      if (!current.systemKey) await this.teamRepository.update(current.id, { systemKey: TeamSystemKey.ADMIN });
+      return current;
+    }
 
     const sameName = await this.teamRepository.findOne({ where: { organizationId, name: ADMIN_TEAM_NAME } });
     if (sameName) {
-      await this.teamRepository.update(sameName.id, { isAdmin: true, isActive: true });
+      await this.teamRepository.update(sameName.id, { isAdmin: true, isActive: true, systemKey: TeamSystemKey.ADMIN });
       return { ...sameName, isAdmin: true, isActive: true };
     }
-    return this.teamRepository.save(this.teamRepository.create({ name: ADMIN_TEAM_NAME, organizationId, isAdmin: true, isActive: true }));
+    return this.teamRepository.save(
+      this.teamRepository.create({ name: ADMIN_TEAM_NAME, organizationId, isAdmin: true, isActive: true, systemKey: TeamSystemKey.ADMIN }),
+    );
+  }
+
+  /**
+   * Garante as 4 equipes padrão (Admin, Financeiro, Voluntário Fixo, Voluntário Volante).
+   * Equipe já existente com o mesmo nome vira a padrão, mantendo membros e acesso; as que faltam nascem sem acesso.
+   */
+  async ensureDefaultTeams(organizationId: string) {
+    const admin = await this.ensureAdminTeam(organizationId);
+    for (const { systemKey, name } of DEFAULT_TEAMS) {
+      if (await this.teamRepository.findOne({ where: { organizationId, systemKey } })) continue;
+      const sameName = await this.teamRepository.findOne({ where: { organizationId, name } });
+      if (sameName) {
+        await this.teamRepository.update(sameName.id, { systemKey, isActive: true });
+        continue;
+      }
+      await this.teamRepository.save(
+        this.teamRepository.create({ name, organizationId, systemKey, isActive: true, accessConfiguredAt: new Date() }),
+      );
+    }
+    return admin;
   }
 
   private async permissionsOf(team: Team): Promise<ScreenPermissions> {

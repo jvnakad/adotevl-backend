@@ -9,6 +9,14 @@ import {
 } from 'typeorm';
 import { Organization } from '../organization/organization.entity';
 
+/** Equipes padrão que toda organização tem (nome travado; a Admin também tem a matriz travada). */
+export enum TeamSystemKey {
+  ADMIN = 'ADMIN',
+  FINANCIAL = 'FINANCIAL',
+  FIXED_VOLUNTEER = 'FIXED_VOLUNTEER',
+  FLOATING_VOLUNTEER = 'FLOATING_VOLUNTEER',
+}
+
 @Entity('teams')
 export class Team {
   @PrimaryGeneratedColumn('uuid')
@@ -27,6 +35,10 @@ export class Team {
   /** Equipe de sistema "Admin": Editar em tudo, não pode ser editada, renomeada nem desativada. Uma por organização. */
   @Column({ name: 'is_admin', default: false })
   isAdmin: boolean;
+
+  /** Equipe padrão do sistema (null = criada pelo Admin). */
+  @Column({ name: 'system_key', type: 'enum', enum: TeamSystemKey, nullable: true })
+  systemKey: TeamSystemKey | null;
 
   /**
    * Quando a matriz de permissões passou a valer (criação no sistema de equipes ou edição da matriz).

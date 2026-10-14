@@ -68,6 +68,53 @@ describe('TeamService', () => {
     });
   });
 
+  describe('equipes padrão', () => {
+    it('ensureDefaultTeams cria as que faltam, sem acesso, marcadas como padrão', async () => {
+      // Admin já existe; demais não
+      repo.findOne.mockImplementation(async ({ where }) => (where.isAdmin ? { id: 't0', isAdmin: true, systemKey: 'ADMIN' } : null));
+
+      await service.ensureDefaultTeams('org-1');
+
+      const created = repo.save.mock.calls.map(([team]) => [team.name, team.systemKey]);
+      expect(created).toEqual([
+        ['Financeiro', 'FINANCIAL'],
+        ['Voluntário Fixo', 'FIXED_VOLUNTEER'],
+        ['Voluntário Volante', 'FLOATING_VOLUNTEER'],
+      ]);
+      expect(repo.save).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 'org-1', isActive: true, accessConfiguredAt: expect.any(Date) }));
+      expect(permissionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('equipe já existente com o nome padrão vira a equipe padrão (mantém membros e acesso)', async () => {
+      repo.findOne.mockImplementation(async ({ where }) => {
+        if (where.isAdmin) return { id: 't0', isAdmin: true, systemKey: 'ADMIN' };
+        if (where.name === 'Financeiro') return { id: 't5', name: 'Financeiro', systemKey: null };
+        if (where.systemKey) return null;
+        return { id: `t-${where.name}`, name: where.name, systemKey: null };
+      });
+
+      await service.ensureDefaultTeams('org-1');
+
+      expect(repo.update).toHaveBeenCalledWith('t5', { systemKey: 'FINANCIAL', isActive: true });
+      expect(repo.save).not.toHaveBeenCalled();
+    });
+
+    it('equipe padrão não pode ser renomeada', async () => {
+      repo.findOne.mockResolvedValue({ id: 't5', name: 'Financeiro', isAdmin: false, systemKey: 'FINANCIAL' });
+
+      await expect(service.update('t5', { name: 'Grana' }, 'admin-1')).rejects.toThrow(new BadRequestException('Equipe padrão do sistema não pode ser renomeada.'));
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
+    it('equipe padrão continua com a matriz editável', async () => {
+      repo.findOne.mockResolvedValue({ id: 't5', name: 'Financeiro', isAdmin: false, systemKey: 'FINANCIAL' });
+
+      await service.setPermissions('t5', { [Screen.FINANCIAL]: AccessLevel.EDIT }, 'admin-1');
+
+      expect(permissionRepo.save).toHaveBeenCalledWith([{ teamId: 't5', screen: Screen.FINANCIAL, level: AccessLevel.EDIT, updatedBy: 'admin-1' }]);
+    });
+  });
+
   describe('equipe Admin', () => {
     it('não pode ser renomeada', async () => {
       repo.findOne.mockResolvedValue({ id: 't0', name: 'Admin', isAdmin: true });
@@ -81,7 +128,7 @@ describe('TeamService', () => {
 
       await service.ensureAdminTeam('org-1');
 
-      expect(repo.save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Admin', organizationId: 'org-1', isAdmin: true, isActive: true }));
+      expect(repo.save).toHaveBeenCalledWith(expect.objectContaining({ name: 'Admin', organizationId: 'org-1', isAdmin: true, isActive: true, systemKey: 'ADMIN' }));
     });
 
     it('ensureAdminTeam promove uma equipe já chamada Admin', async () => {
@@ -89,12 +136,12 @@ describe('TeamService', () => {
 
       await service.ensureAdminTeam('org-1');
 
-      expect(repo.update).toHaveBeenCalledWith('t9', { isAdmin: true, isActive: true });
+      expect(repo.update).toHaveBeenCalledWith('t9', { isAdmin: true, isActive: true, systemKey: 'ADMIN' });
       expect(repo.save).not.toHaveBeenCalled();
     });
 
     it('ensureAdminTeam não faz nada quando já existe', async () => {
-      repo.findOne.mockResolvedValue({ id: 't0', isAdmin: true });
+      repo.findOne.mockResolvedValue({ id: 't0', isAdmin: true, systemKey: 'ADMIN' });
 
       const team = await service.ensureAdminTeam('org-1');
 

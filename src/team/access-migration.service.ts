@@ -17,7 +17,7 @@ const LEGACY_TEAMS: Record<string, { name: string; permissions: ScreenPermission
     },
   },
   VOLUNTEER: {
-    name: 'Voluntários',
+    name: 'Voluntário Fixo',
     permissions: {
       [Screen.PETS]: AccessLevel.EDIT,
       [Screen.MEDICAL_RECORDS]: AccessLevel.EDIT,
@@ -41,9 +41,9 @@ interface LegacyUser {
 
 /**
  * Perfis (ADMIN/FINANCIAL/VOLUNTEER) → equipes. Idempotente, roda a cada boot:
- * - toda organização tem a equipe Admin;
- * - usuário aprovado sem equipe entra na equipe do seu perfil (Admin, Financeiro ou Voluntários);
- * - equipe Admin sem membros recebe todos os usuários de perfil ADMIN (ninguém fica trancado fora).
+ * - usuário aprovado sem equipe entra na equipe do seu perfil (Admin, Financeiro ou Voluntário Fixo), com o acesso antigo;
+ * - equipe Admin sem membros recebe todos os usuários de perfil ADMIN (ninguém fica trancado fora);
+ * - por último garante as 4 equipes padrão: as que ainda faltam nascem sem acesso.
  */
 @Injectable()
 export class AccessMigrationService implements OnModuleInit {
@@ -89,6 +89,8 @@ export class AccessMigrationService implements OnModuleInit {
         moved++;
       }
     }
+    // Depois da migração: as padrão que faltarem nascem sem acesso (as do perfil antigo já levaram o acesso)
+    await this.teams.ensureDefaultTeams(organizationId);
     if (moved) this.logger.log(`Organização ${organizationId}: ${moved} usuário(s) colocado(s) em equipes pelo perfil antigo.`);
   }
 

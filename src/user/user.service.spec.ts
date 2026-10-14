@@ -1,3 +1,4 @@
+import { In } from 'typeorm';
 import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { UserService } from './user.service';
@@ -12,6 +13,7 @@ describe('UserService', () => {
   let userRepo: MockRepository;
   let profileRepo: MockRepository;
   let orgRepo: MockRepository;
+  let membership: { assign: jest.Mock; ensureNotLastAdmin: jest.Mock; teamsOf: jest.Mock; userIdsOfTeam: jest.Mock };
   let mailService: { sendConfirmationEmail: jest.Mock; sendApprovalEmail: jest.Mock; sendPasswordResetEmail: jest.Mock };
   let jwtService: { sign: jest.Mock };
   let service: UserService;
@@ -34,7 +36,8 @@ describe('UserService', () => {
     orgRepo = createMockRepository();
     mailService = { sendConfirmationEmail: jest.fn(), sendApprovalEmail: jest.fn(), sendPasswordResetEmail: jest.fn() };
     jwtService = { sign: jest.fn(() => 'jwt-token') };
-    service = new UserService(userRepo as any, profileRepo as any, orgRepo as any, mailService as any, jwtService as any);
+    membership = { assign: jest.fn(), ensureNotLastAdmin: jest.fn(), teamsOf: jest.fn(async () => new Map()), userIdsOfTeam: jest.fn(async () => []) };
+    service = new UserService(userRepo as any, profileRepo as any, orgRepo as any, mailService as any, jwtService as any, membership as any);
   });
 
   describe('create', () => {
@@ -134,11 +137,32 @@ describe('UserService', () => {
   });
 
   it('findAll filtra por aprovação só quando informada', async () => {
-    await service.findAll(pagination, false);
+    await service.findAll(pagination, { isApproved: false });
     await service.findAll(pagination);
 
     expect(userRepo.findAndCount).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: { isApproved: false } }));
     expect(userRepo.findAndCount).toHaveBeenNthCalledWith(2, expect.objectContaining({ where: {} }));
+  });
+
+  it('findAll devolve a equipe de cada usuário', async () => {
+    userRepo.findAndCount.mockResolvedValue([[{ id: 'u1' }, { id: 'u2' }], 2]);
+    membership.teamsOf.mockResolvedValue(new Map([['u1', { id: 't1', name: 'Resgate', isAdmin: false }]]));
+
+    const result = await service.findAll(pagination);
+
+    expect(membership.teamsOf).toHaveBeenCalledWith(['u1', 'u2']);
+    expect(result.data).toEqual([
+      { id: 'u1', team: { id: 't1', name: 'Resgate', isAdmin: false } },
+      { id: 'u2', team: null },
+    ]);
+  });
+
+  it('findAll filtra por equipe', async () => {
+    membership.userIdsOfTeam.mockResolvedValue(['u1', 'u3']);
+
+    await service.findAll(pagination, { teamId: 't1' });
+
+    expect(userRepo.findAndCount).toHaveBeenCalledWith(expect.objectContaining({ where: { id: In(['u1', 'u3']) } }));
   });
 
   describe('update', () => {
@@ -151,13 +175,13 @@ describe('UserService', () => {
     it('não-admin não pode editar outro usuário', async () => {
       userRepo.findOne.mockResolvedValue({ id: 'u1' });
 
-      await expect(service.update('u1', {}, 'u2', 'VOLUNTEER')).rejects.toThrow(ForbiddenException);
+      await expect(service.update('u1', {}, 'u2', false)).rejects.toThrow(ForbiddenException);
     });
 
     it('não-admin editando o próprio perfil só altera campos pessoais', async () => {
       userRepo.findOne.mockResolvedValue({ id: 'u1' });
 
-      await service.update('u1', { fullName: 'Nova', email: 'x@x.com', profileId: 'p-admin' } as any, 'u1', 'VOLUNTEER');
+      await service.update('u1', { fullName: 'Nova', email: 'x@x.com', profileId: 'p-admin' } as any, 'u1', false);
 
       expect(userRepo.update).toHaveBeenCalledWith('u1', {
         fullName: 'Nova',
@@ -171,7 +195,7 @@ describe('UserService', () => {
     it('admin pode alterar qualquer campo de qualquer usuário', async () => {
       userRepo.findOne.mockResolvedValue({ id: 'u1' });
 
-      await service.update('u1', { email: 'x@x.com', profileId: 'p-admin' } as any, 'admin', 'ADMIN');
+      await service.update('u1', { email: 'x@x.com', profileId: 'p-admin' } as any, 'admin', true);
 
       expect(userRepo.update).toHaveBeenCalledWith('u1', { email: 'x@x.com', profileId: 'p-admin', updatedBy: 'admin' });
     });
@@ -200,14 +224,33 @@ describe('UserService', () => {
     it('lança NotFoundException quando o usuário não existe', async () => {
       userRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.approve('x')).rejects.toThrow(NotFoundException);
+      await expect(service.approve('x', 't1', 'admin')).rejects.toThrow(NotFoundException);
+    });
+
+    it('coloca na equipe antes de aprovar', async () => {
+      const user = { id: 'u1', fullName: 'Ana', organizationId: 'org-1' };
+      userRepo.findOne.mockResolvedValue(user);
+
+      await service.approve('u1', 't1', 'admin');
+
+      expect(membership.assign).toHaveBeenCalledWith(user, 't1', 'admin');
+      expect(membership.assign.mock.invocationCallOrder[0]).toBeLessThan(userRepo.update.mock.invocationCallOrder[0]);
+    });
+
+    it('não aprova quando a equipe é inválida', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-1' });
+      membership.assign.mockRejectedValue(new BadRequestException('Equipe não encontrada nesta organização.'));
+
+      await expect(service.approve('u1', 'tx', 'admin')).rejects.toThrow('Equipe não encontrada nesta organização.');
+      expect(userRepo.update).not.toHaveBeenCalled();
+      expect(mailService.sendApprovalEmail).not.toHaveBeenCalled();
     });
 
     it('aprova, gera token com o perfil e envia email de acesso', async () => {
       const updated = { id: 'u1', email: 'ana@teste.com', fullName: 'Ana', profileId: 'p1', profile: { name: 'VOLUNTEER' }, organizationId: 'org-1' };
       userRepo.findOne.mockResolvedValueOnce({ id: 'u1' }).mockResolvedValueOnce(updated);
 
-      const result = await service.approve('u1', 'admin');
+      const result = await service.approve('u1', 't1', 'admin');
 
       expect(userRepo.update).toHaveBeenCalledWith('u1', { isApproved: true, updatedBy: 'admin' });
       expect(jwtService.sign).toHaveBeenCalledWith({
@@ -219,6 +262,33 @@ describe('UserService', () => {
       });
       expect(mailService.sendApprovalEmail).toHaveBeenCalledWith('ana@teste.com', 'Ana', 'jwt-token');
       expect(result).toBe(updated);
+    });
+  });
+
+  describe('reject', () => {
+    it('não desativa o último membro da equipe Admin', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1' });
+      membership.ensureNotLastAdmin.mockRejectedValue(new BadRequestException('A equipe Admin precisa de ao menos um membro ativo.'));
+
+      await expect(service.reject('u1', 'admin')).rejects.toThrow('A equipe Admin precisa de ao menos um membro ativo.');
+      expect(userRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('changeTeam', () => {
+    it('troca a equipe do usuário', async () => {
+      const user = { id: 'u1', organizationId: 'org-1' };
+      userRepo.findOne.mockResolvedValue(user);
+
+      await service.changeTeam('u1', 't2', 'admin');
+
+      expect(membership.assign).toHaveBeenCalledWith(user, 't2', 'admin');
+    });
+
+    it('lança NotFoundException quando o usuário não existe', async () => {
+      userRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.changeTeam('x', 't2', 'admin')).rejects.toThrow(NotFoundException);
     });
   });
 

@@ -6,7 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { User } from './user.entity';
@@ -19,6 +19,7 @@ import { MailService } from '../mail/mail.service';
 import { JwtService } from '@nestjs/jwt';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
+import { TeamMembershipService } from '../team/team-membership.service';
 
 @Injectable()
 export class UserService {
@@ -31,6 +32,7 @@ export class UserService {
     private readonly organizationRepository: Repository<Organization>,
     private readonly mailService: MailService,
     private readonly jwtService: JwtService,
+    private readonly membership: TeamMembershipService,
   ) {}
 
   async create(dto: CreateUserDto, createdBy: string = null) {
@@ -96,9 +98,14 @@ export class UserService {
     return this.userRepository.save(user);
   }
 
-  async findAll(pagination: PaginationDto, isApproved?: boolean) {
-    const where = isApproved !== undefined ? { isApproved } : {};
-    return paginate(this.userRepository, pagination, where);
+  async findAll(pagination: PaginationDto, filters: { isApproved?: boolean; teamId?: string } = {}) {
+    const where: Record<string, unknown> = {};
+    if (filters.isApproved !== undefined) where.isApproved = filters.isApproved;
+    // Equipe fica em volunteers.teamId: filtra pelos usuários dela
+    if (filters.teamId) where.id = In(await this.membership.userIdsOfTeam(filters.teamId));
+    const result = await paginate(this.userRepository, pagination, where);
+    const teams = await this.membership.teamsOf(result.data.map((user) => user.id));
+    return { ...result, data: result.data.map((user) => ({ ...user, team: teams.get(user.id) ?? null })) };
   }
 
   async findOne(id: string) {
@@ -109,11 +116,12 @@ export class UserService {
     return this.userRepository.findOne({ where: { email } });
   }
 
-  async update(id: string, dto: UpdateUserDto, updatedBy: string = null, requesterProfile: string = null) {
+  /** `canManage`: quem edita Voluntários altera qualquer usuário; os demais só o próprio perfil. */
+  async update(id: string, dto: UpdateUserDto, updatedBy: string = null, canManage = false) {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
 
-    const isAdmin = requesterProfile === 'ADMIN';
+    const isAdmin = canManage;
 
     if (!isAdmin && id !== updatedBy) {
       throw new ForbiddenException('Você só pode editar o próprio perfil.');
@@ -134,9 +142,11 @@ export class UserService {
     return this.userRepository.findOne({ where: { id } });
   }
 
-  async approve(id: string, updatedBy: string = null) {
+  /** Aprovar exige a equipe: é ela que define o acesso às telas. */
+  async approve(id: string, teamId: string, updatedBy: string = null) {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.membership.assign(user, teamId, updatedBy);
     await this.userRepository.update(id, { isApproved: true, updatedBy });
     const updated = await this.userRepository.findOne({ where: { id } });
     const payload = { sub: updated.id, email: updated.email, profileId: updated.profileId, profileName: updated.profile?.name, organizationId: updated.organizationId };
@@ -148,8 +158,16 @@ export class UserService {
   async reject(id: string, updatedBy: string = null) {
     const user = await this.userRepository.findOne({ where: { id } });
     if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.membership.ensureNotLastAdmin(id);
     await this.userRepository.update(id, { isActive: false, updatedBy });
     return this.userRepository.findOne({ where: { id } });
+  }
+
+  async changeTeam(id: string, teamId: string, updatedBy: string = null) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    await this.membership.assign(user, teamId, updatedBy);
+    return user;
   }
 
   async changePassword(id: string, dto: ChangePasswordDto) {

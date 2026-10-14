@@ -4,11 +4,13 @@ import { Team } from './team.entity';
 import { TeamPermission } from './team-permission.entity';
 import { TeamService } from './team.service';
 import { TeamController } from './team.controller';
+import { TeamMembershipService } from './team-membership.service';
+import { Volunteer } from '../volunteer/volunteer.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Team, TeamPermission])],
+  imports: [TypeOrmModule.forFeature([Team, TeamPermission, Volunteer])],
   controllers: [TeamController],
-  providers: [TeamService],
-  exports: [TeamService],
+  providers: [TeamService, TeamMembershipService],
+  exports: [TeamService, TeamMembershipService],
 })
 export class TeamModule {}

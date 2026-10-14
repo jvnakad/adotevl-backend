@@ -171,7 +171,9 @@ export class PetService implements OnModuleInit {
 
   // Idade sempre calculada na hora a partir do mês/ano de nascimento
   private withAge<T extends Pick<Pet, 'birthDate'>>(pet: T) {
-    return { ...pet, ageLabel: petAgeLabel(pet.birthDate ?? null) };
+    // `age` é legado: o retorno do save traz a coluna mesmo com select: false
+    const { age: _legacyAge, ...rest } = pet as T & { age?: number };
+    return { ...rest, ageLabel: petAgeLabel(pet.birthDate ?? null) };
   }
 
   private sortPhotos(pet: Pet) {

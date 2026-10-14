@@ -1,6 +1,6 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { ILike } from 'typeorm';
-import { ScheduleAccessService, SCHEDULE_CODE_MESSAGE } from './schedule-access.service';
+import { ScheduleAccessService } from './schedule-access.service';
 import { createMockRepository, MockRepository } from '../testing/mock-repository';
 
 jest.mock('bcryptjs', () => ({
@@ -38,15 +38,27 @@ describe('ScheduleAccessService', () => {
       const [, , code] = mail.sendScheduleCodeEmail.mock.calls[0];
       expect(code).toMatch(/^\d{6}$/);
       expect(codeRepo.save).toHaveBeenCalledWith(expect.objectContaining({ userId: 'u1', codeHash: `hashed:${code}`, expiresAt: minutesLater(10), attempts: 0 }));
-      expect(result).toEqual({ message: SCHEDULE_CODE_MESSAGE });
+      expect(result).toEqual({ status: 'SENT', message: 'Enviamos um código para o seu e-mail.' });
     });
 
-    it('email sem cadastro ativo recebe a mesma resposta, sem envio', async () => {
+    it('email sem cadastro avisa que é preciso ser voluntário, sem envio', async () => {
       userRepo.findOne.mockResolvedValueOnce(null);
-      expect(await service.requestCode('ninguem@teste.com', 'org-1', NOW)).toEqual({ message: SCHEDULE_CODE_MESSAGE });
+
+      expect(await service.requestCode('ninguem@teste.com', 'org-1', NOW)).toEqual({
+        status: 'NOT_VOLUNTEER',
+        message: 'Para marcar na agenda é preciso ser voluntário.',
+      });
+      expect(mail.sendScheduleCodeEmail).not.toHaveBeenCalled();
+      expect(codeRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('cadastro aguardando aprovação ou inativo avisa que está em análise, sem envio', async () => {
+      const pending = { status: 'PENDING', message: 'Seu cadastro ainda está em análise. Assim que for aprovado, você pode marcar.' };
 
       userRepo.findOne.mockResolvedValueOnce({ ...volunteer, isApproved: false });
-      expect(await service.requestCode('isa@teste.com', 'org-1', NOW)).toEqual({ message: SCHEDULE_CODE_MESSAGE });
+      expect(await service.requestCode('isa@teste.com', 'org-1', NOW)).toEqual(pending);
+      userRepo.findOne.mockResolvedValueOnce({ ...volunteer, isActive: false });
+      expect(await service.requestCode('isa@teste.com', 'org-1', NOW)).toEqual(pending);
 
       expect(mail.sendScheduleCodeEmail).not.toHaveBeenCalled();
       expect(codeRepo.save).not.toHaveBeenCalled();

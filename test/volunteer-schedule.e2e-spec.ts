@@ -97,8 +97,12 @@ describe('Agenda de voluntariado (e2e)', () => {
   it('pela LP: código por e-mail abre a sessão, marca outro horário no dia e vê os próprios', async () => {
     const mail = app.get(MailService) as unknown as { lastScheduleCode: string };
 
+    const unknown = await request(server()).post('/public/schedule/code').send({ email: 'ninguem.agenda@teste.com', organizationId: orgId });
+    expect(unknown.body).toEqual(expect.objectContaining({ status: 'NOT_VOLUNTEER' }));
+
     const asked = await request(server()).post('/public/schedule/code').send({ email: 'ISA.agenda@teste.com', organizationId: orgId });
     expect(asked.status).toBe(201);
+    expect(asked.body.status).toBe('SENT');
     expect(mail.lastScheduleCode).toMatch(/^\d{6}$/);
 
     const verified = await request(server()).post('/public/schedule/verify').send({ email: 'isa.agenda@teste.com', code: mail.lastScheduleCode, organizationId: orgId });
@@ -151,7 +155,7 @@ describe('Agenda de voluntariado (e2e)', () => {
   // Por último: esgota o limite de pedidos de código deste IP
   it('limita pedidos de código por IP (429)', async () => {
     const statuses: number[] = [];
-    for (let attempt = 0; attempt < 6; attempt++) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       statuses.push((await request(server()).post('/public/schedule/code').send({ email: 'x@teste.com', organizationId: orgId })).status);
     }
     expect(statuses).toContain(429);

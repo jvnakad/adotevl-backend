@@ -27,7 +27,7 @@ export class PublicScheduleController {
 
   @Post('code')
   @UseGuards(ThrottlerGuard)
-  @ApiOperation({ summary: 'Pedir código por e-mail', description: 'Rota pública. Resposta sempre igual (não revela quem é cadastrado).' })
+  @ApiOperation({ summary: 'Pedir código por e-mail', description: 'Rota pública. `{ status, message }`: SENT (código enviado), NOT_VOLUNTEER (e-mail sem cadastro: a LP oferece o cadastro de volante) ou PENDING (cadastro em análise ou inativo).' })
   requestCode(@Body() dto: RequestScheduleCodeDto) {
     return this.accessService.requestCode(dto.email, dto.organizationId);
   }

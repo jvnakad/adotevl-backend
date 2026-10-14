@@ -8,7 +8,14 @@ import { ScheduleAccessCode } from './schedule-access-code.entity';
 import { User } from '../user/user.entity';
 import { MailService } from '../mail/mail.service';
 
-export const SCHEDULE_CODE_MESSAGE = 'Se o e-mail for de um voluntário, enviamos um código. Confira sua caixa de entrada.';
+/** Resultado do pedido de código: a LP decide o próximo passo (código, cadastro de volante ou aviso de análise). */
+export type ScheduleCodeStatus = 'SENT' | 'NOT_VOLUNTEER' | 'PENDING';
+const CODE_MESSAGES: Record<ScheduleCodeStatus, string> = {
+  SENT: 'Enviamos um código para o seu e-mail.',
+  NOT_VOLUNTEER: 'Para marcar na agenda é preciso ser voluntário.',
+  PENDING: 'Seu cadastro ainda está em análise. Assim que for aprovado, você pode marcar.',
+};
+const codeResult = (status: ScheduleCodeStatus) => ({ status, message: CODE_MESSAGES[status] });
 const CODE_TTL_MINUTES = 10;
 const MAX_ATTEMPTS = 5;
 const SESSION_TTL = '2h';
@@ -31,10 +38,11 @@ export class ScheduleAccessService {
     private readonly jwtService: JwtService,
   ) {}
 
-  /** Resposta sempre igual: não revela quem é cadastrado. */
+  /** Diz se o e-mail é de voluntário (a LP oferece o cadastro de volante); o throttle da rota limita varredura. */
   async requestCode(email: string, organizationId: string, now = new Date()) {
     const user = await this.userRepository.findOne({ where: { email: emailMatch(email), organizationId } });
-    if (!user || !user.isApproved || !user.isActive) return { message: SCHEDULE_CODE_MESSAGE };
+    if (!user) return codeResult('NOT_VOLUNTEER');
+    if (!user.isApproved || !user.isActive) return codeResult('PENDING');
 
     await this.codeRepository.update({ userId: user.id, usedAt: IsNull() }, { usedAt: now });
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
@@ -47,7 +55,7 @@ export class ScheduleAccessService {
       }),
     );
     await this.mailService.sendScheduleCodeEmail(user.email, user.fullName, code);
-    return { message: SCHEDULE_CODE_MESSAGE };
+    return codeResult('SENT');
   }
 
   async verify(email: string, code: string, organizationId: string, now = new Date()) {

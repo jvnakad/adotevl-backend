@@ -498,7 +498,8 @@ export class AdoptionContractService {
   private async ensureContract(form: AdoptionForm, userId: string) {
     const existing = await this.contractRepository.findOne({ where: { adoptionFormId: form.id } });
     if (existing) return existing;
-    const pet = form.petId ? await this.petRepository.findOne({ where: { id: form.petId } }) : null;
+    // Sem pet vinculado, os dados do animal vêm do pet escolhido no formulário (ainda sem reservar)
+    const pet = form.petId ? await this.petRepository.findOne({ where: { id: form.petId } }) : await this.getSuggestedPet(form);
     const contract = this.contractRepository.create({
       adoptionFormId: form.id,
       organizationId: form.organizationId,
@@ -510,6 +511,13 @@ export class AdoptionContractService {
       updatedBy: userId,
     });
     return this.contractRepository.save(contract);
+  }
+
+  // Pet escolhido pelo adotante no formulário, se ainda puder ser vinculado ao termo
+  private async getSuggestedPet(form: AdoptionForm) {
+    if (!form.desiredPetId) return null;
+    const pet = await this.petRepository.findOne({ where: { id: form.desiredPetId, organizationId: form.organizationId, isActive: true } });
+    return pet && LINKABLE_PET_STATUSES.includes(pet.status) ? pet : null;
   }
 
   private async getForm(id: string, organizationId: string) {
@@ -560,6 +568,8 @@ export class AdoptionContractService {
         url: signed[event.metadata.storagePath] ?? null,
         userName: event.userName,
       })),
+      // O front pré-seleciona este pet no rascunho; ao salvar, ele é vinculado e reservado
+      suggestedPetId: contract.petId ? null : (await this.getSuggestedPet(form))?.id ?? null,
       signature: contract.signatureStatus
         ? {
             status: contract.signatureStatus,

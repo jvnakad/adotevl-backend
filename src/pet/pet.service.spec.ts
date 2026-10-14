@@ -50,13 +50,15 @@ describe('PetService', () => {
 
   it('findAllPublic expõe só os campos do site', async () => {
     petRepo.findAndCount.mockResolvedValue([
-      [{ id: 'p1', name: 'Bob', sex: 'Macho', age: 3, size: 'Medio', castration: true, about: 'Dócil', weight: 10, createdBy: 'u1', fotos: [{ id: 'f1', url: 'u', storagePath: 's', createdAt: new Date() }] }],
+      [{ id: 'p1', name: 'Bob', species: 'Cachorro', animal: 'Vira-lata', sex: 'Macho', age: 3, size: 'Medio', castration: true, about: 'Dócil', weight: 10, createdBy: 'u1', fotos: [{ id: 'f1', url: 'u', storagePath: 's', createdAt: new Date() }] }],
       1,
     ]);
 
     const result = await service.findAllPublic(pagination, { organizationId: 'org-1' });
 
-    expect(result.data[0]).toEqual({ id: 'p1', name: 'Bob', sex: 'Macho', age: 3, size: 'Medio', castration: true, about: 'Dócil', fotos: [{ url: 'u' }] });
+    expect(result.data[0]).toEqual({ id: 'p1', name: 'Bob', species: 'Cachorro', animal: 'Vira-lata', sex: 'Macho', age: 3, size: 'Medio', castration: true, about: 'Dócil', fotos: [{ url: 'u' }] });
+    // Ordenado por nome para o select do formulário de adoção
+    expect(petRepo.findAndCount).toHaveBeenCalledWith(expect.objectContaining({ order: { name: 'ASC' } }));
   });
 
   it('findOne lança NotFoundException quando não existe', async () => {

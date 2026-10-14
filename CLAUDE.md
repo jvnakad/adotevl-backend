@@ -114,6 +114,7 @@ Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFo
   - `PENDENTE/APROVADO/REPROVADO` livres entre si; saindo de `APROVADO` para `PENDENTE/REPROVADO` o pet vinculado volta a `DISPONIVEL`;
   - `AGUARDANDO_ASSINATURA` e `CONCLUIDA` nunca manuais: envio ao Autentique e assinatura do adotante (que conclui a adoção);
   - de `AGUARDANDO_ASSINATURA/CONCLUIDA` só volta para `APROVADO` e só ADMIN (403) → pet `EM_PROCESSO`, `adoptionDate` null; saindo de `AGUARDANDO_ASSINATURA` o documento é excluído no Autentique (best effort) e a assinatura fica `CANCELADO`.
+- `desiredPet`/`desiredPetId` (nullable, `SET NULL`): pet escolhido pelo adotante no select do formulário público (`GET /pets` público: só `DISPONIVEL`, ordem por nome, com `species`/`animal`). No `POST`, o pet precisa ser da organização, ativo e `DISPONIVEL` (senão 400 "não está mais disponível") e `desiredAnimal` vira o nome dele; sem pet, `desiredAnimal` é a descrição livre. Não entra no `UpdateAdoptionFormDto`. É só sugestão: o termo devolve `suggestedPetId` (pet ainda vinculável e termo sem pet) e preenche o animal na criação do rascunho; quem vincula/reserva é o `PUT` do termo.
 - `pet`/`petId` (nullable, `SET NULL`): pet escolhido no contrato. `GET :id` devolve `pet: { id, name, species, fotos[{url}] } | null`.
 - `GET /adoption-forms/board?search=` → `{ columns: [{ status, total, items }] }` (6 colunas, até 50 itens resumidos, `updatedAt DESC`). Declarada antes de `:id`.
 - `GET /adoption-forms/:id/history` → eventos da ficha (`createdAt DESC`).

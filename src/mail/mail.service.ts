@@ -1,22 +1,40 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Resend } from 'resend';
-import { button, channelList, emailLayout, firstName, highlight, ORG_CHANNELS, paragraph } from './email-layout';
+import { createTransport, Transporter } from 'nodemailer';
+import { button, channelList, emailLayout, firstName, highlight, highlightText, ORG_CHANNELS, paragraph } from './email-layout';
+import { formatDateBR } from '../volunteer-schedule/schedule-time';
 
+/**
+ * Envio de e-mails. Produção: Resend. Desenvolvimento: `MAIL_DRIVER=smtp` manda para um SMTP local
+ * (Mailpit do adotevl-local, caixa em http://localhost:8025) sem precisar de chave.
+ * Falha de envio vai para o log e não derruba a ação (cadastro, agenda...).
+ */
 @Injectable()
 export class MailService {
+  private readonly logger = new Logger(MailService.name);
   private resend: Resend;
+  private smtp: Transporter | null = null;
 
   constructor() {
-    this.resend = new Resend(process.env.RESEND_API_KEY);
+    if (process.env.MAIL_DRIVER === 'smtp') {
+      this.smtp = createTransport({ host: process.env.SMTP_HOST || 'localhost', port: Number(process.env.SMTP_PORT) || 1025, secure: false });
+    } else {
+      this.resend = new Resend(process.env.RESEND_API_KEY);
+    }
   }
 
-  private send(to: string, subject: string, html: string) {
-    return this.resend.emails.send({
-      from: process.env.MAIL_FROM || 'AdoteVL <onboarding@resend.dev>',
-      to,
-      subject,
-      html,
-    });
+  private async send(to: string, subject: string, html: string) {
+    const from = process.env.MAIL_FROM || 'AdoteVL <onboarding@resend.dev>';
+    try {
+      if (this.smtp) {
+        await this.smtp.sendMail({ from, to, subject, html });
+        return;
+      }
+      const { error } = (await this.resend.emails.send({ from, to, subject, html })) ?? {};
+      if (error) this.logger.error(`E-mail "${subject}" para ${to} não enviado: ${error.message}`);
+    } catch (error) {
+      this.logger.error(`E-mail "${subject}" para ${to} não enviado: ${(error as Error).message}`);
+    }
   }
 
   private appUrl() {
@@ -72,6 +90,67 @@ export class MailService {
           paragraph('Recebemos seu cadastro de voluntário fixo. Confirme seu e-mail para que a equipe possa analisar suas respostas:'),
           button(confirmUrl, 'Confirmar e-mail'),
           paragraph('Se não reconhece este cadastro, ignore este e-mail.'),
+        ].join(''),
+      }),
+    );
+  }
+
+  private landingUrl() {
+    return (process.env.LANDING_URL || 'http://localhost:4321').replace(/\/$/, '');
+  }
+
+  /** Horário marcado na agenda, com o link "Desmarcar" (abre a agenda na LP). */
+  async sendShiftConfirmationEmail(to: string, name: string, shift: { date: string; startTime: string; endTime: string; cancelToken: string }) {
+    const date = formatDateBR(shift.date);
+    const cancelUrl = `${this.landingUrl()}/?desmarcar=${shift.cancelToken}#agenda`;
+    await this.send(
+      to,
+      `Voluntariado marcado: ${date} — AdoteVL`,
+      emailLayout({
+        preheader: `Te esperamos no abrigo em ${date}, das ${shift.startTime} às ${shift.endTime}.`,
+        eyebrow: 'te esperamos!',
+        title: `Horário marcado, ${firstName(name)}!`,
+        body: [
+          paragraph(`Seu voluntariado está marcado para <strong>${date}</strong>, das <strong>${shift.startTime} às ${shift.endTime}</strong>.`),
+          paragraph(`Endereço do abrigo e combinados do dia chegam pelo grupo de voluntários. Dúvidas? Fale com a gente pelo <a href="${ORG_CHANNELS.whatsapp}" style="color:#fd5028;font-weight:700;text-decoration:none;">WhatsApp</a>.`),
+          paragraph('Não vai conseguir ir? Desmarque com pelo menos 24h de antecedência:'),
+          button(cancelUrl, 'Desmarcar horário'),
+        ].join(''),
+      }),
+    );
+  }
+
+  /** Dia trancado pela equipe depois da marcação. */
+  async sendShiftCancelledByLockEmail(to: string, name: string, shift: { date: string; startTime: string; endTime: string }, message: string) {
+    const date = formatDateBR(shift.date);
+    await this.send(
+      to,
+      `Seu voluntariado de ${date} foi cancelado — AdoteVL`,
+      emailLayout({
+        preheader: `Não teremos voluntariado em ${date}.`,
+        title: `Olá, ${firstName(name)}!`,
+        body: [
+          paragraph(`Precisamos cancelar o voluntariado de <strong>${date}</strong> (${shift.startTime} às ${shift.endTime}). Recado da equipe:`),
+          highlightText(message),
+          paragraph('Que tal escolher outro dia? A agenda continua aberta:'),
+          button(`${this.landingUrl()}/#agenda`, 'Ver a agenda'),
+        ].join(''),
+      }),
+    );
+  }
+
+  /** Código de 6 dígitos para marcar pela LP. */
+  async sendScheduleCodeEmail(to: string, name: string, code: string) {
+    await this.send(
+      to,
+      `Seu código para a agenda: ${code} — AdoteVL`,
+      emailLayout({
+        preheader: 'Use o código para marcar seu voluntariado.',
+        title: `Olá, ${firstName(name)}!`,
+        body: [
+          paragraph('Use este código para marcar seu voluntariado na agenda:'),
+          highlight(code),
+          paragraph('Ele vale por 10 minutos. Se não foi você que pediu, ignore este e-mail.'),
         ].join(''),
       }),
     );

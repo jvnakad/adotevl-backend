@@ -2,6 +2,7 @@
 export enum Screen {
   PETS = 'PETS',
   MEDICAL_RECORDS = 'MEDICAL_RECORDS',
+  SCHEDULE = 'SCHEDULE',
   ADOPTERS = 'ADOPTERS',
   ADOPTION_CONTRACT = 'ADOPTION_CONTRACT',
   ADOPTION_HISTORY = 'ADOPTION_HISTORY',
@@ -32,6 +33,8 @@ export interface ScreenDefinition {
 export const SCREENS: ScreenDefinition[] = [
   { key: Screen.PETS, label: 'Pets' },
   { key: Screen.MEDICAL_RECORDS, label: 'Prontuário', parent: Screen.PETS },
+  // Visualizar: ver e marcar/desmarcar o próprio horário. Editar: trancar dias e marcar/remover por qualquer voluntário
+  { key: Screen.SCHEDULE, label: 'Agenda' },
   { key: Screen.ADOPTERS, label: 'Adotantes' },
   { key: Screen.ADOPTION_CONTRACT, label: 'Termo de adoção', parent: Screen.ADOPTERS },
   { key: Screen.ADOPTION_HISTORY, label: 'Histórico de adoção', parent: Screen.ADOPTERS, viewOnly: true },

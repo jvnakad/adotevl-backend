@@ -55,6 +55,14 @@ export const highlight = (text: string) => `
     </tr>
   </table>`;
 
+/** Recado em destaque (texto livre vindo do sistema, escapado). */
+export const highlightText = (text: string) => `
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:4px 0 20px;">
+    <tr>
+      <td style="background:${COLORS.cream100};border-radius:16px;padding:14px 18px;font-family:${FONT};font-size:15px;line-height:1.5;font-style:italic;color:${COLORS.inkDeep};">&ldquo;${escapeHtml(text)}&rdquo;</td>
+    </tr>
+  </table>`;
+
 /** Lista de canais com título, descrição e link. */
 export const channelList = (items: { title: string; text: string; href: string; label: string }[]) => `
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:4px 0 24px;">

@@ -118,9 +118,17 @@ src/<feature>/
 - Anti-spam nas duas rotas: `ThrottlerGuard` (`SIGNUP_RATE_LIMIT` por minuto por IP, padrão 5; `trust proxy` no `main.ts`) e honeypot `website` (preenchido → responde sucesso sem gravar).
 - `GET /users/:id/application` (Voluntários Visualizar, escopo da organização). `GET /users` devolve `hasApplication`.
 
+## Agenda de voluntariado (`src/volunteer-schedule`)
+- `volunteer_shifts` (usuário, dia `date` como 'YYYY-MM-DD' via `dateColumnTransformer`, `start_time`/`end_time` 'HH:MM', `notes`, `cancel_token` do link do e-mail, `cancelled_at`/`cancel_reason` = soft cancel) e `schedule_locks` (dia trancado com `message`, único por organização).
+- Regras (`schedule-time.ts`, fuso de Brasília): 08:00–18:00 em passos de 30 min, todos os dias; de amanhã até 60 dias; sem limite de vagas; a mesma pessoa pode marcar mais de uma vez no dia sem cruzar horários; voluntário altera/desmarca o próprio até 24h antes; quem gerencia (Agenda: Editar ou equipe Admin) ignora as 24h e marca/remove por qualquer voluntário ativo.
+- Tela `SCHEDULE` ("Agenda") na matriz. `GET /schedule?month=` devolve `{ shifts, locks }`: nome só para a equipe Admin; o próprio vem como "Você" (`mine`), os demais "Voluntário" (sem `id`/`notes`). `POST/PATCH/DELETE /schedule/shifts`, `POST/DELETE /schedule/locks` (trancar desmarca quem estava no dia e manda `sendShiftCancelledByLockEmail`), `GET /schedule/volunteers` (Editar).
+- LP (`/public/schedule`): `GET` público sem nomes; `POST code` (resposta neutra; só voluntário aprovado e ativo recebe; 6 dígitos com hash, 10 min, 5 tentativas, pedido novo invalida os anteriores) → `POST verify` → `{ token, firstName }` (JWT de 2h com segredo `${JWT_SECRET}:schedule` e `scope: 'schedule'`: não vale como login do sistema) → `POST/DELETE shifts` com `Authorization: Bearer`. `POST cancel { token }` = link "Desmarcar" do e-mail (`${LANDING_URL}/?desmarcar=<token>#agenda`). Throttler nas rotas de escrita.
+- E2E: `MockMailService.lastScheduleCode` guarda o último código enviado.
+
 ## E-mails (`src/mail`)
 - Todo e-mail usa `emailLayout` (`email-layout.ts`): tabelas + estilo inline, cores da LP, logo em `${LANDING_URL}/email/logo.png` (arquivo em `LP/public/email/logo.png`), rodapé com os canais da ONG (`ORG_CHANNELS`, espelha `LP/src/data/site.ts`). Nome vindo do cadastro passa por `escapeHtml`/`firstName`.
 - Env: `LANDING_URL` (logo e links), `APP_URL` (links do sistema), `MAIL_FROM`, `RESEND_API_KEY`.
+- Desenvolvimento: `MAIL_DRIVER=smtp` + `SMTP_HOST`/`SMTP_PORT` envia por SMTP (nodemailer) para o Mailpit do adotevl-local (caixa em http://localhost:8025). Sem `MAIL_DRIVER` = Resend. Falha de envio vai para o log (`Logger`) e não derruba a ação.
 
 ## Módulos
 organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), adoption-history, adoption-contract, autentique, webhooks, mail, storage.

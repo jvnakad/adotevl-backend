@@ -45,6 +45,10 @@ import { AutentiqueService } from '../src/autentique/autentique.service';
 import { WebhooksModule } from '../src/webhooks/webhooks.module';
 import { TeamPermission } from '../src/team/team-permission.entity';
 import { AccessModule } from '../src/access/access.module';
+import { VolunteerShift } from '../src/volunteer-schedule/volunteer-shift.entity';
+import { ScheduleLock } from '../src/volunteer-schedule/schedule-lock.entity';
+import { ScheduleAccessCode } from '../src/volunteer-schedule/schedule-access-code.entity';
+import { VolunteerScheduleModule } from '../src/volunteer-schedule/volunteer-schedule.module';
 import { VolunteerApplication } from '../src/volunteer-application/volunteer-application.entity';
 
 class MockMailService {
@@ -52,6 +56,13 @@ class MockMailService {
   async sendApprovalEmail() {}
   async sendPasswordResetEmail() {}
   async sendFloatingWelcomeEmail() {}
+  async sendShiftConfirmationEmail() {}
+  async sendShiftCancelledByLockEmail() {}
+  // Último código enviado por e-mail (o e2e da agenda lê daqui)
+  lastScheduleCode: string | null = null;
+  async sendScheduleCodeEmail(_to: string, _name: string, code: string) {
+    this.lastScheduleCode = code;
+  }
 }
 
 @Global()
@@ -144,7 +155,7 @@ class MockAutentiqueModule {}
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode,
       ],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
@@ -166,6 +177,7 @@ class MockAutentiqueModule {}
     AdoptionFormModule,
     AdoptionHistoryModule,
     AdoptionContractModule,
+    VolunteerScheduleModule,
     WebhooksModule,
     MockMailModule,
     MockStorageModule,

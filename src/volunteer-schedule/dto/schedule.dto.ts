@@ -6,11 +6,11 @@ const DATE_MESSAGE = { message: 'Informe a data no formato AAAA-MM-DD.' };
 const TIME_MESSAGE = { message: 'Horário no formato HH:MM, em passos de 30 minutos.' };
 
 export class ShiftTimesDto {
-  @ApiProperty({ description: 'Início (HH:MM, passos de 30 min, 08:00–18:00)' })
+  @ApiProperty({ description: 'Início (HH:MM, passos de 30 min; seg–sex 08:00–16:00, sáb e dom 13:00–16:00)' })
   @Matches(TIME_PATTERN, TIME_MESSAGE)
   startTime: string;
 
-  @ApiProperty({ description: 'Fim (HH:MM, passos de 30 min, 08:00–18:00)' })
+  @ApiProperty({ description: 'Fim (HH:MM, passos de 30 min; seg–sex 08:00–16:00, sáb e dom 13:00–16:00)' })
   @Matches(TIME_PATTERN, TIME_MESSAGE)
   endTime: string;
 

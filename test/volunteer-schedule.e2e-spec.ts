@@ -12,7 +12,7 @@ import { User } from '../src/user/user.entity';
 import { VolunteerShift } from '../src/volunteer-schedule/volunteer-shift.entity';
 import { MailService } from '../src/mail/mail.service';
 import { AccessLevel, Screen } from '../src/access/access';
-import { addDays, todayInBrazil } from '../src/volunteer-schedule/schedule-time';
+import { addDays, isWeekend, todayInBrazil } from '../src/volunteer-schedule/schedule-time';
 
 describe('Agenda de voluntariado (e2e)', () => {
   let app: INestApplication;
@@ -24,7 +24,9 @@ describe('Agenda de voluntariado (e2e)', () => {
   let volunteerToken: string;
   let volunteerId: string;
 
-  const day = addDays(todayInBrazil(), 5);
+  // Dia útil (seg–sex 08h–16h): os horários abaixo não valem no fim de semana
+  let day = addDays(todayInBrazil(), 5);
+  while (isWeekend(day)) day = addDays(day, 1);
   const month = day.slice(0, 7);
   const server = () => app.getHttpServer();
   const login = async (email: string) => (await request(server()).post('/auth/login').send({ email, password: 'senha123' })).body.access_token;
@@ -117,7 +119,7 @@ describe('Agenda de voluntariado (e2e)', () => {
     expect(booked.status).toBe(201);
 
     // Cada marcação pede um código novo; a sessão segue valendo para ver e desmarcar
-    const again = await request(server()).post('/public/schedule/shifts').set('Authorization', `Bearer ${session}`).send({ date: day, startTime: '16:30', endTime: '17:30' });
+    const again = await request(server()).post('/public/schedule/shifts').set('Authorization', `Bearer ${session}`).send({ date: day, startTime: '12:00', endTime: '13:00' });
     expect(again.status).toBe(401);
 
     const mine = await request(server()).get(`/public/schedule?organizationId=${orgId}&month=${month}`).set('Authorization', `Bearer ${session}`);

@@ -10,6 +10,11 @@ import {
 import { Profile } from '../profile/profile.entity';
 import { Organization } from '../organization/organization.entity';
 
+export interface TutorialProgress {
+  tours: Record<string, number>;
+  disabled: boolean;
+}
+
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
@@ -69,6 +74,10 @@ export class User {
 
   @Column({ name: 'guardian_consent_at', type: 'timestamptz', nullable: true })
   guardianConsentAt: Date | null;
+
+  /** Tours do front já vistos (chave → versão) e desligamento geral; null = nunca viu nenhum */
+  @Column({ name: 'tutorial_progress', type: 'jsonb', nullable: true })
+  tutorialProgress: TutorialProgress | null;
 
   @Column({ default: true })
   isActive: boolean;

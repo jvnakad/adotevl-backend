@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Param, Body, Query, Req, UseGuards, ParseUUIDPipe } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Delete, Param, Body, Query, Req, UseGuards, ParseUUIDPipe } from '@nestjs/common';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -11,6 +11,7 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { CreateFloatingVolunteerDto } from './dto/create-floating-volunteer.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateTutorialDto } from './dto/update-tutorial.dto';
 import { ApproveUserDto } from './dto/approve-user.dto';
 import { PaginationDto } from '../common/pagination.dto';
 
@@ -134,6 +135,22 @@ export class UserController {
   @ApiOperation({ summary: 'Alterar própria senha', description: 'Qualquer usuário logado.' })
   changePassword(@Body() dto: ChangePasswordDto, @Req() req) {
     return this.userService.changePassword(req.user.id, dto);
+  }
+
+  @Patch('me/tutorial')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Registrar tour visto / ligar ou desligar tours', description: 'Qualquer usuário logado. `{ tour, version }` marca o tour como visto; `{ disabled }` liga/desliga os tours automáticos.' })
+  updateTutorial(@Body() dto: UpdateTutorialDto, @Req() req) {
+    return this.userService.updateTutorial(req.user.id, dto);
+  }
+
+  @Delete('me/tutorial')
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Rever todos os tutoriais', description: 'Qualquer usuário logado. Zera os tours vistos e religa os tours automáticos.' })
+  resetTutorial(@Req() req) {
+    return this.userService.resetTutorial(req.user.id);
   }
 
   @Patch('confirm/:code')

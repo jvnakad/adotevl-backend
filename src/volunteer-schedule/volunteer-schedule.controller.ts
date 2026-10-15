@@ -33,7 +33,7 @@ export class VolunteerScheduleController {
 
   @Post('shifts')
   @RequireAccess(Screen.SCHEDULE, AccessLevel.VIEW)
-  @ApiOperation({ summary: 'Marcar horário', description: 'Acesso: Agenda (Visualizar) para si; `userId` exige Agenda (Editar). 08:00–18:00, de amanhã até 60 dias, sem cruzar horário da mesma pessoa.' })
+  @ApiOperation({ summary: 'Marcar horário', description: 'Acesso: Agenda (Visualizar) para si; `userId` exige Agenda (Editar). seg–sex 08:00–16:00 e sáb/dom 13:00–16:00, de amanhã até 60 dias, sem cruzar horário da mesma pessoa.' })
   book(@Body() dto: CreateShiftDto, @Req() req) {
     return this.scheduleService.book({ ...dto, organizationId: req.user.organizationId }, actorOf(req));
   }

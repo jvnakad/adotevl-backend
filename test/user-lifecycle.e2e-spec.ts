@@ -192,4 +192,25 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     expect(getRes.body.isApproved).toBe(true);
     expect(getRes.body.fullName).toBe('Voluntário Atualizado');
   }, 30000);
+
+  it('tutoriais: marca tour visto, desliga e zera pelo /users/me/tutorial', async () => {
+    const auth = { Authorization: `Bearer ${adminToken}` };
+
+    const seen = await request(app.getHttpServer()).patch('/users/me/tutorial').set(auth).send({ tour: 'PETS', version: 1 });
+    expect(seen.status).toBe(200);
+    expect(seen.body).toEqual({ tours: { PETS: 1 }, disabled: false });
+
+    const disabled = await request(app.getHttpServer()).patch('/users/me/tutorial').set(auth).send({ disabled: true });
+    expect(disabled.body).toEqual({ tours: { PETS: 1 }, disabled: true });
+
+    const me = await request(app.getHttpServer()).get('/auth/me').set(auth);
+    expect(me.body.tutorialProgress).toEqual({ tours: { PETS: 1 }, disabled: true });
+
+    const invalid = await request(app.getHttpServer()).patch('/users/me/tutorial').set(auth).send({ tour: 'PETS' });
+    expect(invalid.status).toBe(400);
+
+    const reset = await request(app.getHttpServer()).delete('/users/me/tutorial').set(auth);
+    expect(reset.status).toBe(200);
+    expect(reset.body).toEqual({ tours: {}, disabled: false });
+  });
 });

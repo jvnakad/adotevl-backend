@@ -12,8 +12,7 @@ import {
   MAX_DAYS_AHEAD,
   monthRange,
   MONTH_PATTERN,
-  SCHEDULE_CLOSE,
-  SCHEDULE_OPEN,
+  scheduleHoursFor,
   startsAt,
   todayInBrazil,
 } from './schedule-time';
@@ -195,8 +194,9 @@ export class VolunteerScheduleService {
   }
 
   private async validateSlot(slot: { organizationId: string; date: string; startTime: string; endTime: string }, userId: string, now: Date, ignoreId?: string) {
-    if (slot.startTime < SCHEDULE_OPEN || slot.endTime > SCHEDULE_CLOSE || slot.startTime > SCHEDULE_CLOSE) {
-      throw new BadRequestException(`Escolha um horário entre ${SCHEDULE_OPEN} e ${SCHEDULE_CLOSE}.`);
+    const { open, close } = scheduleHoursFor(slot.date);
+    if (slot.startTime < open || slot.endTime > close || slot.startTime > close) {
+      throw new BadRequestException(`Neste dia, escolha um horário entre ${open} e ${close}.`);
     }
     if (slot.endTime <= slot.startTime) throw new BadRequestException('O fim precisa ser depois do início.');
 

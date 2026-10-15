@@ -9,13 +9,14 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { randomBytes, randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
-import { User } from './user.entity';
+import { TutorialProgress, User } from './user.entity';
 import { Profile } from '../profile/profile.entity';
 import { Organization } from '../organization/organization.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { CreateFloatingVolunteerDto } from './dto/create-floating-volunteer.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { UpdateTutorialDto } from './dto/update-tutorial.dto';
 import { MailService } from '../mail/mail.service';
 import { JwtService } from '@nestjs/jwt';
 import { PaginationDto } from '../common/pagination.dto';
@@ -25,6 +26,8 @@ import { TeamService } from '../team/team.service';
 import { TeamSystemKey } from '../team/team.entity';
 import { guardianFields } from './volunteer-age';
 import { VolunteerApplication } from '../volunteer-application/volunteer-application.entity';
+
+const EMPTY_TUTORIAL: TutorialProgress = { tours: {}, disabled: false };
 
 @Injectable()
 export class UserService {
@@ -248,6 +251,27 @@ export class UserService {
     const hashed = await bcrypt.hash(dto.newPassword, 10);
     await this.userRepository.update(id, { password: hashed });
     return { message: 'Senha alterada com sucesso.' };
+  }
+
+  async updateTutorial(id: string, dto: UpdateTutorialDto) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    const current = user.tutorialProgress ?? EMPTY_TUTORIAL;
+    const progress: TutorialProgress = {
+      tours: dto.tour ? { ...current.tours, [dto.tour]: dto.version } : { ...current.tours },
+      disabled: dto.disabled ?? current.disabled,
+    };
+    await this.userRepository.update(id, { tutorialProgress: progress });
+    return progress;
+  }
+
+  /** "Rever todos os tutoriais": volta a mostrar tudo como no primeiro acesso */
+  async resetTutorial(id: string) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user) throw new NotFoundException('Usuário não encontrado.');
+    const progress: TutorialProgress = { ...EMPTY_TUTORIAL, tours: {} };
+    await this.userRepository.update(id, { tutorialProgress: progress });
+    return progress;
   }
 
   async resetPassword(id: string) {

@@ -49,17 +49,24 @@ describe('VolunteerScheduleService', () => {
       expect(mail.sendShiftConfirmationEmail).toHaveBeenCalledWith('isa@teste.com', 'Isa Kaori', expect.objectContaining({ date: '2026-10-20', startTime: '09:00', endTime: '14:00', cancelToken: shift.cancelToken }));
     });
 
-    it('horário fora das 08h–18h ou fim antes do início é recusado', async () => {
-      await expect(service.book({ ...booking, startTime: '07:30' }, self, NOW)).rejects.toThrow(new BadRequestException('Escolha um horário entre 08:00 e 18:00.'));
-      await expect(service.book({ ...booking, endTime: '18:30' }, self, NOW)).rejects.toThrow(new BadRequestException('Escolha um horário entre 08:00 e 18:00.'));
+    it('dia útil: fora das 08h–16h ou fim antes do início é recusado', async () => {
+      await expect(service.book({ ...booking, startTime: '07:30' }, self, NOW)).rejects.toThrow(new BadRequestException('Neste dia, escolha um horário entre 08:00 e 16:00.'));
+      await expect(service.book({ ...booking, endTime: '16:30' }, self, NOW)).rejects.toThrow(new BadRequestException('Neste dia, escolha um horário entre 08:00 e 16:00.'));
       await expect(service.book({ ...booking, startTime: '14:00', endTime: '14:00' }, self, NOW)).rejects.toThrow(new BadRequestException('O fim precisa ser depois do início.'));
       expect(shiftRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('sábado e domingo: só das 13h às 16h', async () => {
+      const saturday = { ...booking, date: '2026-10-24' };
+      await expect(service.book({ ...saturday, startTime: '12:30', endTime: '14:00' }, self, NOW)).rejects.toThrow(new BadRequestException('Neste dia, escolha um horário entre 13:00 e 16:00.'));
+      await expect(service.book({ ...booking, date: '2026-10-25', startTime: '13:00', endTime: '16:30' }, self, NOW)).rejects.toThrow(new BadRequestException('Neste dia, escolha um horário entre 13:00 e 16:00.'));
+      await expect(service.book({ ...saturday, startTime: '13:00', endTime: '16:00' }, self, NOW)).resolves.toBeDefined();
     });
 
     it('só a partir de amanhã e até 60 dias à frente', async () => {
       await expect(service.book({ ...booking, date: '2026-10-14' }, self, NOW)).rejects.toThrow(new BadRequestException('Marque a partir de amanhã.'));
       await expect(service.book({ ...booking, date: '2026-12-14' }, self, NOW)).rejects.toThrow(new BadRequestException('Dá para marcar até 60 dias à frente.'));
-      await expect(service.book({ ...booking, date: '2026-12-13' }, self, NOW)).resolves.toBeDefined();
+      await expect(service.book({ ...booking, date: '2026-12-13', startTime: '13:00', endTime: '15:00' }, self, NOW)).resolves.toBeDefined();
     });
 
     it('dia trancado não aceita marcação e mostra a mensagem', async () => {
@@ -72,7 +79,7 @@ describe('VolunteerScheduleService', () => {
       shiftRepo.find.mockResolvedValue([{ id: 's1', userId: 'u1', date: '2026-10-20', startTime: '13:00', endTime: '15:00' }]);
 
       await expect(service.book(booking, self, NOW)).rejects.toThrow(new ConflictException('Você já tem um horário nesse dia que cruza com este.'));
-      await expect(service.book({ ...booking, startTime: '15:00', endTime: '17:00' }, self, NOW)).resolves.toBeDefined();
+      await expect(service.book({ ...booking, startTime: '15:00', endTime: '16:00' }, self, NOW)).resolves.toBeDefined();
     });
 
     it('voluntário não marca por outra pessoa; quem gerencia a agenda marca', async () => {

@@ -514,6 +514,56 @@ describe('UserService', () => {
     });
   });
 
+  describe('updateTutorial', () => {
+    it('lança NotFoundException quando o usuário não existe', async () => {
+      userRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.updateTutorial('x', { tour: 'PETS', version: 1 })).rejects.toThrow(NotFoundException);
+    });
+
+    it('marca o primeiro tour visto em usuário sem progresso', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', tutorialProgress: null });
+
+      const result = await service.updateTutorial('u1', { tour: 'PETS', version: 1 });
+
+      expect(result).toEqual({ tours: { PETS: 1 }, disabled: false });
+      expect(userRepo.update).toHaveBeenCalledWith('u1', { tutorialProgress: result });
+    });
+
+    it('mantém os tours anteriores e atualiza a versão do mesmo tour', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', tutorialProgress: { tours: { PETS: 1, WELCOME: 1 }, disabled: false } });
+
+      const result = await service.updateTutorial('u1', { tour: 'PETS', version: 2 });
+
+      expect(result.tours).toEqual({ PETS: 2, WELCOME: 1 });
+    });
+
+    it('desliga os tours sem mexer nos vistos', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', tutorialProgress: { tours: { PETS: 1 }, disabled: false } });
+
+      const result = await service.updateTutorial('u1', { disabled: true });
+
+      expect(result).toEqual({ tours: { PETS: 1 }, disabled: true });
+    });
+  });
+
+  describe('resetTutorial', () => {
+    it('lança NotFoundException quando o usuário não existe', async () => {
+      userRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.resetTutorial('x')).rejects.toThrow(NotFoundException);
+    });
+
+    it('zera os tours vistos e religa os tours', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', tutorialProgress: { tours: { PETS: 1 }, disabled: true } });
+
+      const result = await service.resetTutorial('u1');
+
+      expect(result).toEqual({ tours: {}, disabled: false });
+      expect(userRepo.update).toHaveBeenCalledWith('u1', { tutorialProgress: { tours: {}, disabled: false } });
+    });
+  });
+
   describe('resetPassword', () => {
     it('lança NotFoundException quando o usuário não existe', async () => {
       userRepo.findOne.mockResolvedValue(null);

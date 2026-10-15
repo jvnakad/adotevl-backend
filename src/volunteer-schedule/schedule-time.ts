@@ -1,7 +1,8 @@
 // Regras de horário da agenda de voluntariado (fuso de Brasília, sem horário de verão desde 2019).
 
-export const SCHEDULE_OPEN = '08:00';
-export const SCHEDULE_CLOSE = '18:00';
+/** Funcionamento do abrigo: seg a sex 08:00–16:00; sáb e dom 13:00–16:00 */
+export const SCHEDULE_WEEKDAY_HOURS = { open: '08:00', close: '16:00' } as const;
+export const SCHEDULE_WEEKEND_HOURS = { open: '13:00', close: '16:00' } as const;
 export const MAX_DAYS_AHEAD = 60;
 export const CANCEL_MIN_HOURS = 24;
 
@@ -22,6 +23,15 @@ export function addDays(date: string, days: number) {
 
 /** Instante em que o turno começa (horário de Brasília) */
 export const startsAt = (date: string, time: string) => new Date(`${date}T${time}:00-03:00`);
+
+/** Sábado ou domingo ('YYYY-MM-DD', meio-dia UTC: sem risco de virar o dia) */
+export function isWeekend(date: string) {
+  const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return weekday === 0 || weekday === 6;
+}
+
+/** Horário de funcionamento do dia */
+export const scheduleHoursFor = (date: string) => (isWeekend(date) ? SCHEDULE_WEEKEND_HOURS : SCHEDULE_WEEKDAY_HOURS);
 
 /** Primeiro e último dia de 'YYYY-MM' */
 export function monthRange(month: string) {

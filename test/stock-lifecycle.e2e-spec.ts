@@ -583,6 +583,11 @@ describe('Estoque (e2e)', () => {
       expect((await call('get', `/stock/product-types/${ids.emUso}/usage`, 'admina')).status).toBe(404);
       expect((await call('delete', `/stock/product-types/${ids.emUso}`, 'admina')).status).toBe(404);
 
+      // Filtrar por tipo excluído devolve lista vazia, mesmo com produtos ativos ainda vinculados a ele
+      const filtered = await call('get', `/stock/products?productTypeId=${ids.emUso}`, 'viewer');
+      expect(filtered.status).toBe(200);
+      expect(filtered.body).toMatchObject({ data: [], total: 0 });
+
       const product = await call('get', `/stock/products/${ids.itemUso1}`, 'viewer');
       expect(product.body.productType).toEqual({ id: ids.emUso, name: 'Em uso', isActive: false });
       const listed = (await call('get', '/stock/products?search=item uso', 'viewer')).body.data;
@@ -717,6 +722,56 @@ describe('Estoque (e2e)', () => {
       expect((await call('get', '/stock/history/users', 'adminb')).body).toEqual([{ id: ids.adminb, name: 'Pessoa adminb' }]);
       // A busca na B não encontra itens da A
       expect((await call('get', '/stock/history?search=areia', 'adminb')).body.data).toEqual([]);
+    });
+  });
+
+  // ---------------------------------------------------------------- robustez de entrada
+
+  describe('entrada inválida', () => {
+    const NUL = 'a b';
+    const nullByteMessage = 'O texto enviado contém caracteres inválidos (byte nulo).';
+
+    it('byte nulo em nome, observações ou busca é 400 em PT-BR (não 500) e nada é gravado', async () => {
+      const before = await countEvents(orgA);
+      const requests = await Promise.all([
+        call('post', '/stock/product-types', 'admina', { name: NUL }),
+        call('patch', `/stock/product-types/${ids.higiene}`, 'admina', { name: NUL }),
+        call('post', '/stock/products', 'admina', { name: NUL, productTypeId: ids.racao, unit: 'UNIT', quantity: 1 }),
+        call('post', '/stock/products', 'admina', { name: 'Com nulo', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: NUL }),
+        call('patch', `/stock/products/${ids.premium}`, 'admina', { name: NUL }),
+        call('patch', `/stock/products/${ids.premium}`, 'admina', { notes: NUL }),
+        call('get', '/stock/products?search=a%00b', 'viewer'),
+        call('get', '/stock/history?search=a%00b', 'historyview'),
+        call('get', '/stock/history?userId=%00', 'historyview'),
+      ]);
+      expect(requests.map((r) => r.status)).toEqual(Array(9).fill(400));
+      expect(requests.every((r) => JSON.stringify(r.body.message).includes(nullByteMessage) || r.status === 400)).toBe(true);
+      expect(requests[0].body.message).toBe(nullByteMessage);
+      expect(await countEvents(orgA)).toBe(before);
+      expect((await call('get', '/stock/products?search=com nulo', 'viewer')).body.data).toEqual([]);
+    });
+
+    it('a correção vale também para rotas existentes (pets) e não muda busca válida', async () => {
+      const res = await call('get', '/pets?search=a%00b', 'admina');
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe(nullByteMessage);
+      expect((await call('get', '/pets?search=bolinha', 'admina')).status).toBe(200);
+      expect((await call('get', '/stock/products?search=ra%C3%A7%C3%A3o', 'viewer')).status).toBe(200);
+    });
+
+    it('nome ausente devolve uma única mensagem, sem a de tamanho nem repetida', async () => {
+      const product = await call('post', '/stock/products', 'admina', { productTypeId: ids.racao, unit: 'UNIT', quantity: 1 });
+      expect(product.status).toBe(400);
+      expect(product.body.message).toEqual(['Informe o nome do produto.']);
+      const type = await call('post', '/stock/product-types', 'admina', {});
+      expect(type.body.message).toEqual(['Informe o nome do tipo.']);
+    });
+
+    it('search repetido (array) devolve mensagem em PT-BR', async () => {
+      const products = await call('get', '/stock/products?search=a&search=b', 'viewer');
+      expect(products.status).toBe(400);
+      expect(products.body.message).toEqual(['Busca deve ser um texto.']);
+      expect((await call('get', '/stock/history?search=a&search=b', 'historyview')).body.message).toEqual(['Busca deve ser um texto.']);
     });
   });
 

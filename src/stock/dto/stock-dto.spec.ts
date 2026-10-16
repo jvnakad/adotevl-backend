@@ -79,6 +79,9 @@ describe('caracteres inválidos', () => {
     ['só o tom de pele', 'a\u{1F3FD}b'],
     ['seletor U+FE0F solto', 'a\uFE0Fb'],
     ['keycap U+20E3 solto', 'a\u20E3b'],
+    ['© com seletor de emoji', '\u00A9\uFE0F'],
+    ['® com seletor de emoji', '\u00AE\uFE0F'],
+    ['™ com seletor de emoji', 'Marca\u2122\uFE0F'],
   ];
 
   it.each(emojiNames)('nome com %s é recusado com a mensagem de emoji', async (_label, name) => {
@@ -112,7 +115,7 @@ describe('caracteres inválidos', () => {
     expect(await valid('a'.repeat(500) + '\n' + 'a'.repeat(500))).toBe(1);
   });
 
-  it.each(['Ração 10kg #2', 'Pão-de-Açúcar', 'Ñandú', '日本語', 'عربى', 'Item 1*', '100% natural', 'A/B_c (2)'])('nome legítimo é aceito: %s', async (name) => {
+  it.each(['Ração 10kg #2', 'Pão-de-Açúcar', 'Ñandú', '日本語', 'عربى', 'Item 1*', '100% natural', 'A/B_c (2)', 'Shampoo Pet®', 'Marca™', '© 2026', 'a©b®™'])('nome legítimo é aceito: %s', async (name) => {
     expect(await messages(CreateProductDto, { ...validProduct, name })).toEqual([]);
     expect(await messages(CreateProductTypeDto, { name })).toEqual([]);
   });

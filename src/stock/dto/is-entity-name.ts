@@ -3,7 +3,8 @@ import { registerDecorator, ValidationArguments, ValidationOptions } from 'class
 const MAX_NAME_LENGTH = 250;
 // Emoji não é permitido em nomes: pictogramas, modificadores de tom de pele, bandeiras (indicadores regionais),
 // seletor de emoji U+FE0F, keycap U+20E3 e tags U+E0020–E007F. Dígitos, # e * continuam permitidos.
-const EMOJI_CHARS = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\p{Regional_Indicator}\uFE0F\u20E3\u{E0020}-\u{E007F}]/u;
+// ©, ® e ™ (Extended_Pictographic) são aceitos como texto; com U+FE0F depois (apresentação de emoji) o FE0F os faz ser recusados.
+const EMOJI_CHARS = /(?:(?![\u00A9\u00AE\u2122])\p{Extended_Pictographic}|[\p{Emoji_Modifier}\p{Regional_Indicator}\uFE0F\u20E3\u{E0020}-\u{E007F}])/u;
 // Demais caracteres de controle (Cc) e de formatação (Cf: bidi U+202A–U+202E e U+2066–U+2069, largura zero, ZWJ solto etc.)
 const INVALID_NAME_CHARS = /[\p{Cc}\p{Cf}]/u;
 export const INVALID_NAME_MESSAGE = 'O nome contém caracteres inválidos.';

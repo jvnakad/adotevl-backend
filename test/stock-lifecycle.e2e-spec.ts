@@ -800,6 +800,7 @@ describe('Estoque (e2e)', () => {
         '\u2764\uFE0F',
         '\u{1F1E7}\u{1F1F7}',
         '1\uFE0F\u20E3',
+        '\u00AE\uFE0F',
       ];
       for (const name of emojis) {
         const type = await call('post', '/stock/product-types', 'admina', { name });
@@ -812,6 +813,12 @@ describe('Estoque (e2e)', () => {
       expect((await call('patch', `/stock/products/${ids.premium}`, 'admina', { name: 'x \u{1F436}' })).body.message).toEqual(['O nome não pode conter emojis.']);
       expect((await call('patch', `/stock/product-types/${ids.higiene}`, 'admina', { name: '\u{1F1E7}\u{1F1F7}' })).body.message).toEqual(['O nome não pode conter emojis.']);
 
+      // ©, ® e ™ sem seletor de emoji são texto e passam
+      for (const name of ['Shampoo Pet\u00AE', 'Marca\u2122', '\u00A9 2026']) {
+        const res = await post(name);
+        expect(res.status).toBe(201);
+        expect(res.body.name).toBe(name);
+      }
       // Nome legítimo com dígitos, # e pontuação passa
       const ok = await call('post', '/stock/products', 'admina', { name: 'Ração 10kg #2', productTypeId: ids.racao, unit: 'UNIT', quantity: 1 });
       expect(ok.status).toBe(201);

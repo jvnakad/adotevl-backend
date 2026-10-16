@@ -5,12 +5,12 @@ import { ProductUnit } from '../product.entity';
 import { IsIsoDate } from '../stock-date';
 import { trimName } from './create-product-type.dto';
 import { IsEntityName } from './is-entity-name';
-import { HasNoControlChars } from './has-no-control-chars';
 
-// Vazio vira null; texto com espaços só nas pontas é aparado (RN-19)
+// Observações: remove em silêncio os caracteres de controle (Cc, exceto \n \r \t), aparando as pontas; vazio vira null (RN-19)
+const CONTROL_CHARS = /(?![\n\r\t])\p{Cc}/gu;
 const trimNotes = ({ value }: { value: unknown }) => {
   if (typeof value !== 'string') return value;
-  const trimmed = value.trim();
+  const trimmed = value.replace(CONTROL_CHARS, '').trim();
   return trimmed === '' ? null : trimmed;
 };
 
@@ -43,7 +43,6 @@ export class CreateProductDto {
   @Transform(trimNotes)
   @IsString({ message: 'As observações devem ser um texto.' })
   @MaxLength(1000, { message: 'As observações podem ter até 1.000 caracteres.' })
-  @HasNoControlChars({ message: 'As observações contêm caracteres inválidos.' })
   notes?: string | null;
 }
 

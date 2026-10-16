@@ -36,14 +36,30 @@ describe('ProductTypeService', () => {
   });
 
   describe('findAll / findOptions', () => {
-    it('lista só tipos ativos da organização em ordem alfabética estável (A→Z pelo nome normalizado)', async () => {
-      typeRepo.findAndCount.mockResolvedValue([[baseType()], 1]);
+    // Query builder falso que registra a cadeia de chamadas
+    const fakeQuery = (result: any) => {
+      const calls: Record<string, any[]> = {};
+      const qb: any = {};
+      for (const method of ['where', 'andWhere', 'orderBy', 'addOrderBy', 'skip', 'take', 'select']) {
+        qb[method] = jest.fn((...args) => ((calls[method] = [...(calls[method] ?? []), args]), qb));
+      }
+      qb.getManyAndCount = jest.fn(async () => result);
+      qb.getMany = jest.fn(async () => result);
+      (typeRepo as any).createQueryBuilder = jest.fn(() => qb);
+      return { qb, calls };
+    };
+
+    it('lista só tipos ativos da organização em ordem A→Z por código de caractere (COLLATE "C") com id de desempate', async () => {
+      const { qb, calls } = fakeQuery([[baseType()], 1]);
 
       const result = await service.findAll({ page: 2, limit: 10 }, ORG);
 
-      expect(typeRepo.findAndCount).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { organizationId: ORG, isActive: true }, order: { nameNormalized: 'ASC', id: 'ASC' }, skip: 10, take: 10 }),
-      );
+      expect(calls.where[0]).toEqual(['t.organizationId = :organizationId', { organizationId: ORG }]);
+      expect(calls.andWhere[0]).toEqual(['t.isActive = true']);
+      expect(calls.orderBy[0]).toEqual(['t.nameNormalized COLLATE "C"', 'ASC']);
+      expect(calls.addOrderBy[0]).toEqual(['t.id', 'ASC']);
+      expect(qb.skip).toHaveBeenCalledWith(10);
+      expect(qb.take).toHaveBeenCalledWith(10);
       expect(result).toMatchObject({ total: 1, page: 2, limit: 10, totalPages: 1 });
       expect(result.data[0]).toEqual({ id: 't1', name: 'Racao', createdBy: 'c', updatedBy: null, createdAt: expect.any(Date), updatedAt: expect.any(Date) });
       expect(result.data[0]).not.toHaveProperty('organizationId');
@@ -51,13 +67,15 @@ describe('ProductTypeService', () => {
     });
 
     it('opções: só id e nome, ativos, mesma ordem', async () => {
-      typeRepo.find.mockResolvedValue([baseType(), baseType({ id: 't2', name: 'Medicamento' })]);
+      const { calls } = fakeQuery([baseType(), baseType({ id: 't2', name: 'Medicamento' })]);
 
       expect(await service.findOptions(ORG)).toEqual([
         { id: 't1', name: 'Racao' },
         { id: 't2', name: 'Medicamento' },
       ]);
-      expect(typeRepo.find).toHaveBeenCalledWith(expect.objectContaining({ where: { organizationId: ORG, isActive: true }, order: { nameNormalized: 'ASC', id: 'ASC' } }));
+      expect(calls.orderBy[0]).toEqual(['t.nameNormalized COLLATE "C"', 'ASC']);
+      expect(calls.addOrderBy[0]).toEqual(['t.id', 'ASC']);
+      expect(calls.select[0]).toEqual([['t.id', 't.name']]);
     });
   });
 

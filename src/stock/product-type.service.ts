@@ -7,7 +7,6 @@ import { StockHistoryType } from './stock-history.entity';
 import { StockHistoryService } from './stock-history.service';
 import { CreateProductTypeDto, UpdateProductTypeDto } from './dto/create-product-type.dto';
 import { PaginationDto } from '../common/pagination.dto';
-import { paginate } from '../common/paginate.helper';
 import { normalizeName } from '../common/normalize-name';
 import { toDuplicateNameError } from './stock-errors';
 
@@ -24,21 +23,17 @@ export class ProductTypeService {
   ) {}
 
   async findAll(pagination: PaginationDto, organizationId: string) {
-    // A→Z ignorando acento e maiúscula; id desempata para a ordem ficar estável entre páginas
-    const result = await paginate(this.typeRepository, { page: pagination.page, limit: pagination.limit }, { organizationId, isActive: true }, undefined, {
-      nameNormalized: 'ASC',
-      id: 'ASC',
-    });
-    return { ...result, data: result.data.map((type) => this.toResponse(type)) };
+    const { page = 1, limit = 10 } = pagination;
+    const [types, total] = await this.activeTypesQuery(organizationId)
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+    return { data: types.map((type) => this.toResponse(type)), total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   /** Tipos ativos para select e filtro (só id e nome, sem paginar). */
   async findOptions(organizationId: string) {
-    const types = await this.typeRepository.find({
-      where: { organizationId, isActive: true },
-      select: { id: true, name: true },
-      order: { nameNormalized: 'ASC', id: 'ASC' },
-    });
+    const types = await this.activeTypesQuery(organizationId).select(['t.id', 't.name']).getMany();
     return types.map((type) => ({ id: type.id, name: type.name }));
   }
 
@@ -131,6 +126,19 @@ export class ProductTypeService {
         userName: await this.history.resolveUserName(manager, userId),
       });
     });
+  }
+
+  /**
+   * Tipos ativos em ordem A→Z pelo nome normalizado (sem acento e minúsculo), por código de caractere (COLLATE "C"):
+   * a mesma ordem em qualquer banco, sem depender da collation do servidor (pontuação e dígitos inclusos). O id desempata.
+   */
+  private activeTypesQuery(organizationId: string) {
+    return this.typeRepository
+      .createQueryBuilder('t')
+      .where('t.organizationId = :organizationId', { organizationId })
+      .andWhere('t.isActive = true')
+      .orderBy('t.nameNormalized COLLATE "C"', 'ASC')
+      .addOrderBy('t.id', 'ASC');
   }
 
   private countActiveProducts(manager: EntityManager, type: ProductType) {

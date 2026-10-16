@@ -840,6 +840,20 @@ describe('Estoque (e2e)', () => {
       expect(edited.body.notes).toBe('xy');
       // Só controles = vazio = null
       expect((await call('patch', `/stock/products/${created.body.id}`, 'admina', { notes: '\u0007\u007F' })).body.notes).toBeNull();
+      // Caracteres invisíveis de formatação também saem; emoji composto fica intacto
+      const invisible = await call('post', '/stock/products', 'admina', {
+        name: 'Obs invisível',
+        productTypeId: ids.racao,
+        unit: 'UNIT',
+        quantity: 1,
+        notes: 'a\u200Bb\u202Ec\u200Dd \u{1F468}\u200D\u{1F469}\u200D\u{1F467} \u{1F3F3}\uFE0F\u200D\u{1F308}',
+      });
+      expect(invisible.status).toBe(201);
+      expect(invisible.body.notes).toBe('abcd \u{1F468}\u200D\u{1F469}\u200D\u{1F467} \u{1F3F3}\uFE0F\u200D\u{1F308}');
+      expect((await call('patch', `/stock/products/${invisible.body.id}`, 'admina', { notes: '\u200B\u202E' })).body.notes).toBeNull();
+      const zwsp = await call('post', '/stock/products', 'admina', { name: 'Obs zwsp', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'x'.repeat(1000) + '\u200B'.repeat(5) });
+      expect(zwsp.status).toBe(201);
+      expect(zwsp.body.notes).toHaveLength(1000);
       // A limpeza vem antes do limite de 1000: 1000 úteis + controles passa; 1001 úteis não
       const exact = await call('post', '/stock/products', 'admina', { name: 'Obs limite', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'a'.repeat(1000) + '\u0007'.repeat(30) });
       expect(exact.status).toBe(201);

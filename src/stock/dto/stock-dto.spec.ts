@@ -132,9 +132,66 @@ describe('caracteres inválidos', () => {
     expect(await notes('a\r\nb')).toBe('a\r\nb');
     expect(await notes('col1\tcol2')).toBe('col1\tcol2');
     expect(await notes('Ração \u{1F436}')).toBe('Ração \u{1F436}');
-    expect(await notes('texto\u200Bcom largura zero')).toBe('texto\u200Bcom largura zero');
+    expect(await notes('texto\u200Bcom largura zero')).toBe('textocom largura zero'); // invis\u00EDveis tamb\u00E9m saem (BUG-11)
     expect(await notes('\u0007\u0000')).toBeNull(); // só controles = vazio
     expect(await notes('  \u0007 oi \u0000 ')).toBe('oi');
+  });
+});
+
+describe('observações: caracteres invisíveis (BUG-11)', () => {
+  const clean = (notes: string) => plainToInstance(CreateProductDto, { ...validProduct, notes }).notes;
+  const errors = async (notes: string) => (await validate(plainToInstance(CreateProductDto, { ...validProduct, notes }))).length;
+
+  it.each([
+    ['ZWSP U+200B', 'a\u200Bb'],
+    ['ZWNJ U+200C', 'a\u200Cb'],
+    ['LRM U+200E', 'a\u200Eb'],
+    ['RLM U+200F', 'a\u200Fb'],
+    ['bidi U+202A', 'a\u202Ab'],
+    ['RLO U+202E', 'a\u202Eb'],
+    ['bidi U+2066', 'a\u2066b'],
+    ['bidi U+2069', 'a\u2069b'],
+    ['BOM U+FEFF', 'a\uFEFFb'],
+    ['soft hyphen U+00AD', 'a\u00ADb'],
+    ['word joiner U+2060', 'a\u2060b'],
+    ['operador invisível U+2064', 'a\u2064b'],
+    ['ZWJ solto', 'a\u200Db'],
+    ['tag solta U+E0067', 'a\u{E0067}b'],
+  ])('remove %s em silêncio', (_label, input) => {
+    expect(clean(input)).toBe('ab');
+  });
+
+  it('só invisíveis viram null', () => {
+    expect(clean('\u200B\u200B')).toBeNull();
+    expect(clean('\u202E')).toBeNull();
+    expect(clean('\u200B\u202E\uFEFF\u200D')).toBeNull();
+  });
+
+  it('mantém emoji compostos intactos', () => {
+    for (const emoji of [
+      '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}', // 👨‍👩‍👧
+      '\u{1F3F3}\uFE0F\u200D\u{1F308}', // 🏳️‍🌈
+      '\u{1F469}\u{1F3FD}\u200D\u{1F4BB}', // 👩🏽‍💻
+      '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}', // 🏴 Inglaterra
+      '\u2764\uFE0F',
+      '\u{1F1E7}\u{1F1F7}',
+      '1\uFE0F\u20E3',
+    ]) {
+      expect(clean(`oi ${emoji} fim`)).toBe(`oi ${emoji} fim`);
+    }
+  });
+
+  it('ZWJ preso entre emoji e letra é removido; invisíveis ao redor de emoji composto saem sem quebrar a sequência', () => {
+    expect(clean('\u{1F436}\u200Db')).toBe('\u{1F436}b');
+    expect(clean('a\u200D\u{1F436}')).toBe('a\u{1F436}');
+    expect(clean('\u200B\u{1F468}\u200D\u{1F469}\u200B')).toBe('\u{1F468}\u200D\u{1F469}');
+  });
+
+  it('a limpeza vem antes do limite de 1000 caracteres', async () => {
+    expect(await errors('x'.repeat(1000) + '\u200B'.repeat(5))).toBe(0);
+    expect(clean('x'.repeat(1000) + '\u200B'.repeat(5))).toHaveLength(1000);
+    expect(await errors('\u202E'.repeat(20) + 'x'.repeat(1000) + '\u200D'.repeat(20))).toBe(0);
+    expect(await errors('x'.repeat(1001) + '\u200B')).toBe(1);
   });
 });
 

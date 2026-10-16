@@ -5,12 +5,12 @@ import { ProductUnit } from '../product.entity';
 import { IsIsoDate } from '../stock-date';
 import { trimName } from './create-product-type.dto';
 import { IsEntityName } from './is-entity-name';
+import { cleanNotes } from './clean-notes';
 
-// Observações: remove em silêncio os caracteres de controle (Cc, exceto \n \r \t), aparando as pontas; vazio vira null (RN-19)
-const CONTROL_CHARS = /(?![\n\r\t])\p{Cc}/gu;
+// Observações: remove em silêncio controles e caracteres invisíveis (cleanNotes), aparando as pontas; vazio vira null (RN-19)
 const trimNotes = ({ value }: { value: unknown }) => {
   if (typeof value !== 'string') return value;
-  const trimmed = value.replace(CONTROL_CHARS, '').trim();
+  const trimmed = cleanNotes(value).trim();
   return trimmed === '' ? null : trimmed;
 };
 

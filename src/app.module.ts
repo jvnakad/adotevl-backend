@@ -51,6 +51,7 @@ import { AccessModule } from './access/access.module';
 import { ProductType } from './stock/product-type.entity';
 import { Product } from './stock/product.entity';
 import { StockHistoryEvent } from './stock/stock-history.entity';
+import { NullByteModule } from './common/null-byte.middleware';
 import { StockModule } from './stock/stock.module';
 
 @Module({
@@ -85,6 +86,7 @@ import { StockModule } from './stock/stock.module';
     AdoptionContractModule,
     VolunteerScheduleModule,
     StockModule,
+    NullByteModule,
     AutentiqueModule,
     WebhooksModule,
   ],

@@ -53,6 +53,7 @@ import { VolunteerApplication } from '../src/volunteer-application/volunteer-app
 import { ProductType } from '../src/stock/product-type.entity';
 import { Product } from '../src/stock/product.entity';
 import { StockHistoryEvent } from '../src/stock/stock-history.entity';
+import { NullByteModule } from '../src/common/null-byte.middleware';
 import { StockModule } from '../src/stock/stock.module';
 
 class MockMailService {
@@ -183,6 +184,7 @@ class MockAutentiqueModule {}
     AdoptionContractModule,
     VolunteerScheduleModule,
     StockModule,
+    NullByteModule,
     WebhooksModule,
     MockMailModule,
     MockStorageModule,

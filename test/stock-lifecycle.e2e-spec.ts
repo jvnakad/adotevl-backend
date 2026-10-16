@@ -227,7 +227,10 @@ describe('Estoque (e2e)', () => {
       for (const name of ['medicamento', 'Água sanitária', 'Higiene']) await call('post', '/stock/product-types', 'admina', { name });
       const list = await call('get', '/stock/product-types?limit=100', 'typesview');
       const names = list.body.data.map((t: any) => t.name);
-      // Só compara nomes sem pontuação: a ordem de espaço e hífen depende da collation do banco
+      // Ordem determinística por código de caractere do nome normalizado (COLLATE "C"), com pontuação e dígitos
+      const normalized = (name: string) => name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+      expect(names).toEqual([...names].sort((a, b) => (normalized(a) < normalized(b) ? -1 : normalized(a) > normalized(b) ? 1 : 0)));
+      expect(names.indexOf('Pão de Açúcar')).toBeLessThan(names.indexOf('Pão-de-Açúcar')); // espaço (0x20) antes de hífen (0x2d)
       expect(names.indexOf('Água sanitária')).toBeLessThan(names.indexOf('Higiene'));
       expect(names.indexOf('Higiene')).toBeLessThan(names.indexOf('medicamento'));
       expect(names.indexOf('medicamento')).toBeLessThan(names.indexOf('Ração'));
@@ -242,6 +245,28 @@ describe('Estoque (e2e)', () => {
       const options = await call('get', '/stock/product-types/options', 'viewer');
       expect(options.body.map((t: any) => t.name)).toEqual(names);
       expect(Object.keys(options.body[0]).sort()).toEqual(['id', 'name']);
+    });
+
+    it('ordem A→Z determinística com dígitos e pontuação, igual na lista, nas opções e entre páginas', async () => {
+      const extra = ['Item 10', 'Item 2', 'Item-1', 'a1', 'ab', 'A_b', 'Ábaco'];
+      for (const name of extra) expect((await call('post', '/stock/product-types', 'admina', { name })).status).toBe(201);
+      const list = (await call('get', '/stock/product-types?limit=100', 'admina')).body.data.map((t: any) => t.name);
+      const picked = list.filter((name: string) => extra.includes(name));
+      expect(picked).toEqual([...picked].sort((a, b) => {
+        const n = (v: string) => v.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+        return n(a) < n(b) ? -1 : n(a) > n(b) ? 1 : 0;
+      }));
+      expect(picked).toEqual(['a1', 'A_b', 'ab', 'Ábaco', 'Item 10', 'Item 2', 'Item-1']);
+      const options = (await call('get', '/stock/product-types/options', 'viewer')).body.map((t: any) => t.name);
+      expect(options).toEqual(list);
+      const pages: string[] = [];
+      for (let page = 1; page <= Math.ceil(list.length / 4); page++) {
+        pages.push(...(await call('get', `/stock/product-types?limit=4&page=${page}`, 'admina')).body.data.map((t: any) => t.name));
+      }
+      expect(pages).toEqual(list);
+      for (const t of (await call('get', '/stock/product-types?limit=100', 'admina')).body.data) {
+        if (extra.includes(t.name)) await call('delete', `/stock/product-types/${t.id}`, 'admina');
+      }
     });
 
     it('isola por organização: a lista da B só tem os tipos da B', async () => {
@@ -757,6 +782,25 @@ describe('Estoque (e2e)', () => {
       expect(res.body.message).toBe(nullByteMessage);
       expect((await call('get', '/pets?search=bolinha', 'admina')).status).toBe(200);
       expect((await call('get', '/stock/products?search=ra%C3%A7%C3%A3o', 'viewer')).status).toBe(200);
+    });
+
+    it('nome com controle, bidi ou largura zero é 400; emoji passa; observações aceitam quebra de linha', async () => {
+      const invalid = ['a\u0007b', 'abc\u202Edef', 'a\u200Bb', '\u2066x'];
+      for (const name of invalid) {
+        const type = await call('post', '/stock/product-types', 'admina', { name });
+        expect(type.status).toBe(400);
+        expect(type.body.message).toEqual(['O nome contém caracteres inválidos.']);
+        const product = await call('post', '/stock/products', 'admina', { name, productTypeId: ids.racao, unit: 'UNIT', quantity: 1 });
+        expect(product.body.message).toEqual(['O nome contém caracteres inválidos.']);
+      }
+      expect((await call('patch', `/stock/products/${ids.premium}`, 'admina', { name: 'x\u202Ey' })).status).toBe(400);
+      expect((await call('patch', `/stock/product-types/${ids.higiene}`, 'admina', { name: 'x\u200By' })).status).toBe(400);
+
+      const emoji = await call('post', '/stock/products', 'admina', { name: 'Petisco 🍖', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'linha 1\nlinha 2\tok 🐶' });
+      expect(emoji.status).toBe(201);
+      expect(emoji.body).toMatchObject({ name: 'Petisco 🍖', notes: 'linha 1\nlinha 2\tok 🐶' });
+      const control = await call('post', '/stock/products', 'admina', { name: 'Obs controle', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'a\u0007b' });
+      expect(control.body.message).toEqual(['As observações contêm caracteres inválidos.']);
     });
 
     it('nome ausente devolve uma única mensagem, sem a de tamanho nem repetida', async () => {

@@ -30,6 +30,20 @@ describe('CreateProductTypeDto', () => {
   });
 });
 
+describe('mensagem do nome', () => {
+  it('nome ausente devolve uma única mensagem de obrigatório, sem a de tamanho', async () => {
+    expect(await messages(CreateProductDto, { ...validProduct, name: undefined })).toEqual(['Informe o nome do produto.']);
+    expect(await messages(CreateProductTypeDto, {})).toEqual(['Informe o nome do tipo.']);
+    expect(await messages(CreateProductTypeDto, { name: '   ' })).toEqual(['Informe o nome do tipo.']);
+    expect(await messages(CreateProductDto, { ...validProduct, name: null })).toEqual(['Informe o nome do produto.']);
+  });
+
+  it('nome longo devolve só a mensagem de tamanho', async () => {
+    expect(await messages(CreateProductDto, { ...validProduct, name: 'a'.repeat(251) })).toEqual(['O nome pode ter até 250 caracteres.']);
+    expect(await messages(CreateProductTypeDto, { name: 'a'.repeat(251) })).toEqual(['O nome pode ter até 250 caracteres.']);
+  });
+});
+
 describe('CreateProductDto', () => {
   it('aceita um produto válido, com opcionais ausentes', async () => {
     expect(await messages(CreateProductDto, validProduct)).toEqual([]);
@@ -94,6 +108,11 @@ describe('filtros', () => {
     const result = await messages(FindStockHistoryDto, { type: 'OUTRO', userId: 'x', search: 'a'.repeat(151) });
     expect(result).toEqual(expect.arrayContaining(['Tipo de evento inválido.', 'Usuário inválido.', 'Busca deve ter no máximo 150 caracteres.']));
     expect(await messages(FindStockHistoryDto, { type: 'TIPO_RENOMEADO', limit: '500' })).toEqual([]);
+  });
+
+  it('search repetido (array) devolve mensagem em PT-BR', async () => {
+    expect(await messages(FindStockProductsDto, { search: ['a', 'b'] })).toEqual(['Busca deve ser um texto.']);
+    expect(await messages(FindStockHistoryDto, { search: ['a', 'b'] })).toEqual(['Busca deve ser um texto.']);
   });
 
   it('limit acima de 100 é limitado a 100 também nestas listagens', () => {

@@ -1,9 +1,10 @@
-import { IsDefined, IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsDefined, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 import { ProductUnit } from '../product.entity';
 import { IsIsoDate } from '../stock-date';
 import { trimName } from './create-product-type.dto';
+import { IsEntityName } from './is-entity-name';
 
 // Vazio vira null; texto com espaços só nas pontas é aparado (RN-19)
 const trimNotes = ({ value }: { value: unknown }) => {
@@ -15,9 +16,7 @@ const trimNotes = ({ value }: { value: unknown }) => {
 export class CreateProductDto {
   @ApiProperty({ example: 'Ração Premium', description: 'Nome do produto (até 250 caracteres; único entre os produtos ativos da organização)' })
   @Transform(trimName)
-  @IsString({ message: 'Informe o nome do produto.' })
-  @IsNotEmpty({ message: 'Informe o nome do produto.' })
-  @MaxLength(250, { message: 'O nome pode ter até 250 caracteres.' })
+  @IsEntityName('Informe o nome do produto.')
   name: string;
 
   @ApiProperty({ description: 'ID do tipo de produto (ativo)' })

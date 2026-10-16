@@ -1,13 +1,13 @@
-import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsOptional, IsUUID } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsSearchText } from './is-search-text';
 import { PaginationDto } from '../../common/pagination.dto';
 import { IsIsoDate } from '../stock-date';
 
 export class FindStockProductsDto extends PaginationDto {
   @ApiPropertyOptional({ description: 'Busca parcial pelo nome, sem diferenciar acento nem maiúscula' })
   @IsOptional()
-  @IsString()
-  @MaxLength(150, { message: 'Busca deve ter no máximo 150 caracteres.' })
+  @IsSearchText()
   search?: string;
 
   @ApiPropertyOptional({ description: 'ID do tipo de produto' })

@@ -1,5 +1,6 @@
-import { IsEnum, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsEnum, IsOptional, IsUUID } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsSearchText } from './is-search-text';
 import { PaginationDto } from '../../common/pagination.dto';
 import { StockHistoryType } from '../stock-history.entity';
 import { IsIsoDate } from '../stock-date';
@@ -7,8 +8,7 @@ import { IsIsoDate } from '../stock-date';
 export class FindStockHistoryDto extends PaginationDto {
   @ApiPropertyOptional({ description: 'Busca parcial pelo nome do produto ou tipo, por qualquer nome que o item já teve (sem acento nem maiúscula)' })
   @IsOptional()
-  @IsString()
-  @MaxLength(150, { message: 'Busca deve ter no máximo 150 caracteres.' })
+  @IsSearchText()
   search?: string;
 
   @ApiPropertyOptional({ enum: StockHistoryType, description: 'Tipo do evento' })

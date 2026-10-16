@@ -1,6 +1,9 @@
 import { registerDecorator, ValidationArguments, ValidationOptions } from 'class-validator';
 
 const MAX_NAME_LENGTH = 250;
+// Caracteres de controle (Cc) e de formatação (Cf, inclui os bidi U+202A–U+202E e U+2066–U+2069 e os de largura zero). Emoji é permitido.
+const INVALID_NAME_CHARS = /[\p{Cc}\p{Cf}]/u;
+export const INVALID_NAME_MESSAGE = 'O nome contém caracteres inválidos.';
 
 /**
  * Nome de produto/tipo: texto não vazio com até 250 caracteres (já normalizado pelo Transform).
@@ -14,10 +17,12 @@ export function IsEntityName(requiredMessage: string, options?: ValidationOption
       propertyName,
       options,
       validator: {
-        validate: (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= MAX_NAME_LENGTH,
+        validate: (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= MAX_NAME_LENGTH && !INVALID_NAME_CHARS.test(value),
         defaultMessage: (args: ValidationArguments) => {
           const value = args.value;
-          return typeof value === 'string' && value.length > MAX_NAME_LENGTH ? 'O nome pode ter até 250 caracteres.' : requiredMessage;
+          if (typeof value !== 'string' || value.length === 0) return requiredMessage;
+          if (value.length > MAX_NAME_LENGTH) return 'O nome pode ter até 250 caracteres.';
+          return INVALID_NAME_MESSAGE;
         },
       },
     });

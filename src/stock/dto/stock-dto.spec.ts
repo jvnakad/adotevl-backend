@@ -44,6 +44,43 @@ describe('mensagem do nome', () => {
   });
 });
 
+describe('caracteres inválidos', () => {
+  const invalidNames = [
+    ['controle U+0007', 'a\u0007b'],
+    ['DEL U+007F', 'a\u007fb'],
+    ['NUL U+0000', 'a\u0000b'],
+    ['bidi U+202E', 'abc\u202Edef'],
+    ['bidi isolate U+2066', '\u2066abc'],
+    ['largura zero U+200B', 'a\u200Bb'],
+    ['marca LRM U+200E', 'a\u200Eb'],
+    ['soft hyphen U+00AD', 'a\u00ADb'],
+  ];
+
+  it.each(invalidNames)('nome com %s é recusado no produto e no tipo', async (_label, name) => {
+    expect(await messages(CreateProductDto, { ...validProduct, name })).toEqual(['O nome contém caracteres inválidos.']);
+    expect(await messages(CreateProductTypeDto, { name })).toEqual(['O nome contém caracteres inválidos.']);
+  });
+
+  it('tab e quebra de linha viram espaço na normalização e não são recusados', async () => {
+    const dto = plainToInstance(CreateProductTypeDto, { name: 'Água\tSanitária\nPet' });
+    expect(dto.name).toBe('Água Sanitária Pet');
+    expect(await validate(dto)).toHaveLength(0);
+  });
+
+  it.each(['Ração 🐶', 'Petisco 🍖 grande', 'Pão-de-Açúcar', 'Ñandú', '日本語', 'عربى'])('nome com texto legítimo é aceito: %s', async (name) => {
+    expect(await messages(CreateProductDto, { ...validProduct, name })).toEqual([]);
+  });
+
+  it('observações: recusa NUL e controles, aceita quebra de linha, retorno e tabulação, emoji e largura zero', async () => {
+    for (const notes of ['a\u0000b', 'a\u0007b', 'a\u007fb', 'a\u001bb']) {
+      expect(await messages(CreateProductDto, { ...validProduct, notes })).toEqual(['As observações contêm caracteres inválidos.']);
+    }
+    for (const notes of ['linha 1\nlinha 2', 'a\r\nb', 'col1\tcol2', 'Ração 🐶', 'texto\u200Bcom largura zero']) {
+      expect(await messages(CreateProductDto, { ...validProduct, notes })).toEqual([]);
+    }
+  });
+});
+
 describe('CreateProductDto', () => {
   it('aceita um produto válido, com opcionais ausentes', async () => {
     expect(await messages(CreateProductDto, validProduct)).toEqual([]);

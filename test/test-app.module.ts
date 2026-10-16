@@ -50,6 +50,10 @@ import { ScheduleLock } from '../src/volunteer-schedule/schedule-lock.entity';
 import { ScheduleAccessCode } from '../src/volunteer-schedule/schedule-access-code.entity';
 import { VolunteerScheduleModule } from '../src/volunteer-schedule/volunteer-schedule.module';
 import { VolunteerApplication } from '../src/volunteer-application/volunteer-application.entity';
+import { ProductType } from '../src/stock/product-type.entity';
+import { Product } from '../src/stock/product.entity';
+import { StockHistoryEvent } from '../src/stock/stock-history.entity';
+import { StockModule } from '../src/stock/stock.module';
 
 class MockMailService {
   async sendConfirmationEmail() {}
@@ -155,7 +159,7 @@ class MockAutentiqueModule {}
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ProductType, Product, StockHistoryEvent,
       ],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
@@ -178,6 +182,7 @@ class MockAutentiqueModule {}
     AdoptionHistoryModule,
     AdoptionContractModule,
     VolunteerScheduleModule,
+    StockModule,
     WebhooksModule,
     MockMailModule,
     MockStorageModule,

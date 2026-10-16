@@ -48,6 +48,10 @@ import { AutentiqueModule } from './autentique/autentique.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { TeamPermission } from './team/team-permission.entity';
 import { AccessModule } from './access/access.module';
+import { ProductType } from './stock/product-type.entity';
+import { Product } from './stock/product.entity';
+import { StockHistoryEvent } from './stock/stock-history.entity';
+import { StockModule } from './stock/stock.module';
 
 @Module({
   imports: [
@@ -56,7 +60,7 @@ import { AccessModule } from './access/access.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ProductType, Product, StockHistoryEvent],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),
@@ -80,6 +84,7 @@ import { AccessModule } from './access/access.module';
     AdoptionHistoryModule,
     AdoptionContractModule,
     VolunteerScheduleModule,
+    StockModule,
     AutentiqueModule,
     WebhooksModule,
   ],

@@ -68,6 +68,32 @@ describe('TeamService', () => {
     });
   });
 
+  describe('telas do Estoque', () => {
+    beforeEach(() => repo.findOne.mockResolvedValue({ id: 't1', name: 'Resgate', isAdmin: false }));
+
+    it('Tipos de produto e Histórico do estoque exigem ao menos Visualizar em Estoque', async () => {
+      await expect(service.setPermissions('t1', { [Screen.STOCK_PRODUCT_TYPES]: AccessLevel.VIEW }, 'admin-1')).rejects.toThrow(
+        new BadRequestException('Tipos de produto exige ao menos Visualizar em Estoque.'),
+      );
+      await expect(service.setPermissions('t1', { [Screen.STOCK_HISTORY]: AccessLevel.VIEW }, 'admin-1')).rejects.toThrow(
+        new BadRequestException('Histórico do estoque exige ao menos Visualizar em Estoque.'),
+      );
+    });
+
+    it('Histórico do estoque não aceita Editar', async () => {
+      const permissions = { [Screen.STOCK]: AccessLevel.EDIT, [Screen.STOCK_HISTORY]: AccessLevel.EDIT };
+
+      await expect(service.setPermissions('t1', permissions, 'admin-1')).rejects.toThrow(new BadRequestException('Histórico do estoque só pode ser Visualizar ou Sem acesso.'));
+    });
+
+    it('aceita a matriz válida e a equipe Admin nasce com Editar, Editar e Visualizar', async () => {
+      await service.setPermissions('t1', { [Screen.STOCK]: AccessLevel.VIEW, [Screen.STOCK_PRODUCT_TYPES]: AccessLevel.EDIT, [Screen.STOCK_HISTORY]: AccessLevel.VIEW }, 'admin-1');
+
+      expect(permissionRepo.save).toHaveBeenCalledTimes(1);
+      expect(ADMIN_PERMISSIONS).toMatchObject({ [Screen.STOCK]: AccessLevel.EDIT, [Screen.STOCK_PRODUCT_TYPES]: AccessLevel.EDIT, [Screen.STOCK_HISTORY]: AccessLevel.VIEW });
+    });
+  });
+
   describe('equipes padrão', () => {
     it('ensureDefaultTeams cria as que faltam, sem acesso, marcadas como padrão', async () => {
       // Admin já existe; demais não

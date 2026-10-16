@@ -12,6 +12,9 @@ export enum Screen {
   TEAMS = 'TEAMS',
   FINANCIAL = 'FINANCIAL',
   BANK_ACCOUNTS = 'BANK_ACCOUNTS',
+  STOCK = 'STOCK',
+  STOCK_PRODUCT_TYPES = 'STOCK_PRODUCT_TYPES',
+  STOCK_HISTORY = 'STOCK_HISTORY',
 }
 
 export enum AccessLevel {
@@ -44,6 +47,9 @@ export const SCREENS: ScreenDefinition[] = [
   { key: Screen.TEAMS, label: 'Equipes' },
   { key: Screen.FINANCIAL, label: 'Financeiro' },
   { key: Screen.BANK_ACCOUNTS, label: 'Contas bancárias', parent: Screen.FINANCIAL },
+  { key: Screen.STOCK, label: 'Estoque' },
+  { key: Screen.STOCK_PRODUCT_TYPES, label: 'Tipos de produto', parent: Screen.STOCK },
+  { key: Screen.STOCK_HISTORY, label: 'Histórico do estoque', parent: Screen.STOCK, viewOnly: true },
 ];
 
 export const SCREEN_BY_KEY = Object.fromEntries(SCREENS.map((screen) => [screen.key, screen])) as Record<Screen, ScreenDefinition>;

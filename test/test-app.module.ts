@@ -50,6 +50,11 @@ import { ScheduleLock } from '../src/volunteer-schedule/schedule-lock.entity';
 import { ScheduleAccessCode } from '../src/volunteer-schedule/schedule-access-code.entity';
 import { VolunteerScheduleModule } from '../src/volunteer-schedule/volunteer-schedule.module';
 import { VolunteerApplication } from '../src/volunteer-application/volunteer-application.entity';
+import { ProductType } from '../src/stock/product-type.entity';
+import { Product } from '../src/stock/product.entity';
+import { StockHistoryEvent } from '../src/stock/stock-history.entity';
+import { NullByteModule } from '../src/common/null-byte.middleware';
+import { StockModule } from '../src/stock/stock.module';
 
 class MockMailService {
   async sendConfirmationEmail() {}
@@ -155,7 +160,7 @@ class MockAutentiqueModule {}
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ProductType, Product, StockHistoryEvent,
       ],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
@@ -178,6 +183,8 @@ class MockAutentiqueModule {}
     AdoptionHistoryModule,
     AdoptionContractModule,
     VolunteerScheduleModule,
+    StockModule,
+    NullByteModule,
     WebhooksModule,
     MockMailModule,
     MockStorageModule,
@@ -210,6 +217,14 @@ export async function cleanupAccess(app: INestApplication, organizationId: strin
   const dataSource = app.get(DataSource);
   await dataSource.query('DELETE FROM volunteers WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [organizationId]);
   await dataSource.query('DELETE FROM teams WHERE organization_id = $1', [organizationId]);
+}
+
+/** Remove o estoque da organização (antes de apagar a organização: FKs RESTRICT). Ordem: eventos, produtos, tipos. */
+export async function cleanupStock(app: INestApplication, organizationId: string) {
+  const dataSource = app.get(DataSource);
+  await dataSource.query('DELETE FROM stock_history_events WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM products WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM product_types WHERE organization_id = $1', [organizationId]);
 }
 
 /** Questionário válido do voluntário fixo (POST /users). */

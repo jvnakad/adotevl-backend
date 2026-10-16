@@ -58,6 +58,20 @@ npm run seed:dev                      # organização "AdoteVL Dev" + admin@adot
 
 O `seed:dev` imprime as variáveis para o `.env` do front (`VITE_API_URL`, `VITE_ORGANIZATION_ID`, `VITE_PROFILE_*`).
 
+### Dados de exemplo do Estoque
+
+Para testar o módulo Estoque com bastante dado (tipos, produtos, histórico e paginação):
+
+```bash
+npm run seed:stock                             # na primeira organização existente (rode seed:dev antes, se o banco estiver vazio)
+npm run seed:stock -- --org=<id ou CNPJ>       # organização específica
+npm run seed:stock -- --reset                  # apaga SÓ o estoque da organização alvo (eventos, produtos e tipos) e recria
+```
+
+Cria 8 tipos ativos e 1 excluído (com um produto vinculado) e 45 produtos (42 ativos e 3 excluídos) nas unidades `UNIT`, `KG` e `LITER`, com quantidades 0, 2,500 kg e 1250,500 kg, vencidos, sem vencimento, nomes com acento e "Shampoo Pet®", um nome longo e uma observação longa. Os cadastros ficam espalhados nos últimos 90 dias (filtro de período e paginação de 10/20/50/100) e o histórico (74 eventos) é coerente: criação, edição com de/para (quantidade, unidade, tipo, nome), remoção e renomeação de produtos e tipos (ex.: buscar "Golden Special" ou "higiênica" traz também os eventos com o nome antigo). Os autores são os dois primeiros usuários ativos da organização (com um só usuário, ele assina tudo).
+
+Segurança: só roda com a `DATABASE_URL` em `localhost`/`127.0.0.1` e fora de `NODE_ENV=production`. É idempotente: se a organização já tem dados de estoque, não faz nada (use `--reset` para recriar).
+
 Com `STORAGE_DRIVER=local` as fotos são gravadas em `./uploads` e servidas em `http://localhost:3000/uploads/...`.
 
 Testes e2e contra o banco local:

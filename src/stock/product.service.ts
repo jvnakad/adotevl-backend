@@ -40,7 +40,10 @@ export class ProductService {
       .andWhere('p.isActive = true');
     const term = toLikeTerm(query.search ?? '');
     if (term) qb.andWhere('p.nameNormalized LIKE :term', { term });
-    if (query.productTypeId) qb.andWhere('p.productTypeId = :productTypeId', { productTypeId: query.productTypeId });
+    if (query.productTypeId) {
+      // Tipo excluído não pode ser filtrado (RN-15, B-10): resultado vazio
+      qb.andWhere('p.productTypeId = :productTypeId', { productTypeId: query.productTypeId }).andWhere('t.isActive = true');
+    }
     if (start) qb.andWhere('p.createdAt >= :start', { start });
     if (endExclusive) qb.andWhere('p.createdAt < :endExclusive', { endExclusive });
 

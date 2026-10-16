@@ -217,6 +217,14 @@ export async function cleanupAccess(app: INestApplication, organizationId: strin
   await dataSource.query('DELETE FROM teams WHERE organization_id = $1', [organizationId]);
 }
 
+/** Remove o estoque da organização (antes de apagar a organização: FKs RESTRICT). Ordem: eventos, produtos, tipos. */
+export async function cleanupStock(app: INestApplication, organizationId: string) {
+  const dataSource = app.get(DataSource);
+  await dataSource.query('DELETE FROM stock_history_events WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM products WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM product_types WHERE organization_id = $1', [organizationId]);
+}
+
 /** Questionário válido do voluntário fixo (POST /users). */
 export const VOLUNTEER_APPLICATION = {
   city: 'Curitiba',

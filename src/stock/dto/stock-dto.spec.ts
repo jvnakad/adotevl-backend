@@ -109,8 +109,7 @@ describe('caracteres inválidos', () => {
     // 1001 úteis continuam recusados
     expect(await valid('a'.repeat(1001) + '\u0007')).toBe(1);
     // \n, \r e \t contam como caracteres
-    expect(await valid('a'.repeat(500) + '
-' + 'a'.repeat(500))).toBe(1);
+    expect(await valid('a'.repeat(500) + '\n' + 'a'.repeat(500))).toBe(1);
   });
 
   it.each(['Ração 10kg #2', 'Pão-de-Açúcar', 'Ñandú', '日本語', 'عربى', 'Item 1*', '100% natural', 'A/B_c (2)'])('nome legítimo é aceito: %s', async (name) => {

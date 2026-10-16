@@ -54,6 +54,13 @@ describe('caracteres inválidos', () => {
     ['largura zero U+200B', 'a\u200Bb'],
     ['marca LRM U+200E', 'a\u200Eb'],
     ['soft hyphen U+00AD', 'a\u00ADb'],
+    ['ZWJ solto entre letras', 'a\u200Db'],
+    ['ZWJ no começo', '\u200D🐶'],
+    ['ZWJ no fim', '🐶\u200D'],
+    ['ZWJ entre emoji e letra', '🐶\u200Db'],
+    ['ZWNJ U+200C', 'a\u200Cb'],
+    ['RLO U+202E antes de texto', '\u202Eabc'],
+    ['LRM/RLM U+200F', 'a\u200Fb'],
   ];
 
   it.each(invalidNames)('nome com %s é recusado no produto e no tipo', async (_label, name) => {
@@ -67,7 +74,7 @@ describe('caracteres inválidos', () => {
     expect(await validate(dto)).toHaveLength(0);
   });
 
-  it.each(['Ração 🐶', 'Petisco 🍖 grande', 'Pão-de-Açúcar', 'Ñandú', '日本語', 'عربى'])('nome com texto legítimo é aceito: %s', async (name) => {
+  it.each(['Ração 🐶', '👨\u200D👩\u200D👧', '🏳\uFE0F\u200D🌈', '🏳️‍🌈', '👨‍👩‍👧', '❤\uFE0F', 'Família 👨\u200D👩\u200D👧\u200D👦 grande', 'Petisco 🍖 grande', 'Pão-de-Açúcar', 'Ñandú', '日本語', 'عربى'])('nome com texto legítimo é aceito: %s', async (name) => {
     expect(await messages(CreateProductDto, { ...validProduct, name })).toEqual([]);
   });
 

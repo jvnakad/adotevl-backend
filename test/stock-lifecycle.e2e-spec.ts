@@ -799,6 +799,11 @@ describe('Estoque (e2e)', () => {
       const emoji = await call('post', '/stock/products', 'admina', { name: 'Petisco 🍖', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'linha 1\nlinha 2\tok 🐶' });
       expect(emoji.status).toBe(201);
       expect(emoji.body).toMatchObject({ name: 'Petisco 🍖', notes: 'linha 1\nlinha 2\tok 🐶' });
+      // Emoji composto (ZWJ entre emojis, FE0F) passa; ZWJ solto não
+      for (const name of ['Família \u{1F468}\u200D\u{1F469}\u200D\u{1F467}', 'Bandeira \u{1F3F3}\uFE0F\u200D\u{1F308}']) {
+        expect((await call('post', '/stock/product-types', 'admina', { name })).status).toBe(201);
+      }
+      expect((await call('post', '/stock/product-types', 'admina', { name: 'a\u200Db' })).body.message).toEqual(['O nome contém caracteres inválidos.']);
       const control = await call('post', '/stock/products', 'admina', { name: 'Obs controle', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'a\u0007b' });
       expect(control.body.message).toEqual(['As observações contêm caracteres inválidos.']);
     });

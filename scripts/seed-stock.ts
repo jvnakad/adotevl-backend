@@ -3,7 +3,7 @@
 //   --org=<id|cnpj>  organização alvo (padrão: a primeira organização existente)
 //   --reset          apaga SÓ os dados de estoque (eventos, produtos e tipos) da organização alvo e recria
 // Idempotente: se a organização já tem dados de estoque, não faz nada (use --reset para recriar).
-// Só roda com o banco em localhost/127.0.0.1 e fora de produção.
+// Só roda com o banco em localhost/127.0.0.1 (ou, na stack Docker local, no serviço do compose com ALLOW_LOCAL_SEED=1) e fora de produção.
 import { NestFactory } from '@nestjs/core';
 import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
@@ -22,8 +22,15 @@ function assertLocal() {
   } catch {
     // DATABASE_URL ausente ou inválida cai na recusa abaixo
   }
-  if (host !== 'localhost' && host !== '127.0.0.1') {
-    throw new Error(`seed:stock só roda com DATABASE_URL apontando para localhost ou 127.0.0.1 (host atual: "${host || 'indefinido'}").`);
+  const isLoopback = host === 'localhost' || host === '127.0.0.1';
+  // Stack local em Docker: o banco é o serviço do compose (ex.: "db"). Só vale com ALLOW_LOCAL_SEED=1 (definido apenas no compose local)
+  // e com host de um rótulo só, sem ponto: um banco remoto (db.exemplo.com, *.supabase.co) continua recusado.
+  const isComposeService = process.env.ALLOW_LOCAL_SEED === '1' && /^[a-z][a-z0-9_-]*$/i.test(host);
+  if (!isLoopback && !isComposeService) {
+    throw new Error(
+      `seed:stock só roda com DATABASE_URL apontando para localhost ou 127.0.0.1 (host atual: "${host || 'indefinido'}"). ` +
+        'Na stack Docker local, ALLOW_LOCAL_SEED=1 libera o nome do serviço do banco (ex.: db).',
+    );
   }
 }
 

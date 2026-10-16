@@ -784,28 +784,69 @@ describe('Estoque (e2e)', () => {
       expect((await call('get', '/stock/products?search=ra%C3%A7%C3%A3o', 'viewer')).status).toBe(200);
     });
 
-    it('nome com controle, bidi ou largura zero é 400; emoji passa; observações aceitam quebra de linha', async () => {
-      const invalid = ['a\u0007b', 'abc\u202Edef', 'a\u200Bb', '\u2066x'];
-      for (const name of invalid) {
+    it('nome com controle, bidi ou largura zero é 400 "caracteres inválidos"; nome com emoji é 400 "emojis"', async () => {
+      const post = (name: string) => call('post', '/stock/products', 'admina', { name, productTypeId: ids.racao, unit: 'UNIT', quantity: 1 });
+      for (const name of ['a\u0007b', 'abc\u202Edef', 'a\u200Bb', '\u2066x', 'a\u200Db']) {
         const type = await call('post', '/stock/product-types', 'admina', { name });
         expect(type.status).toBe(400);
         expect(type.body.message).toEqual(['O nome contém caracteres inválidos.']);
-        const product = await call('post', '/stock/products', 'admina', { name, productTypeId: ids.racao, unit: 'UNIT', quantity: 1 });
-        expect(product.body.message).toEqual(['O nome contém caracteres inválidos.']);
+        expect((await post(name)).body.message).toEqual(['O nome contém caracteres inválidos.']);
+      }
+      const emojis = [
+        'Petisco \u{1F356}',
+        '\u{1F469}\u{1F3FD}\u200D\u{1F4BB}',
+        '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}',
+        '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}',
+        '\u2764\uFE0F',
+        '\u{1F1E7}\u{1F1F7}',
+        '1\uFE0F\u20E3',
+      ];
+      for (const name of emojis) {
+        const type = await call('post', '/stock/product-types', 'admina', { name });
+        expect(type.status).toBe(400);
+        expect(type.body.message).toEqual(['O nome não pode conter emojis.']);
+        expect((await post(name)).body.message).toEqual(['O nome não pode conter emojis.']);
       }
       expect((await call('patch', `/stock/products/${ids.premium}`, 'admina', { name: 'x\u202Ey' })).status).toBe(400);
       expect((await call('patch', `/stock/product-types/${ids.higiene}`, 'admina', { name: 'x\u200By' })).status).toBe(400);
+      expect((await call('patch', `/stock/products/${ids.premium}`, 'admina', { name: 'x \u{1F436}' })).body.message).toEqual(['O nome não pode conter emojis.']);
+      expect((await call('patch', `/stock/product-types/${ids.higiene}`, 'admina', { name: '\u{1F1E7}\u{1F1F7}' })).body.message).toEqual(['O nome não pode conter emojis.']);
 
-      const emoji = await call('post', '/stock/products', 'admina', { name: 'Petisco 🍖', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'linha 1\nlinha 2\tok 🐶' });
-      expect(emoji.status).toBe(201);
-      expect(emoji.body).toMatchObject({ name: 'Petisco 🍖', notes: 'linha 1\nlinha 2\tok 🐶' });
-      // Emoji composto (ZWJ entre emojis, FE0F) passa; ZWJ solto não
-      for (const name of ['Família \u{1F468}\u200D\u{1F469}\u200D\u{1F467}', 'Bandeira \u{1F3F3}\uFE0F\u200D\u{1F308}']) {
-        expect((await call('post', '/stock/product-types', 'admina', { name })).status).toBe(201);
-      }
-      expect((await call('post', '/stock/product-types', 'admina', { name: 'a\u200Db' })).body.message).toEqual(['O nome contém caracteres inválidos.']);
-      const control = await call('post', '/stock/products', 'admina', { name: 'Obs controle', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'a\u0007b' });
-      expect(control.body.message).toEqual(['As observações contêm caracteres inválidos.']);
+      // Nome legítimo com dígitos, # e pontuação passa
+      const ok = await call('post', '/stock/products', 'admina', { name: 'Ração 10kg #2', productTypeId: ids.racao, unit: 'UNIT', quantity: 1 });
+      expect(ok.status).toBe(201);
+      expect(ok.body.name).toBe('Ração 10kg #2');
+    });
+
+    it('observações: controles são removidos em silêncio, quebra de linha e emoji ficam; NUL é barrado antes (400 do middleware)', async () => {
+      const created = await call('post', '/stock/products', 'admina', {
+        name: 'Obs limpa',
+        productTypeId: ids.racao,
+        unit: 'UNIT',
+        quantity: 1,
+        notes: 'a\u0007b\u007Fc\u0085d\nlinha 2\tok \u{1F436}',
+      });
+      expect(created.status).toBe(201);
+      expect(created.body.notes).toBe('abcd\nlinha 2\tok \u{1F436}');
+      const edited = await call('patch', `/stock/products/${created.body.id}`, 'admina', { notes: '\u0007x\u001By' });
+      expect(edited.status).toBe(200);
+      expect(edited.body.notes).toBe('xy');
+      // Só controles = vazio = null
+      expect((await call('patch', `/stock/products/${created.body.id}`, 'admina', { notes: '\u0007\u007F' })).body.notes).toBeNull();
+      // A limpeza vem antes do limite de 1000: 1000 úteis + controles passa; 1001 úteis não
+      const exact = await call('post', '/stock/products', 'admina', { name: 'Obs limite', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'a'.repeat(1000) + '\u0007'.repeat(30) });
+      expect(exact.status).toBe(201);
+      expect(exact.body.notes).toHaveLength(1000);
+      const over = await call('post', '/stock/products', 'admina', { name: 'Obs limite 2', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'a'.repeat(1001) + '\u0007' });
+      expect(over.body.message).toEqual(['As observações podem ter até 1.000 caracteres.']);
+      // Nome com tab, \n e \r vira espaço e é aceito
+      const spaced = await call('post', '/stock/products', 'admina', { name: 'Nome\tcom\r\nquebra', productTypeId: ids.racao, unit: 'UNIT', quantity: 1 });
+      expect(spaced.status).toBe(201);
+      expect(spaced.body.name).toBe('Nome com quebra');
+      // O byte nulo é recusado pelo middleware global, antes da validação do campo
+      const nul = await call('post', '/stock/products', 'admina', { name: 'Obs nul', productTypeId: ids.racao, unit: 'UNIT', quantity: 1, notes: 'a\u0000b' });
+      expect(nul.status).toBe(400);
+      expect(nul.body.message).toBe('O texto enviado contém caracteres inválidos (byte nulo).');
     });
 
     it('nome ausente devolve uma única mensagem, sem a de tamanho nem repetida', async () => {

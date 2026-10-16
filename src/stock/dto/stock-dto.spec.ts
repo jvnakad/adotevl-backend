@@ -45,6 +45,8 @@ describe('mensagem do nome', () => {
 });
 
 describe('caracteres inválidos', () => {
+  const INVALID = ['O nome contém caracteres inválidos.'];
+  const EMOJI = ['O nome não pode conter emojis.'];
   const invalidNames = [
     ['controle U+0007', 'a\u0007b'],
     ['DEL U+007F', 'a\u007fb'],
@@ -53,38 +55,83 @@ describe('caracteres inválidos', () => {
     ['bidi isolate U+2066', '\u2066abc'],
     ['largura zero U+200B', 'a\u200Bb'],
     ['marca LRM U+200E', 'a\u200Eb'],
+    ['marca RLM U+200F', 'a\u200Fb'],
     ['soft hyphen U+00AD', 'a\u00ADb'],
     ['ZWJ solto entre letras', 'a\u200Db'],
-    ['ZWJ no começo', '\u200D🐶'],
-    ['ZWJ no fim', '🐶\u200D'],
-    ['ZWJ entre emoji e letra', '🐶\u200Db'],
+    ['ZWJ no começo', '\u200Dabc'],
     ['ZWNJ U+200C', 'a\u200Cb'],
-    ['RLO U+202E antes de texto', '\u202Eabc'],
-    ['LRM/RLM U+200F', 'a\u200Fb'],
   ];
 
   it.each(invalidNames)('nome com %s é recusado no produto e no tipo', async (_label, name) => {
-    expect(await messages(CreateProductDto, { ...validProduct, name })).toEqual(['O nome contém caracteres inválidos.']);
-    expect(await messages(CreateProductTypeDto, { name })).toEqual(['O nome contém caracteres inválidos.']);
+    expect(await messages(CreateProductDto, { ...validProduct, name })).toEqual(INVALID);
+    expect(await messages(CreateProductTypeDto, { name })).toEqual(INVALID);
   });
 
-  it('tab e quebra de linha viram espaço na normalização e não são recusados', async () => {
-    const dto = plainToInstance(CreateProductTypeDto, { name: 'Água\tSanitária\nPet' });
-    expect(dto.name).toBe('Água Sanitária Pet');
-    expect(await validate(dto)).toHaveLength(0);
+  const emojiNames = [
+    ['emoji simples', 'Ração 🐶'],
+    ['emoji com tom de pele e ZWJ (👩🏽‍💻)', '\u{1F469}\u{1F3FD}\u200D\u{1F4BB}'],
+    ['bandeira com tags (🏴󠁧󠁢󠁥󠁮󠁧󠁿)', '\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}'],
+    ['família com ZWJ (👨‍👩‍👧)', '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}'],
+    ['coração com seletor (❤️)', '\u2764\uFE0F'],
+    ['bandeira do Brasil (🇧🇷)', '\u{1F1E7}\u{1F1F7}'],
+    ['keycap (1️⃣)', '1\uFE0F\u20E3'],
+    ['arco-íris com ZWJ (🏳️‍🌈)', '\u{1F3F3}\uFE0F\u200D\u{1F308}'],
+    ['só o tom de pele', 'a\u{1F3FD}b'],
+    ['seletor U+FE0F solto', 'a\uFE0Fb'],
+    ['keycap U+20E3 solto', 'a\u20E3b'],
+  ];
+
+  it.each(emojiNames)('nome com %s é recusado com a mensagem de emoji', async (_label, name) => {
+    expect(await messages(CreateProductDto, { ...validProduct, name })).toEqual(EMOJI);
+    expect(await messages(CreateProductTypeDto, { name })).toEqual(EMOJI);
   });
 
-  it.each(['Ração 🐶', '👨\u200D👩\u200D👧', '🏳\uFE0F\u200D🌈', '🏳️‍🌈', '👨‍👩‍👧', '❤\uFE0F', 'Família 👨\u200D👩\u200D👧\u200D👦 grande', 'Petisco 🍖 grande', 'Pão-de-Açúcar', 'Ñandú', '日本語', 'عربى'])('nome com texto legítimo é aceito: %s', async (name) => {
+  it('no nome, tab, \n e \r viram espaço na normalização (antes da checagem de controle) e não são recusados', async () => {
+    for (const [input, expected] of [
+      ['Água\tSanitária\nPet', 'Água Sanitária Pet'],
+      ['Ração\r\nPremium', 'Ração Premium'],
+      ['\r\n Ração \t', 'Ração'],
+      ['A\r\r\nB', 'A B'],
+    ]) {
+      const type = plainToInstance(CreateProductTypeDto, { name: input });
+      const product = plainToInstance(CreateProductDto, { ...validProduct, name: input });
+      expect([type.name, product.name]).toEqual([expected, expected]);
+      expect(await validate(type)).toHaveLength(0);
+      expect(await validate(product)).toHaveLength(0);
+    }
+  });
+
+  it('observações: a limpeza dos controles acontece antes do limite de 1000 caracteres', async () => {
+    const valid = async (notes: string) => (await validate(plainToInstance(CreateProductDto, { ...validProduct, notes }))).length;
+    // 1000 caracteres úteis + controles que seriam passados do limite: aceito
+    expect(await valid('a'.repeat(1000) + '\u0007'.repeat(50))).toBe(0);
+    expect(await valid('\u0000'.repeat(10) + 'a'.repeat(1000))).toBe(0);
+    // 1001 úteis continuam recusados
+    expect(await valid('a'.repeat(1001) + '\u0007')).toBe(1);
+    // \n, \r e \t contam como caracteres
+    expect(await valid('a'.repeat(1000) + '\n')).toBe(1);
+  });
+
+  it.each(['Ração 10kg #2', 'Pão-de-Açúcar', 'Ñandú', '日本語', 'عربى', 'Item 1*', '100% natural', 'A/B_c (2)'])('nome legítimo é aceito: %s', async (name) => {
     expect(await messages(CreateProductDto, { ...validProduct, name })).toEqual([]);
+    expect(await messages(CreateProductTypeDto, { name })).toEqual([]);
   });
 
-  it('observações: recusa NUL e controles, aceita quebra de linha, retorno e tabulação, emoji e largura zero', async () => {
-    for (const notes of ['a\u0000b', 'a\u0007b', 'a\u007fb', 'a\u001bb']) {
-      expect(await messages(CreateProductDto, { ...validProduct, notes })).toEqual(['As observações contêm caracteres inválidos.']);
-    }
-    for (const notes of ['linha 1\nlinha 2', 'a\r\nb', 'col1\tcol2', 'Ração 🐶', 'texto\u200Bcom largura zero']) {
-      expect(await messages(CreateProductDto, { ...validProduct, notes })).toEqual([]);
-    }
+  it('observações: remove controles em silêncio (sem erro), preservando \n, \r e \t, emoji e largura zero', async () => {
+    const notes = async (value: string) => {
+      const dto = plainToInstance(CreateProductDto, { ...validProduct, notes: value });
+      expect(await validate(dto)).toHaveLength(0);
+      return dto.notes;
+    };
+    expect(await notes('a\u0000b')).toBe('ab');
+    expect(await notes('a\u0007b\u007Fc\u0085d\u001Be')).toBe('abcde');
+    expect(await notes('linha 1\nlinha 2')).toBe('linha 1\nlinha 2');
+    expect(await notes('a\r\nb')).toBe('a\r\nb');
+    expect(await notes('col1\tcol2')).toBe('col1\tcol2');
+    expect(await notes('Ração \u{1F436}')).toBe('Ração \u{1F436}');
+    expect(await notes('texto\u200Bcom largura zero')).toBe('texto\u200Bcom largura zero');
+    expect(await notes('\u0007\u0000')).toBeNull(); // só controles = vazio
+    expect(await notes('  \u0007 oi \u0000 ')).toBe('oi');
   });
 });
 

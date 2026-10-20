@@ -6,7 +6,7 @@ import { TeamPermission } from './team-permission.entity';
 import { CreateTeamDto } from './dto/create-team.dto';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
-import { AccessLevel, ADMIN_PERMISSIONS, hasLevel, SCREEN_BY_KEY, SCREENS, ScreenPermissions } from '../access/access';
+import { AccessLevel, ADMIN_PERMISSIONS, hasLevel, Screen, SCREEN_BY_KEY, SCREENS, ScreenPermissions } from '../access/access';
 
 export const ADMIN_TEAM_NAME = 'Admin';
 
@@ -15,6 +15,8 @@ export const DEFAULT_TEAMS: { systemKey: TeamSystemKey; name: string }[] = [
   { systemKey: TeamSystemKey.FINANCIAL, name: 'Financeiro' },
   { systemKey: TeamSystemKey.FIXED_VOLUNTEER, name: 'Voluntário Fixo' },
   { systemKey: TeamSystemKey.FLOATING_VOLUNTEER, name: 'Voluntário Volante' },
+  // Sempre por último: ao nascer, copia a matriz do Voluntário Fixo
+  { systemKey: TeamSystemKey.MARKETING, name: 'Marketing' },
 ];
 const ADMIN_LOCKED = 'A equipe Admin tem acesso total e não pode ser alterada.';
 
@@ -67,6 +69,9 @@ export class TeamService {
       if (screen.viewOnly && level === AccessLevel.EDIT) {
         throw new BadRequestException(`${screen.label} só pode ser Visualizar ou Sem acesso.`);
       }
+      if (screen.adminOnly && level !== AccessLevel.NONE) {
+        throw new BadRequestException(`${screen.label} é exclusiva da equipe Admin.`);
+      }
       if (screen.parent && level !== AccessLevel.NONE && !hasLevel(permissions[screen.parent], AccessLevel.VIEW)) {
         throw new BadRequestException(`${screen.label} exige ao menos Visualizar em ${SCREEN_BY_KEY[screen.parent].label}.`);
       }
@@ -103,8 +108,9 @@ export class TeamService {
   }
 
   /**
-   * Garante as 4 equipes padrão (Admin, Financeiro, Voluntário Fixo, Voluntário Volante).
-   * Equipe já existente com o mesmo nome vira a padrão, mantendo membros e acesso; as que faltam nascem sem acesso.
+   * Garante as 5 equipes padrão (Admin, Financeiro, Voluntário Fixo, Voluntário Volante, Marketing).
+   * Equipe já existente com o mesmo nome vira a padrão, mantendo membros e acesso; as que faltam nascem sem acesso,
+   * exceto Marketing (cópia única da matriz do Voluntário Fixo + Marketing Editar).
    */
   async ensureDefaultTeams(organizationId: string) {
     const admin = await this.ensureAdminTeam(organizationId);
@@ -113,11 +119,13 @@ export class TeamService {
       const sameName = await this.teamRepository.findOne({ where: { organizationId, name } });
       if (sameName) {
         await this.teamRepository.update(sameName.id, { systemKey, isActive: true });
+        if (systemKey === TeamSystemKey.MARKETING) await this.grantMarketingEditIfMissing(sameName.id);
         continue;
       }
-      await this.teamRepository.save(
+      const created = await this.teamRepository.save(
         this.teamRepository.create({ name, organizationId, systemKey, isActive: true, accessConfiguredAt: new Date() }),
       );
+      if (systemKey === TeamSystemKey.MARKETING) await this.copyFixedVolunteerAccess(created.id, organizationId);
     }
     return admin;
   }
@@ -126,6 +134,22 @@ export class TeamService {
   async systemTeam(organizationId: string, systemKey: TeamSystemKey) {
     await this.ensureDefaultTeams(organizationId);
     return this.teamRepository.findOne({ where: { organizationId, systemKey } });
+  }
+
+  /** Matriz atual do Voluntário Fixo + Marketing Editar, sem a Configuração (só Admin). Cópia única: depois as equipes são independentes. */
+  private async copyFixedVolunteerAccess(teamId: string, organizationId: string) {
+    const fixed = await this.teamRepository.findOne({ where: { organizationId, systemKey: TeamSystemKey.FIXED_VOLUNTEER } });
+    const copied = fixed ? await this.permissionRepository.find({ where: { teamId: fixed.id } }) : [];
+    const rows = copied
+      .filter((row) => row.screen !== Screen.MARKETING && row.screen !== Screen.MARKETING_SETTINGS)
+      .map((row) => ({ teamId, screen: row.screen, level: row.level }));
+    await this.permissionRepository.save([...rows, { teamId, screen: Screen.MARKETING, level: AccessLevel.EDIT }]);
+  }
+
+  /** Equipe adotada como Marketing recebe Editar no quadro se ainda não tiver linha para ele (não rebaixa nem altera o resto). */
+  private async grantMarketingEditIfMissing(teamId: string) {
+    if (await this.permissionRepository.findOne({ where: { teamId, screen: Screen.MARKETING } })) return;
+    await this.permissionRepository.save({ teamId, screen: Screen.MARKETING, level: AccessLevel.EDIT });
   }
 
   private async permissionsOf(team: Team): Promise<ScreenPermissions> {

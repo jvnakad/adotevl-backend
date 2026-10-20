@@ -94,6 +94,24 @@ describe('TeamService', () => {
     });
   });
 
+  describe('telas do Marketing', () => {
+    beforeEach(() => repo.findOne.mockResolvedValue({ id: 't1', name: 'Resgate', isAdmin: false }));
+
+    it('Configuração do Marketing exige ao menos Visualizar em Marketing, mas é exclusiva da equipe Admin', async () => {
+      await expect(service.setPermissions('t1', { [Screen.MARKETING_SETTINGS]: AccessLevel.VIEW }, 'admin-1')).rejects.toThrow(
+        new BadRequestException('Configuração do Marketing é exclusiva da equipe Admin.'),
+      );
+      expect(permissionRepo.delete).not.toHaveBeenCalled();
+    });
+
+    it('Marketing aceita Visualizar e Editar; a equipe Admin tem Editar nas duas telas', async () => {
+      await service.setPermissions('t1', { [Screen.MARKETING]: AccessLevel.EDIT }, 'admin-1');
+
+      expect(permissionRepo.save).toHaveBeenCalledWith([{ teamId: 't1', screen: Screen.MARKETING, level: AccessLevel.EDIT, updatedBy: 'admin-1' }]);
+      expect(ADMIN_PERMISSIONS).toMatchObject({ [Screen.MARKETING]: AccessLevel.EDIT, [Screen.MARKETING_SETTINGS]: AccessLevel.EDIT });
+    });
+  });
+
   describe('equipes padrão', () => {
     it('ensureDefaultTeams cria as que faltam, sem acesso, marcadas como padrão', async () => {
       // Admin já existe; demais não
@@ -106,8 +124,76 @@ describe('TeamService', () => {
         ['Financeiro', 'FINANCIAL'],
         ['Voluntário Fixo', 'FIXED_VOLUNTEER'],
         ['Voluntário Volante', 'FLOATING_VOLUNTEER'],
+        ['Marketing', 'MARKETING'],
       ]);
       expect(repo.save).toHaveBeenCalledWith(expect.objectContaining({ organizationId: 'org-1', isActive: true, accessConfiguredAt: expect.any(Date) }));
+      // Só a Marketing nasce com acesso (Marketing Editar; o Voluntário Fixo recém-criado ainda não tem matriz)
+      expect(permissionRepo.save).toHaveBeenCalledTimes(1);
+      expect(permissionRepo.save).toHaveBeenCalledWith([{ teamId: undefined, screen: Screen.MARKETING, level: AccessLevel.EDIT }]);
+    });
+
+    it('equipe Marketing nova copia a matriz do Voluntário Fixo + Marketing Editar, sem a Configuração', async () => {
+      repo.findOne.mockImplementation(async ({ where }) => {
+        if (where.isAdmin) return { id: 't0', isAdmin: true, systemKey: 'ADMIN' };
+        if (where.systemKey === 'MARKETING') return null;
+        if (where.systemKey) return { id: 't-fixed', systemKey: where.systemKey };
+        return null;
+      });
+      repo.save.mockImplementation(async (team) => ({ ...team, id: 't-mkt' }));
+      permissionRepo.find.mockResolvedValue([
+        { screen: Screen.PETS, level: AccessLevel.EDIT },
+        { screen: Screen.ADOPTION_HISTORY, level: AccessLevel.VIEW },
+        { screen: Screen.MARKETING_SETTINGS, level: AccessLevel.EDIT },
+      ]);
+
+      await service.ensureDefaultTeams('org-1');
+
+      expect(permissionRepo.find).toHaveBeenCalledWith({ where: { teamId: 't-fixed' } });
+      expect(permissionRepo.save).toHaveBeenCalledWith([
+        { teamId: 't-mkt', screen: Screen.PETS, level: AccessLevel.EDIT },
+        { teamId: 't-mkt', screen: Screen.ADOPTION_HISTORY, level: AccessLevel.VIEW },
+        { teamId: 't-mkt', screen: Screen.MARKETING, level: AccessLevel.EDIT },
+      ]);
+    });
+
+    it('equipe Marketing já criada não é copiada de novo (cópia única)', async () => {
+      repo.findOne.mockImplementation(async ({ where }) => (where.isAdmin ? { id: 't0', isAdmin: true, systemKey: 'ADMIN' } : { id: 'x', systemKey: where.systemKey }));
+
+      await service.ensureDefaultTeams('org-1');
+
+      expect(repo.save).not.toHaveBeenCalled();
+      expect(permissionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('equipe existente chamada Marketing é adotada, mantém o acesso e recebe Marketing Editar se não tiver', async () => {
+      repo.findOne.mockImplementation(async ({ where }) => {
+        if (where.isAdmin) return { id: 't0', isAdmin: true, systemKey: 'ADMIN' };
+        if (where.systemKey === 'MARKETING') return null;
+        if (where.name === 'Marketing') return { id: 't-old', name: 'Marketing', systemKey: null };
+        if (where.systemKey) return { id: `t-${where.systemKey}`, systemKey: where.systemKey };
+        return null;
+      });
+      permissionRepo.findOne.mockResolvedValue(null);
+
+      await service.ensureDefaultTeams('org-1');
+
+      expect(repo.update).toHaveBeenCalledWith('t-old', { systemKey: 'MARKETING', isActive: true });
+      expect(permissionRepo.delete).not.toHaveBeenCalled();
+      expect(permissionRepo.save).toHaveBeenCalledWith({ teamId: 't-old', screen: Screen.MARKETING, level: AccessLevel.EDIT });
+    });
+
+    it('equipe adotada que já tem linha para Marketing não é alterada', async () => {
+      repo.findOne.mockImplementation(async ({ where }) => {
+        if (where.isAdmin) return { id: 't0', isAdmin: true, systemKey: 'ADMIN' };
+        if (where.systemKey === 'MARKETING') return null;
+        if (where.name === 'Marketing') return { id: 't-old', name: 'Marketing', systemKey: null };
+        if (where.systemKey) return { id: `t-${where.systemKey}`, systemKey: where.systemKey };
+        return null;
+      });
+      permissionRepo.findOne.mockResolvedValue({ screen: Screen.MARKETING, level: AccessLevel.VIEW });
+
+      await service.ensureDefaultTeams('org-1');
+
       expect(permissionRepo.save).not.toHaveBeenCalled();
     });
 

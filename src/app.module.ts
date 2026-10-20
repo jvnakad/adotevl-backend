@@ -53,6 +53,16 @@ import { Product } from './stock/product.entity';
 import { StockHistoryEvent } from './stock/stock-history.entity';
 import { NullByteModule } from './common/null-byte.middleware';
 import { StockModule } from './stock/stock.module';
+import { MarketingModule } from './marketing/marketing.module';
+import { MarketingList } from './marketing/entities/marketing-list.entity';
+import { MarketingLabel } from './marketing/entities/marketing-label.entity';
+import { MarketingCard } from './marketing/entities/marketing-card.entity';
+import { MarketingCardMember } from './marketing/entities/marketing-card-member.entity';
+import { MarketingCardLabel } from './marketing/entities/marketing-card-label.entity';
+import { MarketingCardTask } from './marketing/entities/marketing-card-task.entity';
+import { MarketingCardAttachment } from './marketing/entities/marketing-card-attachment.entity';
+import { MarketingCardComment } from './marketing/entities/marketing-card-comment.entity';
+import { MarketingHistoryEvent } from './marketing/entities/marketing-history-event.entity';
 
 @Module({
   imports: [
@@ -61,7 +71,7 @@ import { StockModule } from './stock/stock.module';
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ProductType, Product, StockHistoryEvent],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ProductType, Product, StockHistoryEvent, MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),
@@ -86,6 +96,7 @@ import { StockModule } from './stock/stock.module';
     AdoptionContractModule,
     VolunteerScheduleModule,
     StockModule,
+    MarketingModule,
     NullByteModule,
     AutentiqueModule,
     WebhooksModule,

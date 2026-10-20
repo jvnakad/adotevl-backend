@@ -111,13 +111,14 @@ export class NotificationService {
   async markRead(id: string, userId: string) {
     const notification = await this.repository.findOne({ where: { id, userId } });
     if (!notification) throw new NotFoundException('Notificação não encontrada.');
-    if (!notification.readAt) {
-      notification.readAt = new Date();
-      await this.repository.save(notification);
-    }
-    const unreadCount = await this.unreadCount(userId);
-    await this.realtime.emitToUser(userId, NOTIFICATION_READ_EVENT, { ids: [id], all: false, unreadCount, clientId: currentClientId() });
-    return { unreadCount };
+    const unreadCount = async () => this.unreadCount(userId);
+    // Já lida: idempotente, não grava nem emite notification.read de novo
+    if (notification.readAt) return { unreadCount: await unreadCount() };
+    notification.readAt = new Date();
+    await this.repository.save(notification);
+    const count = await unreadCount();
+    await this.realtime.emitToUser(userId, NOTIFICATION_READ_EVENT, { ids: [id], all: false, unreadCount: count, clientId: currentClientId() });
+    return { unreadCount: count };
   }
 
   async markAllRead(userId: string) {

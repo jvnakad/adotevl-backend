@@ -297,6 +297,7 @@ export class MarketingCardService {
       const card = await requireCard(manager, id, organizationId, { lock: true, mutation: true });
       const userName = await this.history.resolveUserName(manager, userId);
       let edited = false;
+      if (dto.baseVersion !== undefined && dto.baseVersion > card.version) throw new BadRequestException('Versão do card inválida. Atualize o card.');
 
       // Trocar a fila pelo detalhe = mover para o fim da fila (mesmo evento do arrastar)
       if (dto.listId !== undefined && dto.listId !== card.listId) {

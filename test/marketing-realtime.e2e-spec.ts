@@ -488,7 +488,10 @@ describe('Marketing: tempo real e notificações (e2e)', () => {
       expect(res.body).toEqual({ unreadCount: unread.length - 1 });
       expect(await readOnTabB).toEqual({ ids: [target.id], all: false, unreadCount: unread.length - 1, clientId: 'aba-A' });
       expect((await readOnTabA).clientId).toBe('aba-A');
+      const repeated = collect(tabB, 'notification.read');
       expect((await call('patch', `/notifications/${target.id}/read`, 'editor2')).body).toEqual({ unreadCount: unread.length - 1 });
+      await pause(300);
+      expect(repeated).toEqual([]);
 
       const stillUnread = await mine('editor2', '&unread=true');
       expect(stillUnread.items).toHaveLength(unread.length - 1);

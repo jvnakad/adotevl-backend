@@ -109,9 +109,13 @@ describe('NotificationService', () => {
     it('já lida mantém a data (não grava de novo)', async () => {
       repo.findOne.mockResolvedValue({ id: 'n1', userId: 'u1', readAt: new Date('2026-10-01') });
 
-      await service.markRead('n1', 'u1');
+      repo.count.mockResolvedValue(2);
 
+      const result = await service.markRead('n1', 'u1');
+
+      expect(result).toEqual({ unreadCount: 2 });
       expect(repo.save).not.toHaveBeenCalled();
+      expect(realtime.emitToUser).not.toHaveBeenCalled();
     });
 
     it('notificação de outro usuário ou inexistente é 404 (busca sempre pelo dono)', async () => {

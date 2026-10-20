@@ -1101,6 +1101,17 @@ describe('Marketing (e2e)', () => {
       expect([res.status, res.body.fields]).toEqual([409, ['labels']]);
     });
 
+    it('baseVersion maior que a versão atual é 400 e nada é gravado', async () => {
+      const current = (await detail()).version;
+
+      const res = await patch('editor', { title: 'Futuro', baseVersion: current + 1 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Versão do card inválida. Atualize o card.');
+      expect((await detail()).version).toBe(current);
+      expect((await patch('editor', { description: 'ok', baseVersion: current })).status).toBe(200);
+    });
+
     it('card arquivado: 409 card_archived em qualquer alteração; baseVersion inválida é 400', async () => {
       expect((await patch('editor', { title: 'x', baseVersion: 0 })).status).toBe(400);
       expect((await patch('editor', { title: 'x', baseVersion: 'a' })).status).toBe(400);

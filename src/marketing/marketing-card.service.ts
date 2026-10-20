@@ -31,6 +31,8 @@ import { isImageMime, toAttachmentResponse, toTaskResponse } from './marketing-p
 import { normalizeName, toLikeTerm } from '../common/normalize-name';
 import { todayInBrazil } from '../volunteer-schedule/schedule-time';
 import { StorageService } from '../storage/storage.service';
+import { MarketingNotifier } from './marketing-notifier.service';
+import { MarketingRealtimeService, MARKETING_EVENTS } from './marketing-realtime.service';
 
 const MAX_CALENDAR_DAYS = 370;
 const dayDiff = (from: string, to: string) => Math.round((Date.parse(to + 'T00:00:00Z') - Date.parse(from + 'T00:00:00Z')) / 86400000);
@@ -46,6 +48,8 @@ export class MarketingCardService {
     private readonly eligibility: MarketingEligibilityService,
     private readonly lists: MarketingListService,
     private readonly storage: StorageService,
+    private readonly rt: MarketingRealtimeService,
+    private readonly notifier: MarketingNotifier,
   ) {}
 
   /** Usuários que podem ser membro, responsável ou mencionado (Editar em Marketing). */
@@ -224,7 +228,7 @@ export class MarketingCardService {
   // ---- escrita ----
 
   async create(dto: CreateMarketingCardDto, userId: string, organizationId: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const list = await this.lockList(manager, dto.listId, organizationId);
       const userName = await this.history.resolveUserName(manager, userId);
       const siblings = await this.activeCards(manager, list.id);
@@ -257,11 +261,13 @@ export class MarketingCardService {
       });
       return this.readDetail(manager, card.id, organizationId);
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.CARD_CREATED, result.id);
+    return result;
   }
 
   /** Arrastar: fila + vizinhos visíveis (afterCardId/beforeCardId). O servidor recalcula a position com o estado travado e devolve o resultado final. */
   async move(id: string, dto: MoveMarketingCardDto, userId: string, organizationId: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const card = await requireCard(manager, id, organizationId, { lock: true, mutation: true });
       const userName = await this.history.resolveUserName(manager, userId);
       if (dto.position === 'last' && (dto.afterCardId || dto.beforeCardId)) {
@@ -270,6 +276,14 @@ export class MarketingCardService {
       const moved = await this.moveInTransaction(manager, card, dto.listId, dto.position === 'last' ? null : dto, userId, userName);
       return { id: card.id, fromListId: card.listId, listId: dto.listId, position: moved.position, renumbered: moved.renumbered };
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.CARD_MOVED, id, {
+      fromListId: result.fromListId,
+      renumbered: result.renumbered,
+      afterCardId: dto.position === 'last' ? null : (dto.afterCardId ?? null),
+      beforeCardId: dto.position === 'last' ? null : (dto.beforeCardId ?? null),
+    });
+    if (result.fromListId !== result.listId) await this.notifier.cardMoved(organizationId, id, userId, result.fromListId, result.listId);
+    return result;
   }
 
   async update(id: string, dto: UpdateMarketingCardDto, userId: string, organizationId: string) {
@@ -277,14 +291,18 @@ export class MarketingCardService {
     if (dto.title === null) throw new BadRequestException('Informe o título do card.');
     if (dto.listId === null) throw new BadRequestException('Escolha a fila.');
 
-    return this.dataSource.transaction(async (manager) => {
+    // O que mudou, para o evento em tempo real e as notificações (depois do commit)
+    const notice = { fields: [] as string[], addedMemberIds: [] as string[], moved: null as { fromListId: string; toListId: string } | null };
+    const detail = await this.dataSource.transaction(async (manager) => {
       const card = await requireCard(manager, id, organizationId, { lock: true, mutation: true });
       const userName = await this.history.resolveUserName(manager, userId);
       let edited = false;
 
       // Trocar a fila pelo detalhe = mover para o fim da fila (mesmo evento do arrastar)
       if (dto.listId !== undefined && dto.listId !== card.listId) {
-        await this.moveInTransaction(manager, card, dto.listId, null, userId, userName);
+        const moved = await this.moveInTransaction(manager, card, dto.listId, null, userId, userName);
+        notice.moved = { fromListId: moved.fromListId, toListId: moved.toListId };
+        notice.fields.push('list');
       }
 
       const patch: Partial<MarketingCard> = {};
@@ -308,7 +326,8 @@ export class MarketingCardService {
         patch.publishDate = dto.publishDate ?? null;
       }
       const title = patch.title ?? card.title;
-      const event = { organizationId, card: { id: card.id, title }, userId, userName };
+      const newVersion = card.version + 1;
+      const event = { organizationId, card: { id: card.id, title }, userId, userName, version: newVersion };
 
       if (fieldChanges.length) {
         edited = true;
@@ -328,13 +347,48 @@ export class MarketingCardService {
           metadata: { fields: dateChanges },
         });
       }
-      if (dto.memberIds !== undefined) edited = (await this.syncMembers(manager, card, dto.memberIds, event)) || edited;
-      if (dto.labelIds !== undefined) edited = (await this.syncLabels(manager, card, dto.labelIds, event)) || edited;
+      notice.fields.push(...fieldChanges.map((change) => change.field), ...dateChanges.map((change) => change.field));
+      if (dto.memberIds !== undefined && (await this.syncMembers(manager, card, dto.memberIds, event, notice.addedMemberIds))) {
+        edited = true;
+        notice.fields.push('members');
+      }
+      if (dto.labelIds !== undefined && (await this.syncLabels(manager, card, dto.labelIds, event))) {
+        edited = true;
+        notice.fields.push('labels');
+      }
 
-      // Sem mudança real: nada é gravado (mover não conta como edição)
-      if (edited) await manager.update(MarketingCard, { id }, { ...patch, updatedBy: userId, updatedByName: userName });
+      // Conflito: outra pessoa alterou, depois da versão que o cliente tinha, algum dos campos que ele quer mudar. Desfaz tudo (rollback)
+      if (dto.baseVersion !== undefined && dto.baseVersion < card.version && notice.fields.length) {
+        const changedSince = await this.fieldsChangedSince(manager, id, dto.baseVersion, card.version);
+        const colliding = notice.fields.filter((field) => changedSince.has(field));
+        if (colliding.length) throw new CardConflictSignal(colliding);
+      }
+
+      // Sem mudança real: nada é gravado (mover não conta como edição). A versão sobe uma vez por salvamento
+      if (notice.fields.length) await manager.update(MarketingCard, { id }, { ...patch, version: newVersion, ...(edited ? { updatedBy: userId, updatedByName: userName } : {}) });
       return this.readDetail(manager, id, organizationId);
+    }).catch(async (error) => {
+      if (error instanceof CardConflictSignal) {
+        throw new ConflictException({
+          statusCode: 409,
+          error: 'Conflict',
+          code: 'card_conflict',
+          message: 'Este card foi alterado por outra pessoa nos mesmos campos.',
+          fields: error.fields,
+          current: await this.readDetail(this.dataSource.manager, id, organizationId),
+        });
+      }
+      throw error;
     });
+    if (notice.fields.length) {
+      await this.rt.publishCard(organizationId, userId, notice.moved && notice.fields.length === 1 ? MARKETING_EVENTS.CARD_MOVED : MARKETING_EVENTS.CARD_UPDATED, id, {
+        fields: notice.fields,
+        ...(notice.moved ? { fromListId: notice.moved.fromListId, afterCardId: null, beforeCardId: null } : {}),
+      });
+    }
+    if (notice.addedMemberIds.length) await this.notifier.membersAdded(organizationId, id, notice.addedMemberIds, userId);
+    if (notice.moved) await this.notifier.cardMoved(organizationId, id, userId, notice.moved.fromListId, notice.moved.toListId);
+    return detail;
   }
 
   async archive(id: string, userId: string, organizationId: string) {
@@ -353,12 +407,13 @@ export class MarketingCardService {
         userName,
       });
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.CARD_ARCHIVED, id);
     return { message: 'Card arquivado com sucesso.' };
   }
 
   /** Admin: volta ao fim da fila de origem; se ela foi excluída, ao fim da primeira fila ativa. */
   async restore(id: string, userId: string, organizationId: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const card = await requireCard(manager, id, organizationId, { lock: true });
       if (card.isActive) throw new ConflictException('Este card não está arquivado.');
       const userName = await this.history.resolveUserName(manager, userId);
@@ -384,11 +439,13 @@ export class MarketingCardService {
       });
       return this.readDetail(manager, id, organizationId);
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.CARD_RESTORED, id);
+    return result;
   }
 
   /** Capa manual ("definir como capa"): imagem ativa do próprio card, ou null para remover. Não gera evento. */
-  async setCover(id: string, attachmentId: string | null, organizationId: string) {
-    return this.dataSource.transaction(async (manager) => {
+  async setCover(id: string, attachmentId: string | null, userId: string, organizationId: string) {
+    const result = await this.dataSource.transaction(async (manager) => {
       await requireCard(manager, id, organizationId, { lock: true, mutation: true });
       if (attachmentId) {
         const attachment = await manager.findOne(MarketingCardAttachment, { where: { id: attachmentId, cardId: id, isActive: true } });
@@ -397,6 +454,8 @@ export class MarketingCardService {
       await manager.update(MarketingCard, { id }, { coverAttachmentId: attachmentId });
       return this.readDetail(manager, id, organizationId);
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.ATTACHMENT_CHANGED, id, { action: 'cover', attachmentIds: attachmentId ? [attachmentId] : [] });
+    return result;
   }
 
   // ---- internos ----
@@ -459,6 +518,7 @@ export class MarketingCardService {
         listId: card.listId,
         list: list ? { id: list.id, name: list.name, color: list.color, isFinal: list.isFinal } : null,
         position: card.position,
+        version: card.version,
         title: card.title,
         dueDate: card.dueDate ?? null,
         publishDate: card.publishDate ?? null,
@@ -509,10 +569,13 @@ export class MarketingCardService {
       card.id,
       placement ? indexFromNeighbours(siblings.map((sibling) => sibling.id), placement.afterCardId ?? null, placement.beforeCardId ?? null) : siblings.length,
     );
-    await manager.update(MarketingCard, { id: card.id }, { listId: target.id, position });
+    const changedList = from.id !== target.id;
+    // Trocar de fila altera um campo do card (sobe a versão); reordenar na mesma fila não
+    await manager.update(MarketingCard, { id: card.id }, { listId: target.id, position, ...(changedList ? { version: card.version + 1 } : {}) });
 
-    if (from.id !== target.id) {
+    if (changedList) {
       await this.history.record(manager, {
+        version: card.version + 1,
         organizationId: card.organizationId,
         type: MarketingHistoryType.CARD_MOVIDO,
         card,
@@ -523,11 +586,11 @@ export class MarketingCardService {
         userName,
       });
     }
-    return { position, renumbered };
+    return { position, renumbered, fromListId: from.id, toListId: target.id };
   }
 
   /** Conjunto completo de membros. Quem entra precisa ser elegível; quem já era membro e perdeu o Editar pode ficar (P-06). */
-  private async syncMembers(manager: EntityManager, card: MarketingCard, desired: string[], event: EventBase) {
+  private async syncMembers(manager: EntityManager, card: MarketingCard, desired: string[], event: EventBase, added: string[] = []) {
     const current = (await manager.find(MarketingCardMember, { where: { cardId: card.id } })).map((member) => member.userId);
     const toAdd = desired.filter((userId) => !current.includes(userId));
     const toRemove = current.filter((userId) => !desired.includes(userId));
@@ -540,6 +603,7 @@ export class MarketingCardService {
     const removedNames = toRemove.length ? await this.userNames(manager, toRemove) : new Map<string, string>();
 
     if (toAdd.length) await manager.insert(MarketingCardMember, toAdd.map((userId) => ({ cardId: card.id, userId, createdBy: event.userId })));
+    added.push(...toAdd);
     if (toRemove.length) await manager.delete(MarketingCardMember, { cardId: card.id, userId: In(toRemove) });
     for (const user of eligible) {
       await this.history.record(manager, {
@@ -583,6 +647,23 @@ export class MarketingCardService {
     for (const label of added) await record(MarketingHistoryType.ETIQUETA_ADICIONADA, label, 'adicionada ao');
     for (const label of removed) await record(MarketingHistoryType.ETIQUETA_REMOVIDA, label, 'removida do');
     return true;
+  }
+
+  /** Campos do card alterados depois de `baseVersion` até a versão atual (exclui os eventos desta própria transação, que já têm a próxima versão). */
+  private async fieldsChangedSince(manager: EntityManager, cardId: string, baseVersion: number, currentVersion: number) {
+    const events: { type: MarketingHistoryType; metadata: { fields?: { field: string }[] } | null }[] = await manager.query(
+      `SELECT type, metadata FROM marketing_history_events WHERE card_id = $1 AND version > $2 AND version <= $3`,
+      [cardId, baseVersion, currentVersion],
+    );
+    const fields = new Set<string>();
+    for (const event of events) {
+      if (event.type === MarketingHistoryType.CARD_EDITADO || event.type === MarketingHistoryType.DATAS_ALTERADAS) {
+        for (const item of event.metadata?.fields ?? []) fields.add(item.field);
+      } else if (event.type === MarketingHistoryType.MEMBRO_ADICIONADO || event.type === MarketingHistoryType.MEMBRO_REMOVIDO) fields.add('members');
+      else if (event.type === MarketingHistoryType.ETIQUETA_ADICIONADA || event.type === MarketingHistoryType.ETIQUETA_REMOVIDA) fields.add('labels');
+      else if (event.type === MarketingHistoryType.CARD_MOVIDO) fields.add('list');
+    }
+    return fields;
   }
 
   private async userNames(manager: EntityManager, userIds: string[]) {
@@ -635,6 +716,7 @@ export class MarketingCardService {
       list: { id: list.id, name: list.name, color: list.color, isFinal: list.isFinal, isActive: list.isActive },
       listId: card.listId,
       position: card.position,
+      version: card.version,
       dueDate: card.dueDate ?? null,
       publishDate: card.publishDate ?? null,
       ...dueInfo(card.isActive ? card.dueDate ?? null : null, list.isFinal),
@@ -665,4 +747,11 @@ export class MarketingCardService {
   }
 }
 
-type EventBase = { organizationId: string; card: { id: string; title: string }; userId: string; userName: string };
+type EventBase = { organizationId: string; card: { id: string; title: string }; userId: string; userName: string; version?: number };
+
+/** Lançada dentro da transação do PATCH para desfazê-la; vira 409 card_conflict. */
+class CardConflictSignal extends Error {
+  constructor(readonly fields: string[]) {
+    super('card_conflict');
+  }
+}

@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { EntityManager } from 'typeorm';
 import { MarketingCard } from './entities/marketing-card.entity';
 
@@ -16,6 +16,6 @@ export async function requireCard(manager: EntityManager, id: string, organizati
     ...(options.lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
   });
   if (!card) throw new NotFoundException(CARD_NOT_FOUND);
-  if (options.mutation && !card.isActive) throw new BadRequestException(CARD_ARCHIVED);
+  if (options.mutation && !card.isActive) throw new ConflictException({ statusCode: 409, error: 'Conflict', code: 'card_archived', message: CARD_ARCHIVED });
   return card;
 }

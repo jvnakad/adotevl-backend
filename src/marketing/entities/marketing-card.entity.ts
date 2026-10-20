@@ -61,6 +61,14 @@ export class MarketingCard {
   @Column({ name: 'title_normalized', type: 'varchar', length: 500 })
   titleNormalized: string;
 
+  /**
+   * Versão dos CAMPOS do card (título, descrição, datas, fila, membros, etiquetas): começa em 1 e sobe 1 a cada alteração real.
+   * O cliente envia baseVersion no PATCH; os campos alterados desde ela vêm dos eventos do histórico com version > baseVersion.
+   * Mover dentro da mesma fila, arquivar, subtarefas, anexos e comentários não mudam a versão.
+   */
+  @Column({ type: 'integer', default: 1 })
+  version: number;
+
   /** Texto livre com quebras de linha; null no lugar de string vazia */
   @Column({ type: 'text', nullable: true })
   description: string | null;

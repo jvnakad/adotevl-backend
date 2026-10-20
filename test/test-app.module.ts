@@ -56,6 +56,9 @@ import { StockHistoryEvent } from '../src/stock/stock-history.entity';
 import { NullByteModule } from '../src/common/null-byte.middleware';
 import { StockModule } from '../src/stock/stock.module';
 import { MarketingModule } from '../src/marketing/marketing.module';
+import { RealtimeModule } from '../src/realtime/realtime.module';
+import { NotificationModule } from '../src/notification/notification.module';
+import { Notification } from '../src/notification/notification.entity';
 import { MarketingList } from '../src/marketing/entities/marketing-list.entity';
 import { MarketingLabel } from '../src/marketing/entities/marketing-label.entity';
 import { MarketingCard } from '../src/marketing/entities/marketing-card.entity';
@@ -171,7 +174,7 @@ class MockAutentiqueModule {}
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
         AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ProductType, Product, StockHistoryEvent,
-        MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent,
+        MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification,
       ],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
@@ -195,6 +198,8 @@ class MockAutentiqueModule {}
     AdoptionContractModule,
     VolunteerScheduleModule,
     StockModule,
+    RealtimeModule,
+    NotificationModule,
     MarketingModule,
     NullByteModule,
     WebhooksModule,
@@ -229,6 +234,7 @@ export async function cleanupAccess(app: INestApplication, organizationId: strin
   const dataSource = app.get(DataSource);
   // O seed das filas do Marketing roda no boot para toda organização: sem limpar, o FK RESTRICT impede apagar a organização de qualquer suíte
   await cleanupMarketing(app, organizationId);
+  await dataSource.query('DELETE FROM notifications WHERE organization_id = $1', [organizationId]);
   await dataSource.query('DELETE FROM volunteers WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [organizationId]);
   await dataSource.query('DELETE FROM teams WHERE organization_id = $1', [organizationId]);
 }

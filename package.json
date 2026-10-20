@@ -24,9 +24,11 @@
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^11.0.1",
+    "@nestjs/platform-socket.io": "^11.2.7",
     "@nestjs/swagger": "^11.2.6",
     "@nestjs/throttler": "^6.7.1",
     "@nestjs/typeorm": "^11.0.0",
+    "@nestjs/websockets": "^11.2.7",
     "@supabase/supabase-js": "^2.117.2",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.10.0",
@@ -41,6 +43,7 @@
     "reflect-metadata": "^0.2.0",
     "resend": "^6.4.2",
     "rxjs": "^7.2.0",
+    "socket.io": "^4.8.4",
     "typeorm": "^0.3.28"
   },
   "devDependencies": {
@@ -64,6 +67,7 @@
     "jest": "30.2.0",
     "nodemon": "3.1.10",
     "prettier": "3.6.2",
+    "socket.io-client": "^4.8.4",
     "supertest": "7.1.4",
     "ts-jest": "^29.4.9",
     "ts-node": "^10.9.2",

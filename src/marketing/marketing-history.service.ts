@@ -20,6 +20,8 @@ export interface RecordMarketingEventParams {
   toList?: MarketingListRef | null;
   description: string;
   metadata?: Record<string, any> | null;
+  /** Versão do card produzida pelo evento (eventos que alteram campos do card) */
+  version?: number | null;
   userId: string;
   userName: string;
 }
@@ -52,6 +54,7 @@ export class MarketingHistoryService {
       toListName: params.toList?.name ?? null,
       description: params.description,
       metadata: params.metadata ?? null,
+      version: params.version ?? null,
       userId: params.userId,
       userName: params.userName,
     });

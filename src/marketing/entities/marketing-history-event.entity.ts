@@ -85,6 +85,10 @@ export class MarketingHistoryEvent {
   @Column({ name: 'to_list_name', type: 'varchar', length: 100, nullable: true })
   toListName: string | null;
 
+  /** Versão do card produzida por este evento (só eventos que alteram campos do card; null nos demais). Base da detecção de conflito */
+  @Column({ type: 'integer', nullable: true })
+  version: number | null;
+
   /** Texto pronto em PT-BR */
   @Column({ type: 'text' })
   description: string;

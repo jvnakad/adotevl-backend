@@ -570,7 +570,9 @@ describe('Marketing (e2e)', () => {
 
       expect((await call('post', `/marketing/cards/${temp.id}/archive`, 'editor')).status).toBe(201);
       expect((await board()).lists.flatMap((l) => l.cards).some((c) => c.id === temp.id)).toBe(false);
-      expect((await call('patch', `/marketing/cards/${temp.id}`, 'editor', { title: 'Nope' })).status).toBe(400);
+      const blocked = await call('patch', `/marketing/cards/${temp.id}`, 'editor', { title: 'Nope' });
+      expect(blocked.status).toBe(409);
+      expect(blocked.body).toMatchObject({ code: 'card_archived' });
       expect((await call('get', '/marketing/cards/archived', 'viewer')).body.data.map((c) => c.id)).toContain(temp.id);
       expect((await call('post', `/marketing/cards/${temp.id}/restore`, 'editor')).status).toBe(403);
 
@@ -990,6 +992,125 @@ describe('Marketing (e2e)', () => {
       expect(res.status).toBe(200);
       const after = (await call('get', `/marketing/lists/${paginada.id}/cards?limit=100`, 'viewer')).body.data.map((card) => card.id);
       expect(after.indexOf(byTitle[pag(20)])).toBe(after.indexOf(visible[0].id) - 1);
+    });
+  });
+
+  // ---------------------------------------------------------------- versão e conflito
+
+  describe('versão do card e conflito de edição', () => {
+    let cardId: string;
+    let listA: string;
+    let listB: string;
+    const detail = async () => (await call('get', `/marketing/cards/${cardId}`, 'viewer')).body;
+    const patch = (who: string, body: object) => call('patch', `/marketing/cards/${cardId}`, who, body);
+
+    beforeAll(async () => {
+      const lists = (await call('get', '/marketing/lists', 'editor')).body;
+      listA = lists[0].id;
+      listB = lists[1].id;
+      cardId = (await call('post', '/marketing/cards', 'editor', { listId: listA, title: 'Versionado' })).body.id;
+    });
+
+    it('nasce na versão 1 e sobe a cada alteração real de campos; no-op, reordenar e itens do card não mudam', async () => {
+      expect((await detail()).version).toBe(1);
+      expect((await board()).lists.flatMap((l) => l.cards).find((c) => c.id === cardId).version).toBe(1);
+
+      expect((await patch('editor', { title: 'Versionado 2' })).body.version).toBe(2);
+      expect((await patch('editor', { title: 'Versionado 2' })).body.version).toBe(2);
+      expect((await patch('editor', { dueDate: '2026-12-01', description: 'd' })).body.version).toBe(3);
+      expect((await patch('editor', { memberIds: [ids.editor] })).body.version).toBe(4);
+      expect((await patch('editor', { labelIds: [ids.labelIg] })).body.version).toBe(5);
+
+      await call('post', `/marketing/cards/${cardId}/comments`, 'editor', { body: 'c' });
+      await call('post', `/marketing/cards/${cardId}/tasks`, 'editor', { title: 't' });
+      await call('patch', `/marketing/cards/${cardId}/move`, 'editor', { listId: listA, position: 'last' });
+      expect((await detail()).version).toBe(5);
+
+      await call('patch', `/marketing/cards/${cardId}/move`, 'editor', { listId: listB, position: 'last' });
+      expect((await detail()).version).toBe(6);
+      await call('patch', `/marketing/cards/${cardId}/move`, 'editor', { listId: listA, position: 'last' });
+      expect((await detail()).version).toBe(7);
+    });
+
+    it('campos diferentes desde a baseVersion são mesclados', async () => {
+      const base = (await detail()).version;
+      await patch('editor', { title: 'Título do editor' });
+
+      const merged = await patch('editor2', { description: 'Descrição do editor2', baseVersion: base });
+
+      expect(merged.status).toBe(200);
+      expect(merged.body).toMatchObject({ title: 'Título do editor', description: 'Descrição do editor2', version: base + 2 });
+    });
+
+    it('mesmo campo alterado desde a baseVersion: 409 card_conflict com os campos e o card atual; nada é gravado', async () => {
+      const base = (await detail()).version;
+      await patch('editor', { title: 'Título A', dueDate: '2026-12-09' });
+      const before = await detail();
+
+      const res = await patch('editor2', { title: 'Título B', description: 'Outra descrição', dueDate: '2026-12-20', baseVersion: base });
+
+      expect(res.status).toBe(409);
+      expect(res.body).toMatchObject({ statusCode: 409, code: 'card_conflict' });
+      expect([...res.body.fields].sort()).toEqual(['dueDate', 'title']);
+      expect(res.body.current).toMatchObject({ id: cardId, title: 'Título A', dueDate: '2026-12-09', version: before.version });
+      const after = await detail();
+      expect(after).toMatchObject({ title: 'Título A', description: before.description, version: before.version });
+    });
+
+    it('enviar o mesmo valor que já está salvo não é conflito; sem baseVersion vale o último a salvar', async () => {
+      const base = (await detail()).version;
+      await patch('editor', { title: 'Título C' });
+
+      const same = await patch('editor2', { title: 'Título C', baseVersion: base });
+      expect(same.status).toBe(200);
+      expect(same.body.version).toBe(base + 1);
+
+      const lww = await patch('editor2', { title: 'Título D' });
+      expect(lww.status).toBe(200);
+      expect(lww.body.title).toBe('Título D');
+    });
+
+    it('membros, etiquetas e fila também colidem', async () => {
+      let base = (await detail()).version;
+      await patch('editor', { memberIds: [ids.editor, ids.editor2] });
+      let res = await patch('editor2', { memberIds: [ids.editor2], baseVersion: base });
+      expect([res.status, res.body.code, res.body.fields]).toEqual([409, 'card_conflict', ['members']]);
+
+      base = (await detail()).version;
+      await patch('editor', { labelIds: [] });
+      res = await patch('editor2', { labelIds: [ids.labelIg], baseVersion: base });
+      expect([res.status, res.body.fields]).toEqual([409, ['labels']]);
+
+      base = (await detail()).version;
+      await call('patch', `/marketing/cards/${cardId}/move`, 'editor', { listId: listB, position: 'last' });
+      res = await patch('editor2', { listId: listA, baseVersion: base });
+      expect([res.status, res.body.fields]).toEqual([409, ['list']]);
+      // mover para a fila onde o card já está não é conflito
+      expect((await patch('editor2', { listId: listB, baseVersion: base })).status).toBe(200);
+    });
+
+    it('excluir uma etiqueta na Configuração sobe a versão dos cards afetados e conflita com quem editava as etiquetas', async () => {
+      const label = (await call('post', '/marketing/labels', 'admina', { name: 'Efêmera', color: '#222' })).body;
+      await patch('editor', { labelIds: [label.id] });
+      const base = (await detail()).version;
+
+      await call('delete', `/marketing/labels/${label.id}`, 'admina');
+
+      expect((await detail()).version).toBe(base + 1);
+      const res = await patch('editor2', { labelIds: [ids.labelIg], baseVersion: base });
+      expect([res.status, res.body.fields]).toEqual([409, ['labels']]);
+    });
+
+    it('card arquivado: 409 card_archived em qualquer alteração; baseVersion inválida é 400', async () => {
+      expect((await patch('editor', { title: 'x', baseVersion: 0 })).status).toBe(400);
+      expect((await patch('editor', { title: 'x', baseVersion: 'a' })).status).toBe(400);
+
+      await call('post', `/marketing/cards/${cardId}/archive`, 'editor');
+      const edit = await patch('editor', { title: 'Arquivado', baseVersion: 1 });
+      expect(edit.status).toBe(409);
+      expect(edit.body).toMatchObject({ statusCode: 409, code: 'card_archived' });
+      expect((await call('post', `/marketing/cards/${cardId}/comments`, 'editor', { body: 'x' })).body.code).toBe('card_archived');
+      await call('post', `/marketing/cards/${cardId}/restore`, 'admina');
     });
   });
 

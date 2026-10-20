@@ -10,6 +10,7 @@ import { MoveByIndexDto } from './dto/marketing-list.dto';
 import { requireCard } from './marketing-card.helper';
 import { resolvePosition } from './marketing-position';
 import { toTaskResponse } from './marketing-presenter';
+import { MarketingRealtimeService, MARKETING_EVENTS } from './marketing-realtime.service';
 
 const NOT_FOUND_MESSAGE = 'Subtarefa não encontrada.';
 const ASSIGNEE_MESSAGE = 'Só quem tem permissão de edição no Marketing pode ser responsável pela subtarefa.';
@@ -21,6 +22,7 @@ export class MarketingTaskService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly history: MarketingHistoryService,
     private readonly eligibility: MarketingEligibilityService,
+    private readonly rt: MarketingRealtimeService,
   ) {}
 
   async findAll(cardId: string, organizationId: string) {
@@ -33,7 +35,7 @@ export class MarketingTaskService {
   }
 
   async create(cardId: string, dto: CreateMarketingTaskDto, userId: string, organizationId: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       await requireCard(manager, cardId, organizationId, { lock: true, mutation: true });
       if (dto.assigneeId) await this.assertEligible(manager, organizationId, dto.assigneeId);
       const siblings = await this.activeTasks(manager, cardId);
@@ -51,13 +53,15 @@ export class MarketingTaskService {
       );
       return (await this.present(manager, [task]))[0];
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.TASK_CHANGED, cardId, { taskId: result.id, action: 'created' });
+    return result;
   }
 
   async update(cardId: string, taskId: string, dto: UpdateMarketingTaskDto, userId: string, organizationId: string) {
     if (dto.title === null) throw new BadRequestException('Informe o texto da subtarefa.');
     if (dto.isDone === null) throw new BadRequestException('Informe se a subtarefa está concluída.');
 
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const card = await requireCard(manager, cardId, organizationId, { lock: true, mutation: true });
       const task = await this.requireTask(manager, cardId, taskId);
 
@@ -87,10 +91,12 @@ export class MarketingTaskService {
       task.updatedBy = userId;
       return (await this.present(manager, [await manager.save(task)]))[0];
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.TASK_CHANGED, cardId, { taskId, action: 'updated' });
+    return result;
   }
 
   async move(cardId: string, taskId: string, dto: MoveByIndexDto, userId: string, organizationId: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       await requireCard(manager, cardId, organizationId, { lock: true, mutation: true });
       await this.requireTask(manager, cardId, taskId);
       const siblings = (await this.activeTasks(manager, cardId)).filter((task) => task.id !== taskId);
@@ -98,6 +104,8 @@ export class MarketingTaskService {
       await manager.update(MarketingCardTask, { id: taskId }, { position, updatedBy: userId });
       return { id: taskId, position, renumbered };
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.TASK_CHANGED, cardId, { taskId, action: 'moved' });
+    return result;
   }
 
   async remove(cardId: string, taskId: string, userId: string, organizationId: string) {
@@ -106,6 +114,7 @@ export class MarketingTaskService {
       await this.requireTask(manager, cardId, taskId);
       await manager.update(MarketingCardTask, { id: taskId }, { isActive: false, updatedBy: userId });
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.TASK_CHANGED, cardId, { taskId, action: 'deleted' });
     return { message: 'Subtarefa excluída com sucesso.' };
   }
 

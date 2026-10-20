@@ -23,6 +23,8 @@ import { MarketingAttachmentService } from './marketing-attachment.service';
 import { MarketingCommentService } from './marketing-comment.service';
 import { MarketingHistoryService } from './marketing-history.service';
 import { MarketingEligibilityService } from './marketing-eligibility.service';
+import { MarketingRealtimeService } from './marketing-realtime.service';
+import { MarketingNotifier } from './marketing-notifier.service';
 
 @Module({
   imports: [
@@ -48,6 +50,8 @@ import { MarketingEligibilityService } from './marketing-eligibility.service';
     MarketingCommentService,
     MarketingHistoryService,
     MarketingEligibilityService,
+    MarketingRealtimeService,
+    MarketingNotifier,
   ],
 })
 export class MarketingModule {}

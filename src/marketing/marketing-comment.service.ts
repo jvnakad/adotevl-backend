@@ -9,6 +9,8 @@ import { CreateMarketingCommentDto, UpdateMarketingCommentDto } from './dto/mark
 import { PaginationDto } from '../common/pagination.dto';
 import { requireCard } from './marketing-card.helper';
 import { toCommentResponse } from './marketing-presenter';
+import { MarketingNotifier } from './marketing-notifier.service';
+import { MarketingRealtimeService, MARKETING_EVENTS } from './marketing-realtime.service';
 
 const NOT_FOUND_MESSAGE = 'Comentário não encontrado.';
 const EXCERPT_LENGTH = 140;
@@ -19,6 +21,8 @@ export class MarketingCommentService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly history: MarketingHistoryService,
     private readonly eligibility: MarketingEligibilityService,
+    private readonly rt: MarketingRealtimeService,
+    private readonly notifier: MarketingNotifier,
   ) {}
 
   /** Mais recente primeiro. */
@@ -35,7 +39,7 @@ export class MarketingCommentService {
   }
 
   async create(cardId: string, dto: CreateMarketingCommentDto, userId: string, organizationId: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const card = await requireCard(manager, cardId, organizationId, { lock: true, mutation: true });
       const userName = await this.history.resolveUserName(manager, userId);
       const mentions = await this.resolveMentions(manager, organizationId, dto);
@@ -51,26 +55,37 @@ export class MarketingCommentService {
         userId,
         userName,
       });
-      // Ponto de extensão (C12): notificar aqui os mencionados (comment.mentions) e os membros do card, exceto o autor.
       return toCommentResponse(comment);
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.COMMENT_CHANGED, cardId, { commentId: result.id, action: 'created' });
+    await this.notifier.commentAdded(organizationId, cardId, userId, result.mentions.map((mention) => mention.userId), result.body.slice(0, EXCERPT_LENGTH));
+    return result;
   }
 
   /** Só o autor edita. Só marca edited_at (sem evento no histórico); sem mudança no texto nada é gravado. */
   async update(cardId: string, commentId: string, dto: UpdateMarketingCommentDto, userId: string, organizationId: string) {
-    return this.dataSource.transaction(async (manager) => {
+    let newMentionIds: string[] = [];
+    let changed = false;
+    const result = await this.dataSource.transaction(async (manager) => {
       await requireCard(manager, cardId, organizationId, { lock: true, mutation: true });
       const comment = await this.requireComment(manager, cardId, commentId);
       if (comment.authorId !== userId) throw new ForbiddenException('Só o autor pode editar o comentário.');
       if (dto.body === comment.body) return toCommentResponse(comment);
 
+      const previous = comment.mentions.map((mention) => mention.userId);
       comment.body = dto.body;
       comment.mentions = await this.resolveMentions(manager, organizationId, dto);
+      newMentionIds = comment.mentions.map((mention) => mention.userId).filter((id) => !previous.includes(id));
+      changed = true;
       comment.editedAt = new Date();
       comment.updatedBy = userId;
-      // Ponto de extensão (C12): notificar só quem entrou em mentions nesta edição.
       return toCommentResponse(await manager.save(comment));
     });
+    if (changed) {
+      await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.COMMENT_CHANGED, cardId, { commentId, action: 'updated' });
+      await this.notifier.commentEdited(organizationId, cardId, userId, newMentionIds, result.body.slice(0, EXCERPT_LENGTH));
+    }
+    return result;
   }
 
   /** Autor exclui o próprio; Admin exclui qualquer um. */
@@ -81,6 +96,7 @@ export class MarketingCommentService {
       if (comment.authorId !== userId && !isAdmin) throw new ForbiddenException('Só o autor ou um administrador pode excluir o comentário.');
       await manager.update(MarketingCardComment, { id: commentId }, { isActive: false, updatedBy: userId });
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.COMMENT_CHANGED, cardId, { commentId, action: 'deleted' });
     return { message: 'Comentário excluído com sucesso.' };
   }
 

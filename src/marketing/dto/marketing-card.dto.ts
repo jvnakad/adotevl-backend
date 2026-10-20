@@ -1,4 +1,4 @@
-import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayUnique, IsArray, IsIn, IsInt, IsOptional, Min, IsString, IsUUID, MaxLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIsoDate } from '../../stock/stock-date';
@@ -38,6 +38,12 @@ export class CreateMarketingCardDto {
 
 /** Edição parcial: campo ausente não muda; description e as datas aceitam null para limpar; listId move para o fim da fila. */
 export class UpdateMarketingCardDto {
+  @ApiPropertyOptional({ description: 'Versão do card que o cliente tinha ao começar a editar (campo `version` do card). Com ela, campos alterados por outra pessoa depois dessa versão e também enviados aqui dão 409 card_conflict; os demais são mesclados' })
+  @IsOptional()
+  @IsInt({ message: 'baseVersion deve ser um inteiro.' })
+  @Min(1, { message: 'baseVersion deve ser no mínimo 1.' })
+  baseVersion?: number;
+
   @ApiPropertyOptional({ description: 'Título' })
   @IsOptional()
   @IsMarketingName(250, 'Informe o título do card.')

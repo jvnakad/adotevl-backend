@@ -29,6 +29,20 @@ export class MarketingEligibilityService {
     return this.query(organizationId, userIds, manager);
   }
 
+  /** Dos ids informados, quem ainda enxerga o Marketing (Visualizar ou Editar, ou equipe Admin). Para decidir quem recebe notificação. */
+  async filterViewers(organizationId: string, userIds: string[]): Promise<EligibleMember[]> {
+    if (!userIds.length) return [];
+    return this.dataSource.query(
+      `SELECT DISTINCT u.id, u.full_name AS name
+         FROM users u
+         JOIN volunteers v ON v.user_id = u.id AND v.is_active = true
+         JOIN teams t ON t.id = v.team_id AND t.is_active = true
+         LEFT JOIN team_permissions p ON p.team_id = t.id AND p.screen = $2 AND p.level IN ($3, $4)
+        WHERE u.organization_id = $1 AND u."isActive" = true AND u.id = ANY($5::uuid[]) AND (t.is_admin = true OR p.id IS NOT NULL)`,
+      [organizationId, Screen.MARKETING, AccessLevel.VIEW, AccessLevel.EDIT, userIds],
+    );
+  }
+
   private async query(organizationId: string, userIds: string[] | null, manager?: EntityManager) {
     const runner = manager ?? this.dataSource;
     const rows: { id: string; name: string }[] = await runner.query(

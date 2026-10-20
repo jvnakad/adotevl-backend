@@ -10,6 +10,7 @@ import { requireCard } from './marketing-card.helper';
 import { toAttachmentResponse } from './marketing-presenter';
 import { inspectAttachment } from './marketing-file-type';
 import { StorageService } from '../storage/storage.service';
+import { MarketingRealtimeService, MARKETING_EVENTS } from './marketing-realtime.service';
 
 export { MARKETING_ATTACHMENT_MAX_BYTES };
 export const MAX_FILES_PER_UPLOAD = 10;
@@ -31,6 +32,7 @@ export class MarketingAttachmentService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly history: MarketingHistoryService,
     private readonly storage: StorageService,
+    private readonly rt: MarketingRealtimeService,
   ) {}
 
   async findAll(cardId: string, organizationId: string) {
@@ -86,6 +88,7 @@ export class MarketingAttachmentService {
         }
         return { rows, coverAttachmentId: card.coverAttachmentId };
       });
+      await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.ATTACHMENT_CHANGED, cardId, { action: 'added', attachmentIds: saved.rows.map((row) => row.id) });
       const urls = await this.storage.getSignedUrls(saved.rows.map((attachment) => attachment.storagePath));
       return saved.rows.map((attachment) => toAttachmentResponse(attachment, urls, saved.coverAttachmentId));
     } catch (error) {
@@ -116,6 +119,7 @@ export class MarketingAttachmentService {
       });
       return attachment.storagePath;
     });
+    await this.rt.publishCard(organizationId, userId, MARKETING_EVENTS.ATTACHMENT_CHANGED, cardId, { action: 'removed', attachmentIds: [attachmentId] });
     await this.removeFiles([path]);
     return { message: 'Anexo excluído com sucesso.' };
   }

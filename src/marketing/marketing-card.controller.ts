@@ -114,7 +114,7 @@ export class MarketingCardController {
   @RequireAccess(Screen.MARKETING, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Definir ou remover a capa', description: 'Acesso: Marketing (Editar). Manual: attachmentId de uma imagem ativa do card, ou null para remover. Não há capa automática.' })
   setCover(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetCoverDto, @Request() req) {
-    return this.cardService.setCover(id, dto.attachmentId, req.user.organizationId);
+    return this.cardService.setCover(id, dto.attachmentId, req.user.id, req.user.organizationId);
   }
 
   @Get('cards/:id/history')

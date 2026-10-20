@@ -7,6 +7,7 @@ import { CreateMarketingListDto, UpdateMarketingListDto } from './dto/marketing-
 import { normalizeName } from '../common/normalize-name';
 import { resolvePosition } from './marketing-position';
 import { toDuplicateNameError } from './marketing-errors';
+import { MarketingRealtimeService, MARKETING_EVENTS } from './marketing-realtime.service';
 
 /** Limite de filas ativas por organização (design). */
 export const MAX_ACTIVE_LISTS = 15;
@@ -17,7 +18,10 @@ const DUPLICATE_MESSAGE = 'Já existe uma fila com esse nome.';
 export class MarketingListService implements OnModuleInit {
   private readonly logger = new Logger(MarketingListService.name);
 
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly rt: MarketingRealtimeService,
+  ) {}
 
   /** Seed das 7 filas padrão em toda organização que ainda não tem nenhuma fila (ativa ou não). */
   async onModuleInit() {
@@ -97,6 +101,7 @@ export class MarketingListService implements OnModuleInit {
           }),
         );
       });
+      await this.rt.publish(organizationId, userId, MARKETING_EVENTS.LIST_CHANGED, { listId: saved.id, action: 'created' });
       return this.toResponse(saved, 0);
     } catch (error) {
       throw toDuplicateNameError(error) ?? error;
@@ -126,6 +131,7 @@ export class MarketingListService implements OnModuleInit {
         list.updatedBy = userId;
         return manager.getRepository(MarketingList).save(list);
       });
+      await this.rt.publish(organizationId, userId, MARKETING_EVENTS.LIST_CHANGED, { listId: saved.id, action: 'updated' });
       return this.toResponse(saved, await this.countCards(saved.id));
     } catch (error) {
       throw toDuplicateNameError(error) ?? error;
@@ -134,7 +140,7 @@ export class MarketingListService implements OnModuleInit {
 
   /** Reordena: o item vai para o índice pedido entre as demais filas ativas. */
   async move(id: string, index: number, userId: string, organizationId: string) {
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       const active = await this.lockActiveLists(manager, organizationId);
       if (!active.some((item) => item.id === id)) throw new NotFoundException(NOT_FOUND_MESSAGE);
       const siblings = active.filter((item) => item.id !== id);
@@ -142,6 +148,8 @@ export class MarketingListService implements OnModuleInit {
       await manager.update(MarketingList, { id }, { position, updatedBy: userId });
       return { id, position, renumbered };
     });
+    await this.rt.publish(organizationId, userId, MARKETING_EVENTS.LIST_CHANGED, { listId: id, action: 'moved' });
+    return result;
   }
 
   /** Só fila sem cards ativos (D-04). O lock das filas da organização serializa com criar/mover card para ela. */
@@ -160,6 +168,7 @@ export class MarketingListService implements OnModuleInit {
       }
       await manager.update(MarketingList, { id }, { isActive: false, updatedBy: userId });
     });
+    await this.rt.publish(organizationId, userId, MARKETING_EVENTS.LIST_CHANGED, { listId: id, action: 'deleted' });
     return { message: 'Fila excluída com sucesso.' };
   }
 

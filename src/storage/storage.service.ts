@@ -2,6 +2,7 @@ import { Injectable, InternalServerErrorException } from '@nestjs/common';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { mkdir, writeFile, readFile, rm } from 'fs/promises';
 import { dirname, join } from 'path';
+import { isLocalPrivatePath, localSignatureQuery } from './local-uploads';
 
 export const LOCAL_UPLOADS_DIR = join(process.cwd(), 'uploads');
 export const isLocalStorage = () => process.env.STORAGE_DRIVER === 'local';
@@ -70,7 +71,10 @@ export class StorageService {
   // URLs temporárias para os arquivos do bucket privado (path -> url). Paths sem URL ficam de fora.
   async getSignedUrls(paths: string[], expiresIn = SIGNED_URL_EXPIRES_IN): Promise<Record<string, string>> {
     if (!paths.length) return {};
-    if (isLocalStorage()) return Object.fromEntries(paths.map((path) => [path, this.localUrl(path)]));
+    if (isLocalStorage()) {
+      // Anexos do Marketing só abrem com link assinado e com validade, como no bucket privado (ver localUploadsMiddleware)
+      return Object.fromEntries(paths.map((path) => [path, isLocalPrivatePath(path) ? `${this.localUrl(path)}?${localSignatureQuery(path, expiresIn)}` : this.localUrl(path)]));
+    }
     const { data, error } = await this.getClient().storage.from(this.privateBucket).createSignedUrls(paths, expiresIn);
     if (error) throw new InternalServerErrorException('Falha ao gerar links dos arquivos.');
     return Object.fromEntries(data.filter((item) => item.signedUrl && !item.error).map((item) => [item.path, item.signedUrl]));

@@ -4,6 +4,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { isLocalStorage, LOCAL_UPLOADS_DIR } from './storage/storage.service';
+import { localUploadsMiddleware } from './storage/local-uploads';
 
 async function bootstrap() {
   // rawBody: o webhook do Autentique valida a assinatura HMAC sobre o corpo original
@@ -15,6 +16,7 @@ async function bootstrap() {
 
   // Em dev com STORAGE_DRIVER=local os arquivos enviados ficam em ./uploads
   if (isLocalStorage()) {
+    app.use('/uploads', localUploadsMiddleware);
     app.useStaticAssets(LOCAL_UPLOADS_DIR, { prefix: '/uploads' });
   }
 

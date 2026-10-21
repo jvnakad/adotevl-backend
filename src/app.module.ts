@@ -53,6 +53,7 @@ import { Product } from './stock/product.entity';
 import { StockHistoryEvent } from './stock/stock-history.entity';
 import { NullByteModule } from './common/null-byte.middleware';
 import { StockModule } from './stock/stock.module';
+import { ScheduleInstitution } from './volunteer-schedule/schedule-institution.entity';
 import { MarketingModule } from './marketing/marketing.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { NotificationModule } from './notification/notification.module';
@@ -74,7 +75,7 @@ import { MarketingHistoryEvent } from './marketing/entities/marketing-history-ev
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ProductType, Product, StockHistoryEvent, MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ScheduleInstitution, ProductType, Product, StockHistoryEvent, MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),

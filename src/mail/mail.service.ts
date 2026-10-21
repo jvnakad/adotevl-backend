@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Resend } from 'resend';
 import { createTransport, Transporter } from 'nodemailer';
-import { button, channelList, emailLayout, firstName, highlight, highlightText, ORG_CHANNELS, paragraph } from './email-layout';
+import { button, channelList, emailLayout, escapeHtml, firstName, highlight, highlightText, ORG_CHANNELS, paragraph } from './email-layout';
 import { formatDateBR } from '../volunteer-schedule/schedule-time';
 
 /**
@@ -100,7 +100,7 @@ export class MailService {
   }
 
   /** Horário marcado na agenda, com o link "Desmarcar" (abre a agenda na LP). */
-  async sendShiftConfirmationEmail(to: string, name: string, shift: { date: string; startTime: string; endTime: string; cancelToken: string }) {
+  async sendShiftConfirmationEmail(to: string, name: string, shift: { date: string; startTime: string; endTime: string; cancelToken: string; institutionName?: string | null; course?: string | null }) {
     const date = formatDateBR(shift.date);
     const cancelUrl = `${this.landingUrl()}/?desmarcar=${shift.cancelToken}#agenda`;
     await this.send(
@@ -112,6 +112,7 @@ export class MailService {
         title: `Horário marcado, ${firstName(name)}!`,
         body: [
           paragraph(`Seu voluntariado está marcado para <strong>${date}</strong>, das <strong>${shift.startTime} às ${shift.endTime}</strong>.`),
+          ...(shift.institutionName && shift.course ? [paragraph(`Programa: <strong>${escapeHtml(shift.institutionName)} · ${escapeHtml(shift.course)}</strong>`)] : []),
           paragraph(`Endereço do abrigo e combinados do dia chegam pelo grupo de voluntários. Dúvidas? Fale com a gente pelo <a href="${ORG_CHANNELS.whatsapp}" style="color:#fd5028;font-weight:700;text-decoration:none;">WhatsApp</a>.`),
           paragraph('Não vai conseguir ir? Desmarque com pelo menos 24h de antecedência:'),
           button(cancelUrl, 'Desmarcar horário'),

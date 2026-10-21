@@ -24,6 +24,13 @@ const SESSION_TTL = '2h';
 /** E-mail sem diferenciar maiúsculas (curingas do LIKE escapados) */
 const emailMatch = (email: string) => ILike(String(email ?? '').trim().replace(/[\\%_]/g, (char) => `\\${char}`));
 
+/** Último programa usado (prefill da LP). Faculdade inativa ou excluída: só o curso vem (D-10). Sem curso guardado: null. */
+export const programOf = (user: User) => {
+  if (!user.course) return null;
+  const institution = user.institution?.isActive ? user.institution : null;
+  return { institutionId: institution?.id ?? null, institutionName: institution?.name ?? null, course: user.course };
+};
+
 const sessionSecret = () => `${process.env.JWT_SECRET || 'changeme'}:schedule`;
 
 /** Identificação de quem marca pela LP: código de 6 dígitos por e-mail → sessão de 2h só para a agenda. */
@@ -59,7 +66,7 @@ export class ScheduleAccessService {
   }
 
   async verify(email: string, code: string, organizationId: string, now = new Date()) {
-    const user = await this.userRepository.findOne({ where: { email: emailMatch(email), organizationId } });
+    const user = await this.userRepository.findOne({ where: { email: emailMatch(email), organizationId }, relations: { institution: true } });
     const stored = user
       ? await this.codeRepository.findOne({ where: { userId: user.id, usedAt: IsNull() }, order: { createdAt: 'DESC' } })
       : null;
@@ -76,7 +83,7 @@ export class ScheduleAccessService {
       { sub: user.id, organizationId: user.organizationId, scope: 'schedule', codeId: stored.id },
       { secret: sessionSecret(), expiresIn: SESSION_TTL },
     );
-    return { token, firstName: user.fullName.trim().split(/\s+/)[0] };
+    return { token, firstName: user.fullName.trim().split(/\s+/)[0], program: programOf(user) };
   }
 
   /** Header Authorization da LP → voluntário da sessão. */

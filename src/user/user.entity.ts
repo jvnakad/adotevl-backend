@@ -6,15 +6,21 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
+  Check,
 } from 'typeorm';
 import { Profile } from '../profile/profile.entity';
 import { Organization } from '../organization/organization.entity';
+import { ScheduleInstitution } from '../volunteer-schedule/schedule-institution.entity';
 
 export interface TutorialProgress {
   tours: Record<string, number>;
   disabled: boolean;
 }
 
+// SET NULL ao excluir faculdade sem varrer users
+@Index('IDX_users_institution', ['institutionId'], { where: '"institution_id" IS NOT NULL' })
+@Check('CHK_users_course_length', `"course" IS NULL OR (char_length("course") >= 2 AND "course" = btrim("course"))`)
 @Entity('users')
 export class User {
   @PrimaryGeneratedColumn('uuid')
@@ -81,6 +87,18 @@ export class User {
 
   @Column({ default: true })
   isActive: boolean;
+
+  /** Última faculdade usada na agenda (prefill RN-14). Pode estar inativa: o service devolve null nesse caso */
+  @ManyToOne(() => ScheduleInstitution, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'institution_id', foreignKeyConstraintName: 'FK_users_schedule_institution' })
+  institution: ScheduleInstitution | null;
+
+  @Column({ name: 'institution_id', type: 'uuid', nullable: true })
+  institutionId: string | null;
+
+  /** Último curso usado na agenda (prefill RN-14). "Não" não apaga (RN-13) */
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  course: string | null;
 
   @Column({ name: 'created_by', nullable: true })
   createdBy: string;

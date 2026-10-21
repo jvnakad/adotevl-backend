@@ -17,6 +17,10 @@ export class Organization {
   @Column({ default: true })
   isActive: boolean;
 
+  /** Seed da PUCPR na agenda já rodou (roda uma vez; ver docs/db/agenda-faculdade.md, seção 4) */
+  @Column({ name: 'schedule_institutions_seeded_at', type: 'timestamptz', nullable: true })
+  scheduleInstitutionsSeededAt: Date | null;
+
   @Column({ name: 'created_by', nullable: true })
   createdBy: string;
 

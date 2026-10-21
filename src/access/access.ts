@@ -17,6 +17,7 @@ export enum Screen {
   STOCK_HISTORY = 'STOCK_HISTORY',
   MARKETING = 'MARKETING',
   MARKETING_SETTINGS = 'MARKETING_SETTINGS',
+  SCHEDULE_SETTINGS = 'SCHEDULE_SETTINGS',
 }
 
 export enum AccessLevel {
@@ -42,6 +43,8 @@ export const SCREENS: ScreenDefinition[] = [
   { key: Screen.MEDICAL_RECORDS, label: 'Prontuário', parent: Screen.PETS },
   // Visualizar: ver e marcar/desmarcar o próprio horário. Editar: trancar dias e marcar/remover por qualquer voluntário
   { key: Screen.SCHEDULE, label: 'Agenda' },
+  // Configuração da Agenda (faculdades do programa de horas complementares): só a equipe Admin
+  { key: Screen.SCHEDULE_SETTINGS, label: 'Configuração da Agenda', parent: Screen.SCHEDULE, adminOnly: true },
   { key: Screen.ADOPTERS, label: 'Adotantes' },
   { key: Screen.ADOPTION_CONTRACT, label: 'Termo de adoção', parent: Screen.ADOPTERS },
   { key: Screen.ADOPTION_HISTORY, label: 'Histórico de adoção', parent: Screen.ADOPTERS, viewOnly: true },

@@ -55,6 +55,7 @@ import { Product } from '../src/stock/product.entity';
 import { StockHistoryEvent } from '../src/stock/stock-history.entity';
 import { NullByteModule } from '../src/common/null-byte.middleware';
 import { StockModule } from '../src/stock/stock.module';
+import { ScheduleInstitution } from '../src/volunteer-schedule/schedule-institution.entity';
 import { MarketingModule } from '../src/marketing/marketing.module';
 import { RealtimeModule } from '../src/realtime/realtime.module';
 import { NotificationModule } from '../src/notification/notification.module';
@@ -74,7 +75,11 @@ class MockMailService {
   async sendApprovalEmail() {}
   async sendPasswordResetEmail() {}
   async sendFloatingWelcomeEmail() {}
-  async sendShiftConfirmationEmail() {}
+  // Último turno confirmado por e-mail (o e2e da agenda confere faculdade e curso)
+  lastShiftConfirmation: { institutionName?: string | null; course?: string | null } | null = null;
+  async sendShiftConfirmationEmail(_to: string, _name: string, shift: { institutionName?: string | null; course?: string | null }) {
+    this.lastShiftConfirmation = shift;
+  }
   async sendShiftCancelledByLockEmail() {}
   // Último código enviado por e-mail (o e2e da agenda lê daqui)
   lastScheduleCode: string | null = null;
@@ -173,7 +178,7 @@ class MockAutentiqueModule {}
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ProductType, Product, StockHistoryEvent,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ScheduleInstitution, ProductType, Product, StockHistoryEvent,
         MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification,
       ],
       synchronize: true,
@@ -234,6 +239,9 @@ export async function cleanupAccess(app: INestApplication, organizationId: strin
   const dataSource = app.get(DataSource);
   // O seed das filas do Marketing roda no boot para toda organização: sem limpar, o FK RESTRICT impede apagar a organização de qualquer suíte
   await cleanupMarketing(app, organizationId);
+  // Idem a agenda: o seed da PUCPR roda para toda organização e o RESTRICT de volunteer_shifts impede apagar a faculdade antes dos turnos
+  await dataSource.query('DELETE FROM volunteer_shifts WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM schedule_institutions WHERE organization_id = $1', [organizationId]);
   await dataSource.query('DELETE FROM notifications WHERE organization_id = $1', [organizationId]);
   await dataSource.query('DELETE FROM volunteers WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [organizationId]);
   await dataSource.query('DELETE FROM teams WHERE organization_id = $1', [organizationId]);

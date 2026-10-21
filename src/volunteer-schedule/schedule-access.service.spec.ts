@@ -81,7 +81,26 @@ describe('ScheduleAccessService', () => {
 
       expect(jwt.sign).toHaveBeenCalledWith({ sub: 'u1', organizationId: 'org-1', scope: 'schedule', codeId: 'c1' }, expect.objectContaining({ expiresIn: '2h', secret: expect.stringContaining(':schedule') }));
       expect(codeRepo.update).toHaveBeenCalledWith('c1', { usedAt: NOW });
-      expect(result).toEqual({ token: 'session-token', firstName: 'Isa' });
+      expect(result).toEqual({ token: 'session-token', firstName: 'Isa', program: null });
+    });
+
+    it('devolve o último programa usado para o prefill da LP', async () => {
+      codeRepo.findOne.mockResolvedValue(stored());
+      userRepo.findOne.mockResolvedValue({ ...volunteer, course: 'Direito', institution: { id: 'i1', name: 'PUCPR', isActive: true } });
+
+      const result = await service.verify('isa@teste.com', '482913', 'org-1', NOW);
+
+      expect(result.program).toEqual({ institutionId: 'i1', institutionName: 'PUCPR', course: 'Direito' });
+    });
+
+    it('faculdade guardada inativa ou excluída: vem só o curso (D-10)', async () => {
+      codeRepo.findOne.mockResolvedValue(stored());
+      userRepo.findOne.mockResolvedValue({ ...volunteer, course: 'Direito', institution: { id: 'i1', name: 'PUCPR', isActive: false } });
+      expect((await service.verify('isa@teste.com', '482913', 'org-1', NOW)).program).toEqual({ institutionId: null, institutionName: null, course: 'Direito' });
+
+      codeRepo.findOne.mockResolvedValue(stored());
+      userRepo.findOne.mockResolvedValue({ ...volunteer, course: 'Direito', institution: null });
+      expect((await service.verify('isa@teste.com', '482913', 'org-1', NOW)).program).toEqual({ institutionId: null, institutionName: null, course: 'Direito' });
     });
 
     it('código errado soma tentativa', async () => {

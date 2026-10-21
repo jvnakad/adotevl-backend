@@ -94,6 +94,17 @@ describe('TeamService', () => {
     });
   });
 
+  describe('Configuração da Agenda', () => {
+    it('é exclusiva da equipe Admin: outra equipe não recebe, a Admin tem Editar', async () => {
+      repo.findOne.mockResolvedValue({ id: 't1', name: 'Resgate', isAdmin: false });
+
+      await expect(service.setPermissions('t1', { [Screen.SCHEDULE_SETTINGS]: AccessLevel.VIEW }, 'admin-1')).rejects.toThrow(
+        new BadRequestException('Configuração da Agenda é exclusiva da equipe Admin.'),
+      );
+      expect(ADMIN_PERMISSIONS).toMatchObject({ [Screen.SCHEDULE_SETTINGS]: AccessLevel.EDIT });
+    });
+  });
+
   describe('telas do Marketing', () => {
     beforeEach(() => repo.findOne.mockResolvedValue({ id: 't1', name: 'Resgate', isAdmin: false }));
 

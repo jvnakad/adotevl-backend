@@ -79,6 +79,8 @@ describe('Marketing (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
+    // Servidor escutando de verdade: sem isso o supertest abre uma porta por requisicao e, com muitas em paralelo, o CI derruba conexoes (ECONNRESET)
+    await app.listen(0);
 
     dataSource = app.get(DataSource);
     orgRepo = moduleFixture.get(getRepositoryToken(Organization));

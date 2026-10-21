@@ -27,6 +27,8 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe());
     await app.init();
+    // Servidor escutando de verdade: sem isso o supertest abre uma porta por requisicao e, com muitas em paralelo, o CI derruba conexoes (ECONNRESET)
+    await app.listen(0);
 
     profileRepo = moduleFixture.get(getRepositoryToken(Profile));
     orgRepo = moduleFixture.get(getRepositoryToken(Organization));

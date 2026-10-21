@@ -32,6 +32,8 @@ describe('Cadastro de voluntário volante (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
+    // Servidor escutando de verdade: sem isso o supertest abre uma porta por requisicao e, com muitas em paralelo, o CI derruba conexoes (ECONNRESET)
+    await app.listen(0);
 
     orgRepo = moduleFixture.get(getRepositoryToken(Organization));
     userRepo = moduleFixture.get(getRepositoryToken(User));

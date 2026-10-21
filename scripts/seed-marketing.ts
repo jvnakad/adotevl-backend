@@ -123,12 +123,12 @@ const asUpload = (originalname: string, buffer: Buffer, mimetype: string) =>
 // ------------------------------------------------------------
 // Usuários do Marketing: [chave, nome, e-mail, cpf]
 const MARKETING_USERS: [string, string, string, string][] = [
-  ['marina', 'Marina Marketing', 'marketing@adotevl.local', '55555555555'],
-  ['caio', 'Caio Criação', 'criacao@adotevl.local', '66666666666'],
-  ['rita', 'Rita Redes Sociais', 'redes@adotevl.local', '77777777777'],
+  ['marina', 'Marina Marketing', 'marketing@adotevl.local', '40012345644'],
+  ['caio', 'Caio Criação', 'criacao@adotevl.local', '40023456701'],
+  ['rita', 'Rita Redes Sociais', 'redes@adotevl.local', '40034567852'],
 ];
 // Só Visualizar no Marketing (equipe própria "Diretoria")
-const VIEWER: [string, string, string] = ['Diego Diretoria', 'diretoria@adotevl.local', '88888888888'];
+const VIEWER: [string, string, string] = ['Diego Diretoria', 'diretoria@adotevl.local', '40045678901'];
 
 // Etiquetas: [chave, nome, cor da paleta do design]
 const LABELS: [string, string, string][] = [

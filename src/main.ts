@@ -5,13 +5,11 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { isLocalStorage, LOCAL_UPLOADS_DIR } from './storage/storage.service';
 import { localUploadsMiddleware } from './storage/local-uploads';
-import { corsOrigin } from './common/cors';
 
 async function bootstrap() {
   // rawBody: o webhook do Autentique valida a assinatura HMAC sobre o corpo original
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
-  // Só os domínios de CORS_ORIGINS (cada ambiente tem a sua lista); sem a variável, só localhost
-  app.enableCors({ origin: corsOrigin });
+  app.enableCors();
   // Atrás do proxy do Railway: req.ip = IP do cliente (limite de cadastros por IP)
   app.set('trust proxy', 1);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true }));

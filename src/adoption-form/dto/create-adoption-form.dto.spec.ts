@@ -109,8 +109,17 @@ describe('CreateAdoptionFormDto', () => {
     expect(instance.sawAdOnOther).toBeUndefined();
   });
 
+  it('aceita CPF com máscara e e-mail em maiúsculas, gravando limpos', async () => {
+    const { instance, errors } = await check(CreateAdoptionFormDto, multipart({ cpf: '529.982.247-25', email: ' Maria@Teste.COM ' }));
+
+    expect(errors).toEqual([]);
+    expect(instance.cpf).toBe('52998224725');
+    expect(instance.email).toBe('maria@teste.com');
+  });
+
   it.each([
-    ['cpf', '123.456.789-09'],
+    ['cpf', '123.456.789-00'],
+    ['fullName', 'Maria'],
     ['phone', '119'],
     ['zipCode', '0131010'],
     ['state', 'São Paulo'],

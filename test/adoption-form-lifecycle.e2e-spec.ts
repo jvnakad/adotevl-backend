@@ -187,7 +187,7 @@ describe('Fluxo de ciclo de vida da ficha de adoção (e2e)', () => {
     const invalid = await submit({ ...baseAnswers(orgId), cpf: '123', residenceType: 'castle' });
     expect(invalid.status).toBe(400);
     expect(invalid.body.message).toEqual(
-      expect.arrayContaining(['CPF deve conter 11 dígitos numéricos.']),
+      expect.arrayContaining(['O CPF precisa ter 11 números.']),
     );
 
     // 6. Resposta condicional obrigatória faltando (tem clínica, mas sem o nome)

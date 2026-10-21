@@ -1,11 +1,11 @@
-import { IsString, IsOptional, IsUUID, IsDateString, Matches } from 'class-validator';
+import { IsOptional, IsUUID, IsDateString } from 'class-validator';
+import { IsCpf, IsFullName } from '../../common/validation/person';
 
 export class CreateVolunteerDto {
-  @IsString()
+  @IsFullName()
   name: string;
 
-  @IsString()
-  @Matches(/^\d{11}$/, { message: 'CPF deve conter 11 dígitos numéricos.' })
+  @IsCpf()
   cpf: string;
 
   @IsDateString()

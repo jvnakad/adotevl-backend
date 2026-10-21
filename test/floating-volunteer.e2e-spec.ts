@@ -19,7 +19,7 @@ describe('Cadastro de voluntário volante (e2e)', () => {
 
   const floating = () => ({
     fullName: 'Bia Volante',
-    cpf: '55544433322',
+    cpf: '55544433380',
     email: 'bia.volante@teste.com',
     phone: '41999998888',
     birthDate: '1996-03-15',
@@ -72,7 +72,7 @@ describe('Cadastro de voluntário volante (e2e)', () => {
   });
 
   it('email repetido responde 409', async () => {
-    const res = await request(app.getHttpServer()).post('/users/floating').send({ ...floating(), cpf: '11122233344' });
+    const res = await request(app.getHttpServer()).post('/users/floating').send({ ...floating(), cpf: '11122233396' });
 
     expect(res.status).toBe(409);
     expect(res.body.message).toBe('Já existe um usuário cadastrado com este e-mail.');
@@ -81,21 +81,21 @@ describe('Cadastro de voluntário volante (e2e)', () => {
   it('sem aceite LGPD ou sem celular responde 400', async () => {
     const noConsent = await request(app.getHttpServer())
       .post('/users/floating')
-      .send({ ...floating(), email: 'sem.aceite@teste.com', cpf: '22233344455', consent: false });
+      .send({ ...floating(), email: 'sem.aceite@teste.com', cpf: '22233344405', consent: false });
     expect(noConsent.status).toBe(400);
     expect(noConsent.body.message).toContain('É preciso autorizar o uso dos dados para contato sobre voluntariado.');
 
     const { phone, ...noPhone } = floating();
     const missingPhone = await request(app.getHttpServer())
       .post('/users/floating')
-      .send({ ...noPhone, email: 'sem.celular@teste.com', cpf: '33344455566' });
+      .send({ ...noPhone, email: 'sem.celular@teste.com', cpf: '33344455508' });
     expect(missingPhone.status).toBe(400);
   });
 
   it('honeypot preenchido finge sucesso e não cria usuário', async () => {
     const res = await request(app.getHttpServer())
       .post('/users/floating')
-      .send({ ...floating(), email: 'robo@teste.com', cpf: '44455566677', website: 'http://spam.test' });
+      .send({ ...floating(), email: 'robo@teste.com', cpf: '44455566619', website: 'http://spam.test' });
 
     expect(res.status).toBe(201);
     expect(await userRepo.findOne({ where: { email: 'robo@teste.com' } })).toBeNull();
@@ -104,10 +104,11 @@ describe('Cadastro de voluntário volante (e2e)', () => {
   // Por último: esgota o limite de cadastros por minuto deste IP
   it('limita cadastros por IP (429)', async () => {
     const statuses: number[] = [];
+    const validCpfs = ['66655544068', '66655544149', '66655544220', '66655544300', '66655544491', '66655544572'];
     for (let attempt = 0; attempt < 6; attempt++) {
       const res = await request(app.getHttpServer())
         .post('/users/floating')
-        .send({ ...floating(), email: `limite${attempt}@teste.com`, cpf: `6665554440${attempt}` });
+        .send({ ...floating(), email: `limite${attempt}@teste.com`, cpf: validCpfs[attempt] });
       statuses.push(res.status);
     }
 

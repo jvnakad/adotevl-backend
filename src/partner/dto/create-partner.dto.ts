@@ -1,4 +1,5 @@
-import { IsString, IsOptional, IsEmail, IsNotEmpty } from 'class-validator';
+import { IsString, IsOptional, IsNotEmpty } from 'class-validator';
+import { IsPersonEmail } from '../../common/validation/person';
 
 export class CreatePartnerDto {
   @IsString()
@@ -17,8 +18,7 @@ export class CreatePartnerDto {
   @IsString()
   contact?: string;
 
-  @IsOptional()
-  @IsEmail()
+  @IsPersonEmail({ optional: true })
   email?: string;
 
   @IsOptional()

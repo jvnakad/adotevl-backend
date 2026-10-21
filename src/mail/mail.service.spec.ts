@@ -136,6 +136,15 @@ describe('MailService', () => {
       expect(message.html).toContain('24h');
     });
 
+    it('confirmação do programa da faculdade traz "Programa: faculdade · curso" (escapado); sem programa a linha some', async () => {
+      await service.sendShiftConfirmationEmail('isa@teste.com', 'Isa Kaori', { ...shift, institutionName: 'PUCPR', course: 'Direito <b>' });
+      await service.sendShiftConfirmationEmail('isa@teste.com', 'Isa Kaori', { ...shift, institutionName: null, course: null });
+
+      const [withProgram, without] = (mockSend.mock.calls as any[]).map(([message]) => message.html as string);
+      expect(withProgram).toContain('Programa: <strong>PUCPR · Direito &lt;b&gt;</strong>');
+      expect(without).not.toContain('Programa:');
+    });
+
     it('dia trancado avisa com a mensagem da equipe', async () => {
       await service.sendShiftCancelledByLockEmail('isa@teste.com', 'Isa Kaori', shift, 'Mutirão de castração');
 

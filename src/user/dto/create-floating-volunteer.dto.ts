@@ -1,20 +1,19 @@
-import { IsString, IsNotEmpty, IsEmail, IsOptional, IsDateString, Matches, Equals, IsBoolean } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDateString, Matches, Equals, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsCpf, IsFullName, IsPersonEmail, PERSON_MESSAGES } from '../../common/validation/person';
 
 /** Cadastro público de voluntário volante (sem senha: a API gera uma aleatória). */
 export class CreateFloatingVolunteerDto {
   @ApiProperty({ description: 'Nome completo' })
-  @IsString()
-  @IsNotEmpty({ message: 'O nome completo é obrigatório.' })
+  @IsFullName()
   fullName: string;
 
   @ApiProperty({ description: 'CPF (somente números)' })
-  @IsString()
-  @Matches(/^\d{11}$/, { message: 'O CPF deve conter exatamente 11 dígitos numéricos (sem formatação).' })
+  @IsCpf()
   cpf: string;
 
   @ApiProperty({ description: 'E-mail' })
-  @IsEmail({}, { message: 'Informe um endereço de e-mail válido.' })
+  @IsPersonEmail()
   email: string;
 
   @ApiProperty({ description: 'Celular/WhatsApp (somente números, com DDD)' })
@@ -27,8 +26,7 @@ export class CreateFloatingVolunteerDto {
   birthDate: string;
 
   @ApiPropertyOptional({ description: 'Nome do responsável (obrigatório para menor de 18)' })
-  @IsOptional()
-  @IsString()
+  @IsFullName({ optional: true, requiredMessage: PERSON_MESSAGES.guardianNameRequired })
   guardianName?: string;
 
   @ApiPropertyOptional({ description: 'Celular do responsável (obrigatório para menor de 18)' })

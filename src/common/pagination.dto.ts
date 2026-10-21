@@ -1,8 +1,10 @@
-import { IsOptional, IsInt, Min } from 'class-validator';
+import { IsOptional, IsInt, Min, Max } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 
 export const MAX_PAGE_LIMIT = 100;
+/** Página máxima: evita OFFSET gigante (estouro de inteiro no Postgres, 500) */
+export const MAX_PAGE = 100000;
 
 export class PaginationDto {
   @ApiPropertyOptional({ default: 1, description: 'Número da página' })
@@ -10,6 +12,7 @@ export class PaginationDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(MAX_PAGE, { message: `page deve ser no máximo ${MAX_PAGE}.` })
   page?: number = 1;
 
   @ApiPropertyOptional({ default: 10, maximum: MAX_PAGE_LIMIT, description: 'Itens por página (máximo 100; valores maiores são limitados a 100)' })

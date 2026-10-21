@@ -1,6 +1,8 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
+import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { DATE_PATTERN, TIME_PATTERN } from '../schedule-time';
+import { IsMarketingName, trimText } from '../../marketing/dto/marketing-text';
 
 const DATE_MESSAGE = { message: 'Informe a data no formato AAAA-MM-DD.' };
 const TIME_MESSAGE = { message: 'Horário no formato HH:MM, em passos de 30 minutos.' };
@@ -26,6 +28,24 @@ export class PublicCreateShiftDto extends ShiftTimesDto {
   @ApiProperty({ description: 'Dia (AAAA-MM-DD)' })
   @Matches(DATE_PATTERN, DATE_MESSAGE)
   date: string;
+
+  @ApiPropertyOptional({ description: 'Faculdade do programa de horas complementares (ativa e da mesma organização). Vai junto com `course`, ou nenhum dos dois.' })
+  @IsOptional()
+  @IsUUID('4', { message: 'Faculdade inválida.' })
+  institutionId?: string;
+
+  @ApiPropertyOptional({ description: 'Curso do aluno, texto livre de 2 a 120 caracteres (sem espaços nas pontas). Vai junto com `institutionId`.' })
+  @IsOptional()
+  // Curso só com espaços conta como ausente: a regra do par (service) responde com a mensagem certa
+  @Transform((params) => {
+    const value = trimText(params);
+    return value === '' ? undefined : value;
+  })
+  @IsString({ message: 'Informe o curso.' })
+  @Matches(/^[^\p{Cc}\p{Cf}]*$/u, { message: 'O curso contém caracteres inválidos.' })
+  @MinLength(2, { message: 'O curso precisa ter entre 2 e 120 caracteres.' })
+  @MaxLength(120, { message: 'O curso precisa ter entre 2 e 120 caracteres.' })
+  course?: string;
 }
 
 export class CreateShiftDto extends PublicCreateShiftDto {
@@ -68,4 +88,22 @@ export class CancelShiftByTokenDto {
   @ApiProperty({ description: 'Token do link "Desmarcar" do e-mail' })
   @IsUUID('4', { message: 'Link de desmarcar inválido.' })
   token: string;
+}
+
+export class CreateScheduleInstitutionDto {
+  @ApiProperty({ example: 'PUCPR', description: 'Nome da faculdade (até 80 caracteres; único na organização, sem diferenciar acento e maiúscula)' })
+  @IsMarketingName(80, 'Informe o nome da faculdade.')
+  name: string;
+}
+
+export class UpdateScheduleInstitutionDto {
+  @ApiPropertyOptional({ description: 'Novo nome da faculdade' })
+  @IsOptional()
+  @IsMarketingName(80, 'Informe o nome da faculdade.')
+  name?: string;
+
+  @ApiPropertyOptional({ description: 'Ativar (true) ou desativar (false)' })
+  @IsOptional()
+  @IsBoolean({ message: 'Informe true ou false.' })
+  isActive?: boolean;
 }

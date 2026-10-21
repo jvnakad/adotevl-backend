@@ -27,6 +27,8 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe());
     await app.init();
+    // Servidor escutando de verdade: sem isso o supertest abre uma porta por requisicao e, com muitas em paralelo, o CI derruba conexoes (ECONNRESET)
+    await app.listen(0);
 
     profileRepo = moduleFixture.get(getRepositoryToken(Profile));
     orgRepo = moduleFixture.get(getRepositoryToken(Organization));
@@ -86,7 +88,7 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
       .post('/users')
       .send({
         fullName: 'Voluntário Novo',
-        cpf: '99988877700',
+        cpf: '99988877714',
         email: 'voluntario.novo@teste.com',
         phone: '11900000002',
         birthDate: '1990-04-20',
@@ -191,6 +193,50 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     expect(getRes.status).toBe(200);
     expect(getRes.body.isApproved).toBe(true);
     expect(getRes.body.fullName).toBe('Voluntário Atualizado');
+  }, 30000);
+
+  it('cadastro e edição validam nome, e-mail e CPF e gravam normalizados', async () => {
+    const server = app.getHttpServer();
+    const base = {
+      fullName: 'Pessoa Valida',
+      cpf: '39053344705',
+      email: 'pessoa.valida@teste.com',
+      phone: '11900000003',
+      birthDate: '1990-04-20',
+      password: 'senha123',
+      consent: true,
+      application: VOLUNTEER_APPLICATION,
+      organizationId: orgId,
+    };
+
+    const invalid = await request(server).post('/users').send({ ...base, fullName: 'Maria', email: 'maria@x', cpf: '12345678900' });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.message).toEqual(
+      expect.arrayContaining(['Informe nome e sobrenome.', 'E-mail inválido. Confira se está no formato nome@exemplo.com.', 'CPF inválido. Confira os números.']),
+    );
+
+    const empty = await request(server).post('/users').send({ ...base, fullName: '', email: '', cpf: '' });
+    expect(empty.body.message).toEqual(expect.arrayContaining(['Informe seu nome completo.', 'Informe seu e-mail.', 'Informe seu CPF.']));
+
+    const short = await request(server).post('/users').send({ ...base, fullName: 'Maria 2 Silva', cpf: '123' });
+    expect(short.body.message).toEqual(expect.arrayContaining(['Use apenas letras no nome.', 'O CPF precisa ter 11 números.']));
+
+    const ok = await request(server)
+      .post('/users')
+      .send({ ...base, fullName: '  Pessoa   Valida ', cpf: '390.533.447-05', email: ' Pessoa.Valida@Teste.COM ' });
+    expect(ok.status).toBe(201);
+    const saved = await userRepo.findOne({ where: { id: ok.body.id } });
+    expect(saved).toEqual(expect.objectContaining({ fullName: 'Pessoa Valida', cpf: '39053344705', email: 'pessoa.valida@teste.com' }));
+
+    // Edição (admin): mesmas regras, CPF mascarado é gravado só com dígitos
+    const auth = { Authorization: `Bearer ${adminToken}` };
+    const badEdit = await request(server).patch(`/users/${saved.id}`).set(auth).send({ fullName: 'Pessoa', cpf: '11111111111' });
+    expect(badEdit.status).toBe(400);
+    expect(badEdit.body.message).toEqual(expect.arrayContaining(['Informe nome e sobrenome.', 'CPF inválido. Confira os números.']));
+
+    const goodEdit = await request(server).patch(`/users/${saved.id}`).set(auth).send({ fullName: ' Pessoa  Editada ', cpf: '529.982.247-25' });
+    expect(goodEdit.status).toBe(200);
+    expect(goodEdit.body).toEqual(expect.objectContaining({ fullName: 'Pessoa Editada', cpf: '52998224725' }));
   }, 30000);
 
   it('tutoriais: marca tour visto, desliga e zera pelo /users/me/tutorial', async () => {

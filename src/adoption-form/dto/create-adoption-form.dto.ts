@@ -5,7 +5,6 @@ import {
   IsIn,
   IsInt,
   IsBoolean,
-  IsEmail,
   IsDateString,
   IsUUID,
   Matches,
@@ -17,6 +16,7 @@ import {
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsCpf, IsFullName, IsPersonEmail } from '../../common/validation/person';
 
 // Valores aceitos em cada pergunta de múltipla escolha (espelham src/constants/adoptionFormOptions.ts do front)
 export const YES_NO = ['yes', 'no'];
@@ -65,19 +65,19 @@ export class CreateAdoptionFormDto {
   // Etapa 1 — Sobre você
   // ------------------------------------------------------------
   @ApiProperty({ description: 'Nome completo' })
-  @Trim() @required('Nome completo') @IsString() @text('Nome completo', 150)
+  @IsFullName()
   fullName: string;
 
   @ApiProperty({ description: 'Email' })
-  @Trim() @required('Email') @IsEmail({}, { message: 'Informe um email válido.' })
+  @IsPersonEmail()
   email: string;
 
   @ApiProperty({ description: 'Data de nascimento (YYYY-MM-DD)' })
   @Trim() @required('Data de nascimento') @IsDateString({}, { message: 'Informe uma data de nascimento válida no formato YYYY-MM-DD.' })
   birthDate: string;
 
-  @ApiProperty({ description: 'CPF (somente dígitos)' })
-  @Trim() @required('CPF') @Matches(/^\d{11}$/, { message: 'CPF deve conter 11 dígitos numéricos.' })
+  @ApiProperty({ description: 'CPF (com ou sem máscara; gravado só com dígitos)' })
+  @IsCpf()
   cpf: string;
 
   @ApiProperty({ description: 'Telefone com DDD (somente dígitos)' })

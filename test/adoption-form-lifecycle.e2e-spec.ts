@@ -135,6 +135,8 @@ describe('Fluxo de ciclo de vida da ficha de adoção (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
+    // Servidor escutando de verdade: sem isso o supertest abre uma porta por requisicao e, com muitas em paralelo, o CI derruba conexoes (ECONNRESET)
+    await app.listen(0);
 
     profileRepo = moduleFixture.get(getRepositoryToken(Profile));
     orgRepo = moduleFixture.get(getRepositoryToken(Organization));
@@ -187,7 +189,7 @@ describe('Fluxo de ciclo de vida da ficha de adoção (e2e)', () => {
     const invalid = await submit({ ...baseAnswers(orgId), cpf: '123', residenceType: 'castle' });
     expect(invalid.status).toBe(400);
     expect(invalid.body.message).toEqual(
-      expect.arrayContaining(['CPF deve conter 11 dígitos numéricos.']),
+      expect.arrayContaining(['O CPF precisa ter 11 números.']),
     );
 
     // 6. Resposta condicional obrigatória faltando (tem clínica, mas sem o nome)

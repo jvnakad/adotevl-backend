@@ -55,13 +55,31 @@ import { Product } from '../src/stock/product.entity';
 import { StockHistoryEvent } from '../src/stock/stock-history.entity';
 import { NullByteModule } from '../src/common/null-byte.middleware';
 import { StockModule } from '../src/stock/stock.module';
+import { ScheduleInstitution } from '../src/volunteer-schedule/schedule-institution.entity';
+import { MarketingModule } from '../src/marketing/marketing.module';
+import { RealtimeModule } from '../src/realtime/realtime.module';
+import { NotificationModule } from '../src/notification/notification.module';
+import { Notification } from '../src/notification/notification.entity';
+import { MarketingList } from '../src/marketing/entities/marketing-list.entity';
+import { MarketingLabel } from '../src/marketing/entities/marketing-label.entity';
+import { MarketingCard } from '../src/marketing/entities/marketing-card.entity';
+import { MarketingCardMember } from '../src/marketing/entities/marketing-card-member.entity';
+import { MarketingCardLabel } from '../src/marketing/entities/marketing-card-label.entity';
+import { MarketingCardTask } from '../src/marketing/entities/marketing-card-task.entity';
+import { MarketingCardAttachment } from '../src/marketing/entities/marketing-card-attachment.entity';
+import { MarketingCardComment } from '../src/marketing/entities/marketing-card-comment.entity';
+import { MarketingHistoryEvent } from '../src/marketing/entities/marketing-history-event.entity';
 
 class MockMailService {
   async sendConfirmationEmail() {}
   async sendApprovalEmail() {}
   async sendPasswordResetEmail() {}
   async sendFloatingWelcomeEmail() {}
-  async sendShiftConfirmationEmail() {}
+  // Último turno confirmado por e-mail (o e2e da agenda confere faculdade e curso)
+  lastShiftConfirmation: { institutionName?: string | null; course?: string | null } | null = null;
+  async sendShiftConfirmationEmail(_to: string, _name: string, shift: { institutionName?: string | null; course?: string | null }) {
+    this.lastShiftConfirmation = shift;
+  }
   async sendShiftCancelledByLockEmail() {}
   // Último código enviado por e-mail (o e2e da agenda lê daqui)
   lastScheduleCode: string | null = null;
@@ -160,7 +178,8 @@ class MockAutentiqueModule {}
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ProductType, Product, StockHistoryEvent,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ScheduleInstitution, ProductType, Product, StockHistoryEvent,
+        MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification,
       ],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
@@ -184,6 +203,9 @@ class MockAutentiqueModule {}
     AdoptionContractModule,
     VolunteerScheduleModule,
     StockModule,
+    RealtimeModule,
+    NotificationModule,
+    MarketingModule,
     NullByteModule,
     WebhooksModule,
     MockMailModule,
@@ -215,6 +237,13 @@ export async function joinTeam(app: INestApplication, user: TestUser, access: 'A
 /** Remove voluntários e equipes da organização (antes de apagar os usuários: FK de volunteers.user_id). */
 export async function cleanupAccess(app: INestApplication, organizationId: string) {
   const dataSource = app.get(DataSource);
+  // O seed das filas do Marketing roda no boot para toda organização: sem limpar, o FK RESTRICT impede apagar a organização de qualquer suíte
+  await cleanupMarketing(app, organizationId);
+  // Idem a agenda: o seed da PUCPR roda para toda organização e o RESTRICT de volunteer_shifts impede apagar a faculdade antes dos turnos
+  await dataSource.query('DELETE FROM volunteer_shifts WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM schedule_locks WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM schedule_institutions WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM notifications WHERE organization_id = $1', [organizationId]);
   await dataSource.query('DELETE FROM volunteers WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [organizationId]);
   await dataSource.query('DELETE FROM teams WHERE organization_id = $1', [organizationId]);
 }
@@ -225,6 +254,16 @@ export async function cleanupStock(app: INestApplication, organizationId: string
   await dataSource.query('DELETE FROM stock_history_events WHERE organization_id = $1', [organizationId]);
   await dataSource.query('DELETE FROM products WHERE organization_id = $1', [organizationId]);
   await dataSource.query('DELETE FROM product_types WHERE organization_id = $1', [organizationId]);
+}
+
+/** Remove o Marketing da organização (antes de apagar a organização: FKs RESTRICT do histórico e das filas). */
+export async function cleanupMarketing(app: INestApplication, organizationId: string) {
+  const dataSource = app.get(DataSource);
+  await dataSource.query('DELETE FROM marketing_history_events WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('UPDATE marketing_cards SET cover_attachment_id = NULL WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM marketing_cards WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM marketing_labels WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM marketing_lists WHERE organization_id = $1', [organizationId]);
 }
 
 /** Questionário válido do voluntário fixo (POST /users). */

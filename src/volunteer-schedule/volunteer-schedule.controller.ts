@@ -24,6 +24,13 @@ export class VolunteerScheduleController {
     return this.scheduleService.month(req.user.organizationId, month, { userId: req.user.id, isAdmin: !!req.access?.isAdmin });
   }
 
+  @Get('me/program')
+  @RequireAccess(Screen.SCHEDULE, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Meu último programa da faculdade', description: 'Acesso: Agenda (Visualizar). `{ institutionId, institutionName, course }` ou null; faculdade inativa vem com institutionId/institutionName null e o curso preservado.' })
+  myProgram(@Req() req) {
+    return this.scheduleService.myProgram(req.user.id);
+  }
+
   @Get('volunteers')
   @RequireAccess(Screen.SCHEDULE, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Voluntários ativos para marcar por eles', description: 'Acesso: Agenda (Editar).' })
@@ -63,6 +70,6 @@ export class VolunteerScheduleController {
   @RequireAccess(Screen.SCHEDULE, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Destrancar dia', description: 'Acesso: Agenda (Editar).' })
   unlock(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
-    return this.scheduleService.unlock(id, req.user.organizationId);
+    return this.scheduleService.unlock(id, req.user.organizationId, req.user.id);
   }
 }

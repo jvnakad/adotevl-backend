@@ -25,7 +25,18 @@ import { TeamMembershipService } from '../team/team-membership.service';
 import { TeamService } from '../team/team.service';
 import { TeamSystemKey } from '../team/team.entity';
 import { guardianFields } from './volunteer-age';
+import { normalizeCpf, normalizeEmail, normalizePersonName } from '../common/validation/person';
 import { VolunteerApplication } from '../volunteer-application/volunteer-application.entity';
+
+/** O ValidationPipe global não grava a normalização no body: nome, e-mail e CPF vão limpos para o banco. */
+function normalizedPerson(dto: { fullName: string; cpf: string; email: string; guardianName?: string }) {
+  return {
+    fullName: normalizePersonName(dto.fullName) as string,
+    cpf: normalizeCpf(dto.cpf) as string,
+    email: normalizeEmail(dto.email) as string,
+    guardianName: normalizePersonName(dto.guardianName) as string | undefined,
+  };
+}
 
 const EMPTY_TUTORIAL: TutorialProgress = { tours: {}, disabled: false };
 
@@ -47,8 +58,9 @@ export class UserService {
   ) {}
 
   async create(dto: CreateUserDto, createdBy: string = null) {
-    const guardian = guardianFields(dto);
-    await this.assertCanRegister(dto);
+    const person = normalizedPerson(dto);
+    const guardian = guardianFields({ ...dto, guardianName: person.guardianName });
+    await this.assertCanRegister({ ...dto, ...person });
 
     const isFirstUser = !(await this.userRepository.findOne({ where: { organizationId: dto.organizationId } }));
     // Voluntário fixo responde o questionário; o admin inicial da organização não
@@ -60,9 +72,9 @@ export class UserService {
     const confirmationCode = randomUUID();
 
     const user = this.userRepository.create({
-      fullName: dto.fullName,
-      cpf: dto.cpf,
-      email: dto.email,
+      fullName: person.fullName,
+      cpf: person.cpf,
+      email: person.email,
       phone: dto.phone,
       birthDate: dto.birthDate as unknown as Date,
       password: hashedPassword,
@@ -92,16 +104,17 @@ export class UserService {
 
   /** Volante: sem senha (gera uma aleatória só para o login aceitar), já aprovado e na equipe Voluntário Volante. */
   async createFloating(dto: CreateFloatingVolunteerDto) {
-    const guardian = guardianFields(dto);
-    await this.assertCanRegister(dto);
+    const person = normalizedPerson(dto);
+    const guardian = guardianFields({ ...dto, guardianName: person.guardianName });
+    await this.assertCanRegister({ ...dto, ...person });
     const profileId = await this.legacyProfileId('VOLUNTEER');
     const password = await bcrypt.hash(randomBytes(24).toString('base64url'), 10);
 
     const saved = await this.userRepository.save(
       this.userRepository.create({
-        fullName: dto.fullName,
-        cpf: dto.cpf,
-        email: dto.email,
+        fullName: person.fullName,
+        cpf: person.cpf,
+        email: person.email,
         phone: dto.phone,
         birthDate: dto.birthDate as unknown as Date,
         password,
@@ -203,6 +216,8 @@ export class UserService {
     const data: Partial<UpdateUserDto> = isAdmin
       ? { ...dto }
       : { fullName: dto.fullName, cpf: dto.cpf, phone: dto.phone, birthDate: dto.birthDate };
+    if (data.fullName !== undefined) data.fullName = normalizePersonName(data.fullName) as string;
+    if (data.cpf !== undefined) data.cpf = normalizeCpf(data.cpf) as string;
 
     await this.userRepository.update(id, { ...data, updatedBy });
     return this.userRepository.findOne({ where: { id } });

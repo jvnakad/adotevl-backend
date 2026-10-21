@@ -15,6 +15,9 @@ export enum Screen {
   STOCK = 'STOCK',
   STOCK_PRODUCT_TYPES = 'STOCK_PRODUCT_TYPES',
   STOCK_HISTORY = 'STOCK_HISTORY',
+  MARKETING = 'MARKETING',
+  MARKETING_SETTINGS = 'MARKETING_SETTINGS',
+  SCHEDULE_SETTINGS = 'SCHEDULE_SETTINGS',
 }
 
 export enum AccessLevel {
@@ -30,6 +33,8 @@ export interface ScreenDefinition {
   parent?: Screen;
   /** Tela só de leitura: não aceita Editar */
   viewOnly?: boolean;
+  /** Tela só da equipe Admin: a matriz de outras equipes não pode concedê-la */
+  adminOnly?: boolean;
 }
 
 // Ordem de exibição na matriz de permissões do front
@@ -38,6 +43,8 @@ export const SCREENS: ScreenDefinition[] = [
   { key: Screen.MEDICAL_RECORDS, label: 'Prontuário', parent: Screen.PETS },
   // Visualizar: ver e marcar/desmarcar o próprio horário. Editar: trancar dias e marcar/remover por qualquer voluntário
   { key: Screen.SCHEDULE, label: 'Agenda' },
+  // Configuração da Agenda (faculdades do programa de horas complementares): só a equipe Admin
+  { key: Screen.SCHEDULE_SETTINGS, label: 'Configuração da Agenda', parent: Screen.SCHEDULE, adminOnly: true },
   { key: Screen.ADOPTERS, label: 'Adotantes' },
   { key: Screen.ADOPTION_CONTRACT, label: 'Termo de adoção', parent: Screen.ADOPTERS },
   { key: Screen.ADOPTION_HISTORY, label: 'Histórico de adoção', parent: Screen.ADOPTERS, viewOnly: true },
@@ -50,6 +57,9 @@ export const SCREENS: ScreenDefinition[] = [
   { key: Screen.STOCK, label: 'Estoque' },
   { key: Screen.STOCK_PRODUCT_TYPES, label: 'Tipos de produto', parent: Screen.STOCK },
   { key: Screen.STOCK_HISTORY, label: 'Histórico do estoque', parent: Screen.STOCK, viewOnly: true },
+  // Quadro: Visualizar consulta; Editar cria, move, edita, comenta e anexa. A Configuração (filas e etiquetas) é só da equipe Admin
+  { key: Screen.MARKETING, label: 'Marketing' },
+  { key: Screen.MARKETING_SETTINGS, label: 'Configuração do Marketing', parent: Screen.MARKETING, adminOnly: true },
 ];
 
 export const SCREEN_BY_KEY = Object.fromEntries(SCREENS.map((screen) => [screen.key, screen])) as Record<Screen, ScreenDefinition>;

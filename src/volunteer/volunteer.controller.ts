@@ -6,6 +6,7 @@ import { AdminOnly, RequireAccess } from '../access/access.decorator';
 import { AccessLevel, Screen } from '../access/access';
 import { VolunteerService } from './volunteer.service';
 import { CreateVolunteerDto } from './dto/create-volunteer.dto';
+import { UpdateVolunteerDto } from './dto/update-volunteer.dto';
 import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Voluntários')
@@ -39,7 +40,7 @@ export class VolunteerController {
   @Put(':id')
   @RequireAccess(Screen.VOLUNTEERS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Atualizar voluntário', description: 'Acesso: Voluntários (Editar)' })
-  update(@Param('id') id: string, @Body() dto: Partial<CreateVolunteerDto>, @Request() req) {
+  update(@Param('id') id: string, @Body() dto: UpdateVolunteerDto, @Request() req) {
     return this.volunteerService.update(id, dto, req.user.id);
   }
 }

@@ -1,22 +1,17 @@
-import { IsString, IsNotEmpty, IsEmail, IsOptional, IsDateString, Matches, MinLength, Equals, IsBoolean, ValidateNested } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDateString, Matches, MinLength, Equals, IsBoolean, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { VolunteerApplicationDto } from '../../volunteer-application/dto/volunteer-application.dto';
+import { IsCpf, IsFullName, IsPersonEmail, PERSON_MESSAGES } from '../../common/validation/person';
 
 export class CreateUserDto {
-  @IsString()
-  @IsNotEmpty({ message: 'O nome completo é obrigatório.' })
+  @IsFullName()
   fullName: string;
 
-  @IsString()
-  @IsNotEmpty({ message: 'O CPF é obrigatório.' })
-  @Matches(/^\d{11}$/, {
-    message: 'O CPF deve conter exatamente 11 dígitos numéricos (sem formatação).',
-  })
+  @IsCpf()
   cpf: string;
 
-  @IsEmail({}, { message: 'Informe um endereço de e-mail válido.' })
-  @IsNotEmpty({ message: 'O e-mail é obrigatório.' })
+  @IsPersonEmail()
   email: string;
 
   @IsString()
@@ -35,8 +30,7 @@ export class CreateUserDto {
   birthDate: string;
 
   @ApiPropertyOptional({ description: 'Nome do responsável (obrigatório para menor de 18)' })
-  @IsOptional()
-  @IsString()
+  @IsFullName({ optional: true, requiredMessage: PERSON_MESSAGES.guardianNameRequired })
   guardianName?: string;
 
   @ApiPropertyOptional({ description: 'Celular do responsável (obrigatório para menor de 18)' })

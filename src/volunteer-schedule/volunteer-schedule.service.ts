@@ -1,11 +1,14 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Between, IsNull, Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { Between, DataSource, IsNull, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { VolunteerShift } from './volunteer-shift.entity';
 import { ScheduleLock } from './schedule-lock.entity';
+import { ScheduleInstitution } from './schedule-institution.entity';
+import { programOf } from './schedule-access.service';
 import { User } from '../user/user.entity';
 import { MailService } from '../mail/mail.service';
+import { ScheduleRealtimeService } from './schedule-realtime.service';
 import {
   addDays,
   CANCEL_MIN_HOURS,
@@ -21,6 +24,8 @@ import {
 export interface ScheduleActor {
   id: string;
   canManage: boolean;
+  /** Ação vinda da LP: o evento em tempo real não leva autor nem clientId */
+  public?: boolean;
 }
 
 /** Quem olha a agenda: equipe Admin vê nomes; `userId` null = LP sem identificação. */
@@ -37,7 +42,12 @@ export interface BookShiftInput {
   notes?: string;
   /** Marcar por outro voluntário (só quem gerencia a agenda) */
   userId?: string;
+  /** Programa de horas complementares: faculdade e curso vão juntos ou nenhum dos dois (RN-09) */
+  institutionId?: string;
+  course?: string;
 }
+
+const INSTITUTION_UNAVAILABLE = 'Essa faculdade não está mais disponível, escolha outra.';
 
 const overlaps = (a: { startTime: string; endTime: string }, b: { startTime: string; endTime: string }) =>
   a.startTime < b.endTime && b.startTime < a.endTime;
@@ -52,6 +62,8 @@ export class VolunteerScheduleService {
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     private readonly mailService: MailService,
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly realtime: ScheduleRealtimeService,
   ) {}
 
   /** Mês da agenda. Nomes só para a equipe Admin; o próprio voluntário se vê como "Você". */
@@ -81,6 +93,9 @@ export class VolunteerScheduleService {
           name: viewer.isAdmin ? shift.user?.fullName : mine ? 'Você' : 'Voluntário',
           mine,
           notes: visible ? (shift.notes ?? null) : null,
+          // Mesma regra do nome: quem vê o nome vê faculdade e curso (D-07); snapshot da época da reserva
+          institutionName: visible ? shift.institutionName : null,
+          course: visible ? shift.course : null,
         };
       }),
     };
@@ -90,22 +105,40 @@ export class VolunteerScheduleService {
     const userId = input.userId ?? actor.id;
     if (userId !== actor.id && !actor.canManage) throw new ForbiddenException('Você só pode marcar o seu próprio horário.');
 
+    const course = input.course?.trim() || null;
+    if (!!input.institutionId !== !!course) throw new BadRequestException('Informe a faculdade e o curso juntos, ou nenhum dos dois.');
+
     const user = await this.activeVolunteer(userId, input.organizationId);
     await this.validateSlot(input, userId, now);
 
-    const saved = await this.shiftRepository.save(
-      this.shiftRepository.create({
-        organizationId: input.organizationId,
-        userId,
-        date: input.date,
-        startTime: input.startTime,
-        endTime: input.endTime,
-        notes: input.notes?.trim() || null,
-        cancelToken: randomUUID(),
-        createdBy: actor.id,
-        updatedBy: actor.id,
-      }),
-    );
+    // Turno e "último programa usado" do voluntário do turno (inclusive quando o Admin marca por ele) na mesma transação
+    const saved = await this.dataSource.transaction(async (manager) => {
+      let institution: ScheduleInstitution | null = null;
+      if (input.institutionId) {
+        institution = await manager.getRepository(ScheduleInstitution).findOne({ where: { id: input.institutionId, organizationId: input.organizationId, isActive: true } });
+        if (!institution) throw new BadRequestException(INSTITUTION_UNAVAILABLE);
+      }
+      const shifts = manager.getRepository(VolunteerShift);
+      const shift = await shifts.save(
+        shifts.create({
+          organizationId: input.organizationId,
+          userId,
+          date: input.date,
+          startTime: input.startTime,
+          endTime: input.endTime,
+          notes: input.notes?.trim() || null,
+          institutionId: institution?.id ?? null,
+          institutionName: institution?.name ?? null,
+          course: institution ? course : null,
+          cancelToken: randomUUID(),
+          createdBy: actor.id,
+          updatedBy: actor.id,
+        }),
+      );
+      if (institution) await manager.update(User, userId, { institutionId: institution.id, course });
+      return shift;
+    });
+    await this.realtime.publish(input.organizationId, 'shift.created', [saved.date], this.actorIdOf(actor));
     await this.mailService.sendShiftConfirmationEmail(user.email, user.fullName, saved);
     return saved;
   }
@@ -122,6 +155,7 @@ export class VolunteerScheduleService {
       notes: next.notes?.trim() || null,
       updatedBy: actor.id,
     });
+    await this.realtime.publish(organizationId, 'shift.updated', [shift.date], this.actorIdOf(actor));
     return { ...next, notes: next.notes?.trim() || null };
   }
 
@@ -130,6 +164,7 @@ export class VolunteerScheduleService {
     this.assertCanChange(shift, actor, now);
     const reason = shift.userId === actor.id ? 'Desmarcado pelo voluntário' : 'Removido pela equipe';
     await this.shiftRepository.update(id, { cancelledAt: now, cancelReason: reason, updatedBy: actor.id });
+    await this.realtime.publish(organizationId, 'shift.cancelled', [shift.date], this.actorIdOf(actor));
     return { message: 'Horário desmarcado.' };
   }
 
@@ -139,6 +174,7 @@ export class VolunteerScheduleService {
     if (!shift) throw new NotFoundException('Horário não encontrado ou já desmarcado.');
     this.assertCanChange(shift, { id: shift.userId, canManage: false }, now);
     await this.shiftRepository.update(shift.id, { cancelledAt: now, cancelReason: 'Desmarcado pelo voluntário', updatedBy: shift.userId });
+    await this.realtime.publish(shift.organizationId, 'shift.cancelled', [shift.date]);
     return { message: 'Horário desmarcado.', date: shift.date, startTime: shift.startTime, endTime: shift.endTime };
   }
 
@@ -152,24 +188,42 @@ export class VolunteerScheduleService {
       await this.shiftRepository.update(shift.id, { cancelledAt: now, cancelReason: `Dia trancado: ${lock.message}`, updatedBy: actorId });
       if (shift.user?.email) await this.mailService.sendShiftCancelledByLockEmail(shift.user.email, shift.user.fullName, shift, lock.message);
     }
+    if (shifts.length) await this.realtime.publish(organizationId, 'shift.cancelled', [date], actorId);
+    await this.realtime.publish(organizationId, 'lock.created', [date], actorId);
     return { ...lock, cancelledShifts: shifts.length };
   }
 
-  async unlock(id: string, organizationId: string) {
+  async unlock(id: string, organizationId: string, actorId?: string) {
     const lock = await this.lockRepository.findOne({ where: { id, organizationId } });
     if (!lock) throw new NotFoundException('Dia trancado não encontrado.');
     await this.lockRepository.delete(id);
+    await this.realtime.publish(organizationId, 'lock.removed', [lock.date], actorId);
     return { message: 'Dia liberado.' };
   }
 
-  /** Voluntários ativos da organização (select de "marcar por" de quem gerencia a agenda). */
+  /** Voluntários ativos da organização (select de "marcar por" de quem gerencia a agenda), com o último programa usado para o prefill. */
   async volunteers(organizationId: string) {
-    const users = await this.userRepository.find({
-      where: { organizationId, isApproved: true, isActive: true },
-      select: { id: true, fullName: true },
-      order: { fullName: 'ASC' },
-    });
-    return users.map(({ id, fullName }) => ({ id, fullName }));
+    const [users, activeInstitutions] = await Promise.all([
+      this.userRepository.find({
+        where: { organizationId, isApproved: true, isActive: true },
+        select: { id: true, fullName: true, institutionId: true, course: true },
+        order: { fullName: 'ASC' },
+      }),
+      this.dataSource.getRepository(ScheduleInstitution).find({ where: { organizationId, isActive: true }, select: { id: true } }),
+    ]);
+    const active = new Set(activeInstitutions.map((institution) => institution.id));
+    // Faculdade guardada inativa: só o curso vem preenchido (D-10)
+    return users.map(({ id, fullName, institutionId, course }) => ({ id, fullName, institutionId: institutionId && active.has(institutionId) ? institutionId : null, course: course ?? null }));
+  }
+
+  /** Último programa usado pelo usuário logado (prefill do painel); mesma regra do verify da LP (D-10). */
+  async myProgram(userId: string) {
+    const user = await this.userRepository.findOne({ where: { id: userId }, relations: { institution: true } });
+    return user ? programOf(user) : null;
+  }
+
+  private actorIdOf(actor: ScheduleActor) {
+    return actor.public ? undefined : actor.id;
   }
 
   private async activeVolunteer(userId: string, organizationId: string) {

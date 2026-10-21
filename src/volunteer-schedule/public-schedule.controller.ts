@@ -1,8 +1,9 @@
 import { Body, Controller, Delete, Get, Headers, Param, ParseUUIDPipe, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { VolunteerScheduleService } from './volunteer-schedule.service';
 import { ScheduleAccessService } from './schedule-access.service';
+import { ScheduleInstitutionService } from './schedule-institution.service';
 import { CancelShiftByTokenDto, PublicCreateShiftDto, RequestScheduleCodeDto, VerifyScheduleCodeDto } from './dto/schedule.dto';
 
 /**
@@ -15,6 +16,7 @@ export class PublicScheduleController {
   constructor(
     private readonly scheduleService: VolunteerScheduleService,
     private readonly accessService: ScheduleAccessService,
+    private readonly institutions: ScheduleInstitutionService,
   ) {}
 
   @Get()
@@ -23,6 +25,15 @@ export class PublicScheduleController {
     const session = this.accessService.optionalSession(authorization);
     const userId = session?.organizationId === organizationId ? session.userId : null;
     return this.scheduleService.month(organizationId, month, { userId, isAdmin: false });
+  }
+
+  @Get('institutions')
+  // Dado público só de leitura: limite próprio e mais folgado (redes de campus compartilham IP); code/verify/shifts seguem no padrão
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @UseGuards(ThrottlerGuard)
+  @ApiOperation({ summary: 'Faculdades do programa (LP)', description: 'Rota pública. `organizationId`. Só as ativas, em ordem alfabética: `[{ id, name }]`.' })
+  findInstitutions(@Query('organizationId', ParseUUIDPipe) organizationId: string) {
+    return this.institutions.findActive(organizationId);
   }
 
   @Post('code')
@@ -34,7 +45,7 @@ export class PublicScheduleController {
 
   @Post('verify')
   @UseGuards(ThrottlerGuard)
-  @ApiOperation({ summary: 'Validar código', description: 'Rota pública. Devolve `{ token, firstName }` (sessão de 2h da agenda).' })
+  @ApiOperation({ summary: 'Validar código', description: 'Rota pública. Devolve `{ token, firstName, program }` (sessão de 2h da agenda). `program` = último programa usado `{ institutionId, institutionName, course }` ou null; faculdade inativa vem com institutionId/institutionName null e o curso preservado.' })
   verify(@Body() dto: VerifyScheduleCodeDto) {
     return this.accessService.verify(dto.email, dto.code, dto.organizationId);
   }
@@ -45,7 +56,7 @@ export class PublicScheduleController {
   async book(@Body() dto: PublicCreateShiftDto, @Headers('authorization') authorization: string) {
     const { userId, organizationId, codeId } = this.accessService.session(authorization);
     await this.accessService.assertCanBook(codeId);
-    const shift = await this.scheduleService.book({ ...dto, organizationId }, { id: userId, canManage: false });
+    const shift = await this.scheduleService.book({ ...dto, organizationId }, { id: userId, canManage: false, public: true });
     // Só consome depois de marcar: erro de validação (horário cruzado, dia trancado) não gasta o código
     await this.accessService.markBooked(codeId);
     return shift;
@@ -55,7 +66,7 @@ export class PublicScheduleController {
   @ApiOperation({ summary: 'Desmarcar horário (LP)', description: 'Sessão da agenda. Até 24h antes.' })
   cancel(@Param('id', ParseUUIDPipe) id: string, @Headers('authorization') authorization: string) {
     const { userId, organizationId } = this.accessService.session(authorization);
-    return this.scheduleService.cancel(id, organizationId, { id: userId, canManage: false });
+    return this.scheduleService.cancel(id, organizationId, { id: userId, canManage: false, public: true });
   }
 
   @Post('cancel')

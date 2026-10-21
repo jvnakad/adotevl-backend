@@ -12,7 +12,7 @@ import { User } from '../src/user/user.entity';
 import { VolunteerShift } from '../src/volunteer-schedule/volunteer-shift.entity';
 import { MailService } from '../src/mail/mail.service';
 import { AccessLevel, Screen } from '../src/access/access';
-import { addDays, isWeekend, todayInBrazil } from '../src/volunteer-schedule/schedule-time';
+import { addDays, earliestStartToday, isWeekend, todayInBrazil } from '../src/volunteer-schedule/schedule-time';
 
 describe('Agenda de voluntariado (e2e)', () => {
   let app: INestApplication;
@@ -103,6 +103,40 @@ describe('Agenda de voluntariado (e2e)', () => {
 
     const asSelf = await request(server()).get(`/schedule?month=${month}`).set('Authorization', `Bearer ${volunteerToken}`);
     expect(asSelf.body.shifts[0]).toEqual(expect.objectContaining({ name: 'Você', mine: true }));
+  });
+
+  it('hoje: reserva só a partir do próximo passo de 30 min; o mês informa `today.earliestStart`', async () => {
+    const today = todayInBrazil();
+    const earliest = earliestStartToday();
+    const lp = await request(server()).get(`/public/schedule?organizationId=${orgId}&month=${today.slice(0, 7)}`);
+    expect(lp.body.today).toEqual(expect.objectContaining({ date: today }));
+    // Pode virar o passo de 30 min entre a leitura e a reserva: compara com a leitura mais recente
+    const book = (startTime: string, endTime: string) =>
+      request(server()).post('/schedule/shifts').set('Authorization', `Bearer ${volunteerToken}`).send({ date: today, startTime, endTime });
+
+    if (!earliest) {
+      expect(lp.body.today.earliestStart).toBeNull();
+      const res = await book('15:30', '16:00');
+      expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/Não há mais horários disponíveis para hoje|entre/);
+      return;
+    }
+    const open = isWeekend(today) ? '13:00' : '08:00';
+    if (earliest > open) {
+      const tooEarly = await book(open, '16:00');
+      expect(tooEarly.status).toBe(400);
+      expect(tooEarly.body.message).toMatch(/^Para hoje, escolha um horário a partir das \d\d:\d\d\.$/);
+    }
+    const ok = await book('15:30', '16:00');
+    // 15:30 só vale se ainda for o próximo passo possível; senão o horário já passou
+    expect([201, 400]).toContain(ok.status);
+    if (ok.status === 400) expect(ok.body.message).toMatch(/Para hoje|Não há mais horários/);
+    if (ok.status === 201) {
+      // O link do e-mail não desmarca (faltam menos de 24h)
+      const [{ cancel_token: token }] = await app.get(DataSource).query('SELECT cancel_token FROM volunteer_shifts WHERE id = $1', [ok.body.id]);
+      expect((await request(server()).post('/public/schedule/cancel').send({ token })).status).toBe(403);
+      await shiftRepo.update(ok.body.id, { cancelledAt: new Date() });
+    }
   });
 
   it('pela LP: código por e-mail abre a sessão, marca outro horário no dia e vê os próprios', async () => {

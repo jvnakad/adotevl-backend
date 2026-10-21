@@ -5,6 +5,7 @@ import { DEFAULT_SCHEDULE_INSTITUTIONS, ScheduleInstitution } from './schedule-i
 import { CreateScheduleInstitutionDto, UpdateScheduleInstitutionDto } from './dto/schedule.dto';
 import { normalizeName } from '../common/normalize-name';
 import { todayInBrazil } from './schedule-time';
+import { ScheduleRealtimeService } from './schedule-realtime.service';
 
 const NOT_FOUND_MESSAGE = 'Faculdade não encontrada.';
 const DUPLICATE_MESSAGE = 'Já existe uma faculdade com esse nome.';
@@ -17,7 +18,10 @@ const pgCode = (error: unknown) => (error as { driverError?: { code?: string } }
 export class ScheduleInstitutionService implements OnModuleInit {
   private readonly logger = new Logger(ScheduleInstitutionService.name);
 
-  constructor(@InjectDataSource() private readonly dataSource: DataSource) {}
+  constructor(
+    @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly realtime: ScheduleRealtimeService,
+  ) {}
 
   /** Seed em toda organização no boot; o boot não cai se falhar (a leitura da lista tenta de novo). */
   async onModuleInit() {
@@ -74,6 +78,7 @@ export class ScheduleInstitutionService implements OnModuleInit {
       const saved = await repository.save(
         repository.create({ organizationId, name: dto.name, nameNormalized: normalizeName(dto.name), createdBy: userId, updatedBy: userId }),
       );
+      await this.realtime.publish(organizationId, 'institutions.changed', [], userId);
       return { id: saved.id, name: saved.name, isActive: saved.isActive, totalShifts: 0, upcomingShifts: 0 };
     } catch (error) {
       if (pgCode(error) === '23505') throw new ConflictException(DUPLICATE_MESSAGE);
@@ -99,12 +104,13 @@ export class ScheduleInstitutionService implements OnModuleInit {
       if (pgCode(error) === '23505') throw new ConflictException(DUPLICATE_MESSAGE);
       throw error;
     }
+    await this.realtime.publish(organizationId, 'institutions.changed', [], userId);
     const [item] = await this.withCounts(organizationId, id);
     return item;
   }
 
   /** Só faculdade nunca usada em agendamento (FK RESTRICT no banco, inclusive turnos cancelados). */
-  async remove(id: string, organizationId: string) {
+  async remove(id: string, organizationId: string, userId?: string) {
     try {
       const { affected } = await this.dataSource.getRepository(ScheduleInstitution).delete({ id, organizationId });
       if (!affected) throw new NotFoundException(NOT_FOUND_MESSAGE);
@@ -112,6 +118,7 @@ export class ScheduleInstitutionService implements OnModuleInit {
       if (pgCode(error) === '23503') throw new ConflictException(IN_USE_MESSAGE);
       throw error;
     }
+    await this.realtime.publish(organizationId, 'institutions.changed', [], userId);
     return { message: 'Faculdade excluída com sucesso.' };
   }
 

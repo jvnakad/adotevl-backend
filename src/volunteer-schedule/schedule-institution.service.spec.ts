@@ -10,12 +10,14 @@ const pgError = (code: string) => Object.assign(new Error('pg'), { driverError: 
 describe('ScheduleInstitutionService', () => {
   let repo: MockRepository;
   let dataSource: { query: jest.Mock; getRepository: jest.Mock };
+  let realtime: { publish: jest.Mock };
   let service: ScheduleInstitutionService;
 
   beforeEach(() => {
     repo = createMockRepository();
     dataSource = { query: jest.fn().mockResolvedValue([{ seeded: new Date() }]), getRepository: jest.fn(() => repo) };
-    service = new ScheduleInstitutionService(dataSource as any);
+    realtime = { publish: jest.fn() };
+    service = new ScheduleInstitutionService(dataSource as any, realtime as any);
   });
 
   describe('seed da PUCPR', () => {
@@ -93,6 +95,26 @@ describe('ScheduleInstitutionService', () => {
 
       repo.delete.mockResolvedValueOnce({ affected: 0 });
       await expect(service.remove('i1', 'org-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('criar, editar e excluir emitem institutions.changed (sem dias); falha não emite', async () => {
+      repo.save.mockImplementation(async (data) => ({ id: 'i2', isActive: true, ...data }));
+      await service.create({ name: 'UFPR' }, 'u1', 'org-1');
+      repo.findOne.mockResolvedValue({ id: 'i1', name: 'PUCPR', nameNormalized: 'pucpr', isActive: true });
+      dataSource.query.mockResolvedValue([{ id: 'i1', name: 'PUCPR', is_active: false, total_shifts: 0, upcoming_shifts: 0 }]);
+      await service.update('i1', { isActive: false }, 'u1', 'org-1');
+      repo.delete.mockResolvedValueOnce({ affected: 1 });
+      await service.remove('i1', 'org-1', 'u1');
+      expect(realtime.publish.mock.calls).toEqual([
+        ['org-1', 'institutions.changed', [], 'u1'],
+        ['org-1', 'institutions.changed', [], 'u1'],
+        ['org-1', 'institutions.changed', [], 'u1'],
+      ]);
+
+      realtime.publish.mockClear();
+      repo.save.mockRejectedValue(pgError('23505'));
+      await expect(service.create({ name: 'ufpr' }, 'u1', 'org-1')).rejects.toThrow(ConflictException);
+      expect(realtime.publish).not.toHaveBeenCalled();
     });
   });
 });

@@ -8,8 +8,10 @@ import { ScheduleInstitution } from './schedule-institution.entity';
 import { programOf } from './schedule-access.service';
 import { User } from '../user/user.entity';
 import { MailService } from '../mail/mail.service';
+import { ScheduleRealtimeService } from './schedule-realtime.service';
 import {
   addDays,
+  earliestStartToday,
   CANCEL_MIN_HOURS,
   MAX_DAYS_AHEAD,
   monthRange,
@@ -23,6 +25,8 @@ import {
 export interface ScheduleActor {
   id: string;
   canManage: boolean;
+  /** Ação vinda da LP: o evento em tempo real não leva autor nem clientId */
+  public?: boolean;
 }
 
 /** Quem olha a agenda: equipe Admin vê nomes; `userId` null = LP sem identificação. */
@@ -60,10 +64,11 @@ export class VolunteerScheduleService {
     private readonly userRepository: Repository<User>,
     private readonly mailService: MailService,
     @InjectDataSource() private readonly dataSource: DataSource,
+    private readonly realtime: ScheduleRealtimeService,
   ) {}
 
   /** Mês da agenda. Nomes só para a equipe Admin; o próprio voluntário se vê como "Você". */
-  async month(organizationId: string, month: string, viewer: ScheduleViewer) {
+  async month(organizationId: string, month: string, viewer: ScheduleViewer, now = new Date()) {
     if (!MONTH_PATTERN.test(month ?? '')) throw new BadRequestException('Informe o mês no formato AAAA-MM.');
     const { from, to } = monthRange(month);
     const [shifts, locks] = await Promise.all([
@@ -77,6 +82,8 @@ export class VolunteerScheduleService {
 
     return {
       month,
+      // Hoje já aceita reserva a partir do próximo passo de 30 min; `earliestStart` null = sem horário hoje
+      today: { date: todayInBrazil(now), earliestStart: earliestStartToday(now) },
       locks: locks.map(({ id, date, message }) => ({ id, date, message })),
       shifts: shifts.map((shift) => {
         const mine = !!viewer.userId && shift.userId === viewer.userId;
@@ -134,6 +141,7 @@ export class VolunteerScheduleService {
       if (institution) await manager.update(User, userId, { institutionId: institution.id, course });
       return shift;
     });
+    await this.realtime.publish(input.organizationId, 'shift.created', [saved.date], this.actorIdOf(actor));
     await this.mailService.sendShiftConfirmationEmail(user.email, user.fullName, saved);
     return saved;
   }
@@ -143,13 +151,15 @@ export class VolunteerScheduleService {
     const shift = await this.findActive(id, organizationId);
     this.assertCanChange(shift, actor, now);
     const next = { ...shift, ...input };
-    await this.validateSlot(next, shift.userId, now, shift.id);
+    // Início que não mudou não é rechecado contra "agora": dá para editar fim/observação de um turno de hoje que já começou
+    await this.validateSlot(next, shift.userId, now, shift.id, next.startTime !== shift.startTime);
     await this.shiftRepository.update(id, {
       startTime: next.startTime,
       endTime: next.endTime,
       notes: next.notes?.trim() || null,
       updatedBy: actor.id,
     });
+    await this.realtime.publish(organizationId, 'shift.updated', [shift.date], this.actorIdOf(actor));
     return { ...next, notes: next.notes?.trim() || null };
   }
 
@@ -158,6 +168,7 @@ export class VolunteerScheduleService {
     this.assertCanChange(shift, actor, now);
     const reason = shift.userId === actor.id ? 'Desmarcado pelo voluntário' : 'Removido pela equipe';
     await this.shiftRepository.update(id, { cancelledAt: now, cancelReason: reason, updatedBy: actor.id });
+    await this.realtime.publish(organizationId, 'shift.cancelled', [shift.date], this.actorIdOf(actor));
     return { message: 'Horário desmarcado.' };
   }
 
@@ -167,6 +178,7 @@ export class VolunteerScheduleService {
     if (!shift) throw new NotFoundException('Horário não encontrado ou já desmarcado.');
     this.assertCanChange(shift, { id: shift.userId, canManage: false }, now);
     await this.shiftRepository.update(shift.id, { cancelledAt: now, cancelReason: 'Desmarcado pelo voluntário', updatedBy: shift.userId });
+    await this.realtime.publish(shift.organizationId, 'shift.cancelled', [shift.date]);
     return { message: 'Horário desmarcado.', date: shift.date, startTime: shift.startTime, endTime: shift.endTime };
   }
 
@@ -180,13 +192,16 @@ export class VolunteerScheduleService {
       await this.shiftRepository.update(shift.id, { cancelledAt: now, cancelReason: `Dia trancado: ${lock.message}`, updatedBy: actorId });
       if (shift.user?.email) await this.mailService.sendShiftCancelledByLockEmail(shift.user.email, shift.user.fullName, shift, lock.message);
     }
+    if (shifts.length) await this.realtime.publish(organizationId, 'shift.cancelled', [date], actorId);
+    await this.realtime.publish(organizationId, 'lock.created', [date], actorId);
     return { ...lock, cancelledShifts: shifts.length };
   }
 
-  async unlock(id: string, organizationId: string) {
+  async unlock(id: string, organizationId: string, actorId?: string) {
     const lock = await this.lockRepository.findOne({ where: { id, organizationId } });
     if (!lock) throw new NotFoundException('Dia trancado não encontrado.');
     await this.lockRepository.delete(id);
+    await this.realtime.publish(organizationId, 'lock.removed', [lock.date], actorId);
     return { message: 'Dia liberado.' };
   }
 
@@ -211,6 +226,10 @@ export class VolunteerScheduleService {
     return user ? programOf(user) : null;
   }
 
+  private actorIdOf(actor: ScheduleActor) {
+    return actor.public ? undefined : actor.id;
+  }
+
   private async activeVolunteer(userId: string, organizationId: string) {
     const user = await this.userRepository.findOne({ where: { id: userId } });
     if (!user || user.organizationId !== organizationId || !user.isApproved || !user.isActive) {
@@ -232,7 +251,7 @@ export class VolunteerScheduleService {
     if (hoursLeft < CANCEL_MIN_HOURS) throw new ForbiddenException('Faltam menos de 24h para o horário. Fale com a ONG pelo WhatsApp.');
   }
 
-  private async validateSlot(slot: { organizationId: string; date: string; startTime: string; endTime: string }, userId: string, now: Date, ignoreId?: string) {
+  private async validateSlot(slot: { organizationId: string; date: string; startTime: string; endTime: string }, userId: string, now: Date, ignoreId?: string, checkEarliestToday = true) {
     const { open, close } = scheduleHoursFor(slot.date);
     if (slot.startTime < open || slot.endTime > close || slot.startTime > close) {
       throw new BadRequestException(`Neste dia, escolha um horário entre ${open} e ${close}.`);
@@ -240,11 +259,18 @@ export class VolunteerScheduleService {
     if (slot.endTime <= slot.startTime) throw new BadRequestException('O fim precisa ser depois do início.');
 
     const today = todayInBrazil(now);
-    if (slot.date <= today) throw new BadRequestException('Marque a partir de amanhã.');
+    if (slot.date < today) throw new BadRequestException('Esse dia já passou. Marque a partir de hoje.');
     if (slot.date > addDays(today, MAX_DAYS_AHEAD)) throw new BadRequestException(`Dá para marcar até ${MAX_DAYS_AHEAD} dias à frente.`);
 
     const lock = await this.lockRepository.findOne({ where: { organizationId: slot.organizationId, date: slot.date } });
     if (lock) throw new BadRequestException(`Dia trancado: ${lock.message}`);
+
+    // Hoje: só a partir do próximo passo de 30 min (vale para todos, inclusive quem gerencia a agenda)
+    if (slot.date === today && checkEarliestToday) {
+      const earliest = earliestStartToday(now);
+      if (!earliest) throw new BadRequestException('Não há mais horários disponíveis para hoje. Escolha outro dia.');
+      if (slot.startTime < earliest) throw new BadRequestException(`Para hoje, escolha um horário a partir das ${earliest}.`);
+    }
 
     const sameDay = await this.shiftRepository.find({ where: { userId, date: slot.date, cancelledAt: IsNull() } });
     if (sameDay.some((other) => other.id !== ignoreId && overlaps(other, slot))) {

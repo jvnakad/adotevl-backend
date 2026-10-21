@@ -52,3 +52,21 @@ export const dateColumnTransformer = {
     return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
   },
 };
+
+/** 'HH:MM' atual em Brasília */
+export const timeInBrazil = (now = new Date()) =>
+  new Intl.DateTimeFormat('en-GB', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now);
+
+/**
+ * Primeiro início possível hoje: o próximo passo de 30 min estritamente depois de agora (10:07 -> 10:30; 10:30 -> 11:00),
+ * nunca antes da abertura. `null` quando não sobra horário (o início precisa ser antes do fechamento).
+ */
+export function earliestStartToday(now = new Date()): string | null {
+  const [hours, minutes] = timeInBrazil(now).split(':').map(Number);
+  const nextSlot = (Math.floor((hours * 60 + minutes) / 30) + 1) * 30;
+  const { open, close } = scheduleHoursFor(todayInBrazil(now));
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const candidate = `${pad(Math.floor(nextSlot / 60))}:${pad(nextSlot % 60)}`;
+  const earliest = candidate < open ? open : candidate;
+  return nextSlot >= 24 * 60 || earliest >= close ? null : earliest;
+}

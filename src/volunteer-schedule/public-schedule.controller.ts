@@ -56,7 +56,7 @@ export class PublicScheduleController {
   async book(@Body() dto: PublicCreateShiftDto, @Headers('authorization') authorization: string) {
     const { userId, organizationId, codeId } = this.accessService.session(authorization);
     await this.accessService.assertCanBook(codeId);
-    const shift = await this.scheduleService.book({ ...dto, organizationId }, { id: userId, canManage: false });
+    const shift = await this.scheduleService.book({ ...dto, organizationId }, { id: userId, canManage: false, public: true });
     // Só consome depois de marcar: erro de validação (horário cruzado, dia trancado) não gasta o código
     await this.accessService.markBooked(codeId);
     return shift;
@@ -66,7 +66,7 @@ export class PublicScheduleController {
   @ApiOperation({ summary: 'Desmarcar horário (LP)', description: 'Sessão da agenda. Até 24h antes.' })
   cancel(@Param('id', ParseUUIDPipe) id: string, @Headers('authorization') authorization: string) {
     const { userId, organizationId } = this.accessService.session(authorization);
-    return this.scheduleService.cancel(id, organizationId, { id: userId, canManage: false });
+    return this.scheduleService.cancel(id, organizationId, { id: userId, canManage: false, public: true });
   }
 
   @Post('cancel')

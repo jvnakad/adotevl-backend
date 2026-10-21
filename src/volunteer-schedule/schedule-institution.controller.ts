@@ -47,6 +47,6 @@ export class ScheduleInstitutionController {
   @AdminOnly()
   @ApiOperation({ summary: 'Excluir faculdade', description: 'Somente equipe Admin. Só se nunca usada em agendamento; senão 409 e é preciso desativar.' })
   remove(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
-    return this.institutions.remove(id, req.user.organizationId);
+    return this.institutions.remove(id, req.user.organizationId, req.user.id);
   }
 }

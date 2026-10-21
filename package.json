@@ -15,7 +15,7 @@
     "seed:marketing": "ts-node -r tsconfig-paths/register scripts/seed-marketing.ts",
     "test": "jest",
     "test:cov": "jest --coverage",
-    "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "test:watch": "jest --watch"
   },
   "dependencies": {

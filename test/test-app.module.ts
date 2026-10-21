@@ -241,6 +241,7 @@ export async function cleanupAccess(app: INestApplication, organizationId: strin
   await cleanupMarketing(app, organizationId);
   // Idem a agenda: o seed da PUCPR roda para toda organização e o RESTRICT de volunteer_shifts impede apagar a faculdade antes dos turnos
   await dataSource.query('DELETE FROM volunteer_shifts WHERE organization_id = $1', [organizationId]);
+  await dataSource.query('DELETE FROM schedule_locks WHERE organization_id = $1', [organizationId]);
   await dataSource.query('DELETE FROM schedule_institutions WHERE organization_id = $1', [organizationId]);
   await dataSource.query('DELETE FROM notifications WHERE organization_id = $1', [organizationId]);
   await dataSource.query('DELETE FROM volunteers WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [organizationId]);

@@ -11,7 +11,6 @@ import { MailService } from '../mail/mail.service';
 import { ScheduleRealtimeService } from './schedule-realtime.service';
 import {
   addDays,
-  earliestStartToday,
   CANCEL_MIN_HOURS,
   MAX_DAYS_AHEAD,
   monthRange,
@@ -68,7 +67,7 @@ export class VolunteerScheduleService {
   ) {}
 
   /** Mês da agenda. Nomes só para a equipe Admin; o próprio voluntário se vê como "Você". */
-  async month(organizationId: string, month: string, viewer: ScheduleViewer, now = new Date()) {
+  async month(organizationId: string, month: string, viewer: ScheduleViewer) {
     if (!MONTH_PATTERN.test(month ?? '')) throw new BadRequestException('Informe o mês no formato AAAA-MM.');
     const { from, to } = monthRange(month);
     const [shifts, locks] = await Promise.all([
@@ -82,8 +81,6 @@ export class VolunteerScheduleService {
 
     return {
       month,
-      // Hoje já aceita reserva a partir do próximo passo de 30 min; `earliestStart` null = sem horário hoje
-      today: { date: todayInBrazil(now), earliestStart: earliestStartToday(now) },
       locks: locks.map(({ id, date, message }) => ({ id, date, message })),
       shifts: shifts.map((shift) => {
         const mine = !!viewer.userId && shift.userId === viewer.userId;
@@ -151,8 +148,7 @@ export class VolunteerScheduleService {
     const shift = await this.findActive(id, organizationId);
     this.assertCanChange(shift, actor, now);
     const next = { ...shift, ...input };
-    // Início que não mudou não é rechecado contra "agora": dá para editar fim/observação de um turno de hoje que já começou
-    await this.validateSlot(next, shift.userId, now, shift.id, next.startTime !== shift.startTime);
+    await this.validateSlot(next, shift.userId, now, shift.id);
     await this.shiftRepository.update(id, {
       startTime: next.startTime,
       endTime: next.endTime,
@@ -251,7 +247,7 @@ export class VolunteerScheduleService {
     if (hoursLeft < CANCEL_MIN_HOURS) throw new ForbiddenException('Faltam menos de 24h para o horário. Fale com a ONG pelo WhatsApp.');
   }
 
-  private async validateSlot(slot: { organizationId: string; date: string; startTime: string; endTime: string }, userId: string, now: Date, ignoreId?: string, checkEarliestToday = true) {
+  private async validateSlot(slot: { organizationId: string; date: string; startTime: string; endTime: string }, userId: string, now: Date, ignoreId?: string) {
     const { open, close } = scheduleHoursFor(slot.date);
     if (slot.startTime < open || slot.endTime > close || slot.startTime > close) {
       throw new BadRequestException(`Neste dia, escolha um horário entre ${open} e ${close}.`);
@@ -259,18 +255,11 @@ export class VolunteerScheduleService {
     if (slot.endTime <= slot.startTime) throw new BadRequestException('O fim precisa ser depois do início.');
 
     const today = todayInBrazil(now);
-    if (slot.date < today) throw new BadRequestException('Esse dia já passou. Marque a partir de hoje.');
+    if (slot.date <= today) throw new BadRequestException('Marque a partir de amanhã.');
     if (slot.date > addDays(today, MAX_DAYS_AHEAD)) throw new BadRequestException(`Dá para marcar até ${MAX_DAYS_AHEAD} dias à frente.`);
 
     const lock = await this.lockRepository.findOne({ where: { organizationId: slot.organizationId, date: slot.date } });
     if (lock) throw new BadRequestException(`Dia trancado: ${lock.message}`);
-
-    // Hoje: só a partir do próximo passo de 30 min (vale para todos, inclusive quem gerencia a agenda)
-    if (slot.date === today && checkEarliestToday) {
-      const earliest = earliestStartToday(now);
-      if (!earliest) throw new BadRequestException('Não há mais horários disponíveis para hoje. Escolha outro dia.');
-      if (slot.startTime < earliest) throw new BadRequestException(`Para hoje, escolha um horário a partir das ${earliest}.`);
-    }
 
     const sameDay = await this.shiftRepository.find({ where: { userId, date: slot.date, cancelledAt: IsNull() } });
     if (sameDay.some((other) => other.id !== ignoreId && overlaps(other, slot))) {

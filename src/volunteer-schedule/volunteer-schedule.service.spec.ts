@@ -117,35 +117,8 @@ describe('VolunteerScheduleService', () => {
       await expect(service.book({ ...saturday, startTime: '13:00', endTime: '16:00' }, self, NOW)).resolves.toBeDefined();
     });
 
-    it('hoje: só a partir do próximo passo de 30 min (agora 12:00 -> 12:30), para voluntário e para quem gerencia', async () => {
-      const today = { ...booking, date: '2026-10-14', endTime: '15:00' };
-
-      await expect(service.book({ ...today, startTime: '12:00' }, self, NOW)).rejects.toThrow(new BadRequestException('Para hoje, escolha um horário a partir das 12:30.'));
-      await expect(service.book({ ...today, startTime: '09:00' }, admin, NOW)).rejects.toThrow(new BadRequestException('Para hoje, escolha um horário a partir das 12:30.'));
-      await expect(service.book({ ...today, startTime: '12:30' }, self, NOW)).resolves.toBeDefined();
-    });
-
-    it('hoje: agora 12:30 exato -> 13:00; 12:07 -> 12:30', async () => {
-      const today = { ...booking, date: '2026-10-14', endTime: '15:00' };
-
-      await expect(service.book({ ...today, startTime: '12:30' }, self, new Date('2026-10-14T12:30:00-03:00'))).rejects.toThrow('a partir das 13:00');
-      await expect(service.book({ ...today, startTime: '12:30' }, self, new Date('2026-10-14T12:07:00-03:00'))).resolves.toBeDefined();
-    });
-
-    it('hoje: antes da abertura vale o primeiro horário do dia; sem horário sobrando, o dia não é reservável', async () => {
-      const today = { ...booking, date: '2026-10-14', endTime: '10:00' };
-      await expect(service.book({ ...today, startTime: '08:00' }, self, new Date('2026-10-14T06:10:00-03:00'))).resolves.toBeDefined();
-
-      await expect(service.book({ ...today, startTime: '15:30', endTime: '16:00' }, self, new Date('2026-10-14T15:30:00-03:00'))).rejects.toThrow(
-        new BadRequestException('Não há mais horários disponíveis para hoje. Escolha outro dia.'),
-      );
-    });
-
-    it('dia que já passou é recusado', async () => {
-      await expect(service.book({ ...booking, date: '2026-10-13' }, self, NOW)).rejects.toThrow(BadRequestException);
-    });
-
-    it('só até 60 dias à frente', async () => {
+    it('só a partir de amanhã e até 60 dias à frente', async () => {
+      await expect(service.book({ ...booking, date: '2026-10-14' }, self, NOW)).rejects.toThrow(new BadRequestException('Marque a partir de amanhã.'));
       await expect(service.book({ ...booking, date: '2026-12-14' }, self, NOW)).rejects.toThrow(new BadRequestException('Dá para marcar até 60 dias à frente.'));
       await expect(service.book({ ...booking, date: '2026-12-13', startTime: '13:00', endTime: '15:00' }, self, NOW)).resolves.toBeDefined();
     });
@@ -250,15 +223,6 @@ describe('VolunteerScheduleService', () => {
     it('mês inválido é recusado', async () => {
       await expect(service.month('org-1', '2026-13', { userId: null, isAdmin: false })).rejects.toThrow(BadRequestException);
     });
-
-    it('devolve hoje e o primeiro início possível (null quando não sobra horário)', async () => {
-      const viewer = { userId: null, isAdmin: false };
-
-      expect((await service.month('org-1', '2026-10', viewer, NOW)).today).toEqual({ date: '2026-10-14', earliestStart: '12:30' });
-      expect((await service.month('org-1', '2026-10', viewer, new Date('2026-10-14T16:10:00-03:00'))).today).toEqual({ date: '2026-10-14', earliestStart: null });
-      // Sábado: abre às 13:00
-      expect((await service.month('org-1', '2026-10', viewer, new Date('2026-10-17T09:00:00-03:00'))).today).toEqual({ date: '2026-10-17', earliestStart: '13:00' });
-    });
   });
 
   describe('voluntários', () => {
@@ -309,25 +273,6 @@ describe('VolunteerScheduleService', () => {
       lockRepo.findOne.mockResolvedValue({ id: 'l1' });
 
       await expect(service.lock('org-1', '2026-10-20', 'Outro', 'u-admin', NOW)).rejects.toThrow(new ConflictException('Esse dia já está trancado.'));
-    });
-  });
-
-  describe('editar turno de hoje', () => {
-    const todayShift = { id: 's1', organizationId: 'org-1', userId: 'u-admin', date: '2026-10-14', startTime: '09:00', endTime: '11:00', cancelledAt: null };
-
-    it('não move o início para antes do próximo passo de 30 min', async () => {
-      shiftRepo.findOne.mockResolvedValue({ ...todayShift, startTime: '13:00', endTime: '15:00' });
-
-      await expect(service.update('s1', 'org-1', { startTime: '12:00', endTime: '15:00' }, admin, NOW)).rejects.toThrow(
-        new BadRequestException('Para hoje, escolha um horário a partir das 12:30.'),
-      );
-      await expect(service.update('s1', 'org-1', { startTime: '12:30', endTime: '15:00' }, admin, NOW)).resolves.toBeDefined();
-    });
-
-    it('início inalterado: dá para ajustar fim e observação de um turno que já começou', async () => {
-      shiftRepo.findOne.mockResolvedValue(todayShift);
-
-      await expect(service.update('s1', 'org-1', { startTime: '09:00', endTime: '12:00', notes: 'ok' }, admin, NOW)).resolves.toBeDefined();
     });
   });
 

@@ -48,6 +48,9 @@ import { AccessModule } from '../src/access/access.module';
 import { VolunteerShift } from '../src/volunteer-schedule/volunteer-shift.entity';
 import { ScheduleLock } from '../src/volunteer-schedule/schedule-lock.entity';
 import { ScheduleAccessCode } from '../src/volunteer-schedule/schedule-access-code.entity';
+import { PasswordResetCode } from '../src/auth/password-reset-code.entity';
+import { EmailChangeRequest } from '../src/user/email-change-request.entity';
+import { EmailChangeEvent } from '../src/user/email-change-event.entity';
 import { VolunteerScheduleModule } from '../src/volunteer-schedule/volunteer-schedule.module';
 import { VolunteerApplication } from '../src/volunteer-application/volunteer-application.entity';
 import { ProductType } from '../src/stock/product-type.entity';
@@ -70,11 +73,49 @@ import { MarketingCardAttachment } from '../src/marketing/entities/marketing-car
 import { MarketingCardComment } from '../src/marketing/entities/marketing-card-comment.entity';
 import { MarketingHistoryEvent } from '../src/marketing/entities/marketing-history-event.entity';
 
+/**
+ * Trava de segurança do e2e: só roda contra Postgres local. DATABASE_URL tem de vir do processo e apontar para localhost ou 127.0.0.1.
+ * Ex.: DATABASE_URL="postgresql://usuario:senha@localhost:5432/adotevl_e2e?sslmode=disable" JWT_SECRET=... npm run test:e2e
+ */
+export function assertLocalTestDatabase(url = process.env.DATABASE_URL) {
+  if (!url) throw new Error('E2E recusado: defina DATABASE_URL (Postgres local, host localhost ou 127.0.0.1). O .env não é lido nos testes.');
+  let host = '';
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    throw new Error('E2E recusado: DATABASE_URL inválida. Use um Postgres local (localhost ou 127.0.0.1).');
+  }
+  if (!['localhost', '127.0.0.1', '[::1]', '::1'].includes(host)) {
+    throw new Error('E2E recusado: DATABASE_URL não aponta para localhost ou 127.0.0.1. Os testes apagam e recriam dados.');
+  }
+}
+assertLocalTestDatabase();
+
 class MockMailService {
   async sendConfirmationEmail() {}
   async sendApprovalEmail() {}
   async sendPasswordResetEmail() {}
   async sendFloatingWelcomeEmail() {}
+  // Esqueci minha senha: o e2e lê o último código e confere quem recebeu e-mail
+  lastPasswordResetCode: string | null = null;
+  passwordResetCodeSentTo: string[] = [];
+  passwordChangedSentTo: string[] = [];
+  async sendPasswordResetCodeEmail(to: string, _name: string, code: string) {
+    this.lastPasswordResetCode = code;
+    this.passwordResetCodeSentTo.push(to);
+  }
+  // Troca de e-mail: o e2e lê o último código e confere quem recebeu
+  lastEmailChangeCode: string | null = null;
+  emailChangeCodeSentTo: string[] = [];
+  failEmailChangeSend = false;
+  async sendEmailChangeCodeEmail(to: string, code: string) {
+    if (this.failEmailChangeSend) throw new Error('envio falhou');
+    this.lastEmailChangeCode = code;
+    this.emailChangeCodeSentTo.push(to);
+  }
+  async sendPasswordChangedEmail(to: string) {
+    this.passwordChangedSentTo.push(to);
+  }
   // Último turno confirmado por e-mail (o e2e da agenda confere faculdade e curso)
   lastShiftConfirmation: { institutionName?: string | null; course?: string | null } | null = null;
   async sendShiftConfirmationEmail(_to: string, _name: string, shift: { institutionName?: string | null; course?: string | null }) {
@@ -171,14 +212,15 @@ class MockAutentiqueModule {}
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true }),
+    // Nunca lê .env: ele pode apontar para o banco de produção. Tudo vem do processo (ver assertLocalTestDatabase)
+    ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, ScheduleInstitution, ProductType, Product, StockHistoryEvent,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, PasswordResetCode, EmailChangeRequest, EmailChangeEvent, ScheduleInstitution, ProductType, Product, StockHistoryEvent,
         MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification,
       ],
       synchronize: true,

@@ -41,7 +41,8 @@ export class User {
   @Column({ name: 'birth_date', type: 'date', nullable: true })
   birthDate: Date;
 
-  @Column()
+  /** select: false: o hash nunca sai em consulta comum (RN-35). Login e troca de senha pedem com addSelect */
+  @Column({ select: false })
   password: string;
 
   @Column({ name: 'is_confirmed', default: false })
@@ -50,8 +51,20 @@ export class User {
   @Column({ name: 'is_approved', default: false })
   isApproved: boolean;
 
-  @Column({ name: 'confirmation_code', nullable: true })
+  @Column({ name: 'confirmation_code', nullable: true, select: false })
   confirmationCode: string;
+
+  /**
+   * Última troca de senha (esqueci-senha, reset pela tela Voluntários, perfil) ou troca do e-mail pelo admin (revoga as sessões). JWT do painel com
+   * iat < floor(passwordChangedAt / 1000) é recusado (RN-21). null = nunca trocou, nada revogado.
+   * Gravar com o relógio da API (new Date()) e só depois assinar o token novo (RN-30).
+   */
+  @Column({ name: 'password_changed_at', type: 'timestamptz', nullable: true, select: false })
+  passwordChangedAt: Date | null;
+
+  /** Bloqueio do "Esqueci minha senha" após 15 falhas em 24 h (RN-31). Não afeta o login com a senha atual */
+  @Column({ name: 'password_reset_locked_until', type: 'timestamptz', nullable: true, select: false })
+  passwordResetLockedUntil: Date | null;
 
   @ManyToOne(() => Profile, { nullable: false, eager: true })
   @JoinColumn({ name: 'profile_id' })

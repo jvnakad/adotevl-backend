@@ -102,7 +102,8 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     // Resposta pública não expõe hash da senha nem código de confirmação (o código chega por e-mail)
     expect(createRes.body).toEqual({ id: expect.any(String), email: 'voluntario.novo@teste.com' });
     const userId = createRes.body.id;
-    const { confirmationCode } = await userRepo.findOne({ where: { id: userId } });
+    // confirmationCode é select:false: só aparece pedindo
+    const { confirmationCode } = await userRepo.findOne({ where: { id: userId }, select: { id: true, confirmationCode: true } });
 
     // Admin lê o questionário respondido no cadastro
     const applicationRes = await request(app.getHttpServer())
@@ -237,6 +238,49 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     const goodEdit = await request(server).patch(`/users/${saved.id}`).set(auth).send({ fullName: ' Pessoa  Editada ', cpf: '529.982.247-25' });
     expect(goodEdit.status).toBe(200);
     expect(goodEdit.body).toEqual(expect.objectContaining({ fullName: 'Pessoa Editada', cpf: '52998224725' }));
+  }, 30000);
+
+  it('admin altera o e-mail de outro voluntário: grava, derruba o token antigo e o login passa a ser pelo novo', async () => {
+    const server = app.getHttpServer();
+    const auth = { Authorization: `Bearer ${adminToken}` };
+    const volunteerProfile = await profileRepo.findOne({ where: { name: 'VOLUNTEER' } });
+    const base = { organizationId: orgId, profileId: volunteerProfile.id, isConfirmed: true, isApproved: true, isActive: true, password: await bcrypt.hash('senha123', 10) };
+    const target = await userRepo.save({ ...base, fullName: 'Troca Email', cpf: '52998224725', email: 'troca.antigo@teste.com', phone: '11900000010' });
+    const other = await userRepo.save({ ...base, fullName: 'Outro Usuario', cpf: '39053344705', email: 'ocupado@teste.com', phone: '11900000011' });
+    await joinTeam(app, target, 'ADMIN');
+
+    const oldLogin = await request(server).post('/auth/login').send({ email: 'troca.antigo@teste.com', password: 'senha123' });
+    expect(oldLogin.status).toBe(201);
+    const oldToken = oldLogin.body.access_token;
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${oldToken}`)).status).toBe(200);
+
+    // E-mail de outro usuário (sem diferenciar maiúsculas) e o próprio e-mail do admin por esta rota
+    const taken = await request(server).patch(`/users/${target.id}`).set(auth).send({ email: 'OCUPADO@teste.com' });
+    expect(taken.status).toBe(409);
+    expect(taken.body.message).toBe('Este e-mail já está em uso.');
+    const own = await request(server).patch(`/users/${adminId}`).set(auth).send({ email: 'admin.novo@teste.com' });
+    expect(own.status).toBe(400);
+    expect(own.body.message).toBe('Altere seu e-mail em Editar perfil.');
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${oldToken}`)).status).toBe(200);
+
+    // O guard só recusa iat menor que o segundo da troca: espera virar o segundo
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const changed = await request(server).patch(`/users/${target.id}`).set(auth).send({ email: ' Troca.Novo@Teste.com ', fullName: 'Troca Email' });
+    expect(changed.status).toBe(200);
+    expect(changed.body.email).toBe('troca.novo@teste.com');
+    expect((await userRepo.findOne({ where: { id: target.id } })).email).toBe('troca.novo@teste.com');
+
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${oldToken}`)).status).toBe(401);
+    expect((await request(server).post('/auth/login').send({ email: 'troca.antigo@teste.com', password: 'senha123' })).status).toBe(401);
+    const newLogin = await request(server).post('/auth/login').send({ email: 'troca.novo@teste.com', password: 'senha123' });
+    expect(newLogin.status).toBe(201);
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${newLogin.body.access_token}`)).status).toBe(200);
+
+    // Mesmo e-mail de novo: no-op, a sessão nova continua valendo
+    const same = await request(server).patch(`/users/${target.id}`).set(auth).send({ email: 'troca.novo@teste.com' });
+    expect(same.status).toBe(200);
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${newLogin.body.access_token}`)).status).toBe(200);
+    expect(other.email).toBe('ocupado@teste.com');
   }, 30000);
 
   it('tutoriais: marca tour visto, desliga e zera pelo /users/me/tutorial', async () => {

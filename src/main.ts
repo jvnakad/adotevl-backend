@@ -1,12 +1,20 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe } from '@nestjs/common';
+import { Logger, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { isLocalStorage, LOCAL_UPLOADS_DIR } from './storage/storage.service';
 import { localUploadsMiddleware } from './storage/local-uploads';
+import { jwtSecret } from './auth/jwt-secret';
 
 async function bootstrap() {
+  // Sem JWT_SECRET forte a API não sobe (a mensagem nunca traz o valor)
+  try {
+    jwtSecret();
+  } catch (error) {
+    Logger.error((error as Error).message, 'Bootstrap');
+    process.exit(1);
+  }
   // rawBody: o webhook do Autentique valida a assinatura HMAC sobre o corpo original
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
   app.enableCors();

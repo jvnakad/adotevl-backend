@@ -11,6 +11,7 @@ import { Organization } from '../src/organization/organization.entity';
 import { User } from '../src/user/user.entity';
 import { VolunteerShift } from '../src/volunteer-schedule/volunteer-shift.entity';
 import { MailService } from '../src/mail/mail.service';
+import { ScheduleAccessService } from '../src/volunteer-schedule/schedule-access.service';
 import { AccessLevel, Screen } from '../src/access/access';
 import { addDays, isWeekend, todayInBrazil } from '../src/volunteer-schedule/schedule-time';
 
@@ -139,6 +140,56 @@ describe('Agenda de voluntariado (e2e)', () => {
     // Sessão da agenda não vale como login do sistema
     const misuse = await request(server()).get(`/schedule?month=${month}`).set('Authorization', `Bearer ${session}`);
     expect(misuse.status).toBe(401);
+  });
+
+  it('código da agenda vale 5 minutos e o reenvio só sai depois de 60 s, com a mesma resposta (CA-74, CA-75)', async () => {
+    const mail = app.get(MailService) as unknown as { lastScheduleCode: string; sendScheduleCodeEmail: (...args: unknown[]) => Promise<void> };
+    const dataSource = app.get(DataSource);
+    const sent = jest.spyOn(mail, 'sendScheduleCodeEmail');
+    // Pelo service: as rotas HTTP dividem o limite de 5 pedidos por minuto por IP com as outras suítes deste arquivo
+    const access = app.get(ScheduleAccessService);
+    const ask = () => access.requestCode('isa.agenda@teste.com', orgId);
+    const verify = (code: string) => access.verify('isa.agenda@teste.com', code, orgId);
+    const latest = async () => (await dataSource.query(`SELECT id, expires_at > now() + interval '4 minutes 50 seconds' AND expires_at <= now() + interval '5 minutes' AS "fiveMinutes" FROM schedule_access_codes WHERE user_id = $1 ORDER BY expires_at DESC LIMIT 1`, [volunteerId]))[0];
+
+    const first = await ask();
+    const firstCode = mail.lastScheduleCode;
+    expect(sent).toHaveBeenCalledTimes(1);
+    expect((await latest()).fiveMinutes).toBe(true);
+
+    // Dentro dos 60 s: mesma resposta, nenhum e-mail novo, e o código atual continua valendo
+    const early = await ask();
+    expect(early).toEqual(first);
+    expect(sent).toHaveBeenCalledTimes(1);
+
+    // Depois dos 60 s sai um código novo e o anterior deixa de valer
+    await dataSource.query(`UPDATE schedule_access_codes SET expires_at = expires_at - interval '61 seconds' WHERE user_id = $1`, [volunteerId]);
+    expect(await ask()).toEqual(first);
+    expect(sent).toHaveBeenCalledTimes(2);
+    const secondCode = mail.lastScheduleCode;
+    if (secondCode !== firstCode) await expect(verify(firstCode)).rejects.toThrow();
+
+    // Com mais de 5 minutos é recusado, mesmo certo
+    await dataSource.query(`UPDATE schedule_access_codes SET expires_at = now() - interval '1 second' WHERE user_id = $1 AND used_at IS NULL`, [volunteerId]);
+    await expect(verify(secondCode)).rejects.toThrow('Código expirado. Peça um novo.');
+    // Fecha o código aberto: os testes seguintes pedem códigos novos sem esbarrar no cooldown de 60 s
+    await dataSource.query('UPDATE schedule_access_codes SET used_at = now() WHERE user_id = $1 AND used_at IS NULL', [volunteerId]);
+    sent.mockRestore();
+  });
+
+  it('dois pedidos de código simultâneos mandam um e-mail só (cooldown atômico)', async () => {
+    const mail = app.get(MailService) as unknown as { sendScheduleCodeEmail: (...args: unknown[]) => Promise<void> };
+    const dataSource = app.get(DataSource);
+    const sent = jest.spyOn(mail, 'sendScheduleCodeEmail');
+    const access = app.get(ScheduleAccessService);
+
+    await Promise.all([access.requestCode('isa.agenda@teste.com', orgId), access.requestCode('isa.agenda@teste.com', orgId)]);
+
+    expect(sent).toHaveBeenCalledTimes(1);
+    const open = await dataSource.query('SELECT id FROM schedule_access_codes WHERE user_id = $1 AND used_at IS NULL', [volunteerId]);
+    expect(open).toHaveLength(1);
+    await dataSource.query('UPDATE schedule_access_codes SET used_at = now() WHERE user_id = $1 AND used_at IS NULL', [volunteerId]);
+    sent.mockRestore();
   });
 
   it('desmarca pelo link do e-mail', async () => {

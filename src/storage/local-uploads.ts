@@ -1,9 +1,10 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import { extname } from 'path';
+import { jwtSecret } from '../auth/jwt-secret';
 
 // Driver local: anexos do Marketing ficam em ./uploads/marketing e só abrem com link assinado (como o bucket privado)
 export const LOCAL_PRIVATE_PREFIX = 'marketing/';
-const LOCAL_SIGNATURE_SECRET = () => `${process.env.JWT_SECRET || 'changeme'}:uploads`;
+const LOCAL_SIGNATURE_SECRET = () => `${jwtSecret()}:uploads`;
 
 export const isLocalPrivatePath = (path: string) => path.startsWith(LOCAL_PRIVATE_PREFIX);
 

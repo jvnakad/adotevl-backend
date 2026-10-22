@@ -27,7 +27,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://testuser:testpass@localhost:5432/testdb?sslmode=disable
-      JWT_SECRET: test-secret
+      JWT_SECRET: ci-secret-0123456789abcdef0123456789abcdef
       RESEND_API_KEY: re_fake_key_for_tests
 
     steps:

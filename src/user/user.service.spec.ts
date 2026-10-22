@@ -24,8 +24,13 @@ describe('UserService', () => {
   let applicationRepo: MockRepository;
   let teams: { ensureDefaultTeams: jest.Mock; systemTeam: jest.Mock };
   let membership: { assign: jest.Mock; ensureNotLastAdmin: jest.Mock; teamsOf: jest.Mock; userIdsOfTeam: jest.Mock };
-  let mailService: { sendConfirmationEmail: jest.Mock; sendApprovalEmail: jest.Mock; sendPasswordResetEmail: jest.Mock; sendFloatingWelcomeEmail: jest.Mock };
+  let mailService: { sendConfirmationEmail: jest.Mock; sendApprovalEmail: jest.Mock; sendPasswordResetEmail: jest.Mock; sendFloatingWelcomeEmail: jest.Mock; sendPasswordChangedEmail: jest.Mock };
   let jwtService: { sign: jest.Mock };
+  let access: { isFloatingVolunteer: jest.Mock };
+  let realtime: { disconnectUser: jest.Mock };
+  let managerQuery: jest.Mock;
+  // Consulta que traz o hash da senha (coluna select:false): só login e troca de senha
+  let passwordQuery: { leftJoinAndSelect: jest.Mock; addSelect: jest.Mock; where: jest.Mock; andWhere: jest.Mock; getOne: jest.Mock };
   let service: UserService;
 
   const dto = {
@@ -70,11 +75,17 @@ describe('UserService', () => {
     orgRepo = createMockRepository();
     applicationRepo = createMockRepository();
     applicationRepo.find.mockResolvedValue([]);
-    mailService = { sendConfirmationEmail: jest.fn(), sendApprovalEmail: jest.fn(), sendPasswordResetEmail: jest.fn(), sendFloatingWelcomeEmail: jest.fn() };
+    mailService = { sendConfirmationEmail: jest.fn(), sendApprovalEmail: jest.fn(), sendPasswordResetEmail: jest.fn(), sendFloatingWelcomeEmail: jest.fn(), sendPasswordChangedEmail: jest.fn() };
     jwtService = { sign: jest.fn(() => 'jwt-token') };
+    access = { isFloatingVolunteer: jest.fn(async () => false) };
+    realtime = { disconnectUser: jest.fn(async () => undefined) };
+    passwordQuery = { leftJoinAndSelect: jest.fn().mockReturnThis(), addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getOne: jest.fn() };
+    managerQuery = jest.fn(async () => undefined);
+    (userRepo as any).manager = { query: managerQuery };
+    (userRepo as any).createQueryBuilder = jest.fn(() => passwordQuery);
     membership = { assign: jest.fn(), ensureNotLastAdmin: jest.fn(), teamsOf: jest.fn(async () => new Map()), userIdsOfTeam: jest.fn(async () => []) };
     teams = { ensureDefaultTeams: jest.fn(async () => ({ id: 't-admin' })), systemTeam: jest.fn(async () => ({ id: 't-floating' })) };
-    service = new UserService(userRepo as any, profileRepo as any, orgRepo as any, mailService as any, jwtService as any, membership as any, teams as any, applicationRepo as any);
+    service = new UserService(userRepo as any, profileRepo as any, orgRepo as any, mailService as any, jwtService as any, membership as any, teams as any, applicationRepo as any, access as any, realtime as any);
   });
 
   describe('create', () => {
@@ -309,28 +320,38 @@ describe('UserService', () => {
 
       const result = await service.confirmAccount('code');
 
-      expect(result).toEqual(expect.objectContaining({ isConfirmed: true, confirmationCode: null }));
+      expect(userRepo.save).toHaveBeenCalledWith(expect.objectContaining({ isConfirmed: true, confirmationCode: null }));
+      expect(result).toEqual(expect.objectContaining({ id: 'u1', isConfirmed: true }));
+    });
+
+    it('não devolve hash, código de confirmação nem carimbos na resposta (CA-64)', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', isConfirmed: false, confirmationCode: 'code' });
+      userRepo.save.mockImplementation(async (data) => ({ ...data, password: 'hash', passwordChangedAt: null, passwordResetLockedUntil: null }));
+
+      const result = await service.confirmAccount('code');
+
+      for (const field of ['password', 'confirmationCode', 'passwordChangedAt', 'passwordResetLockedUntil']) expect(result).not.toHaveProperty(field);
     });
   });
 
-  it('findAll filtra por aprovação só quando informada', async () => {
-    await service.findAll(pagination, { isApproved: false });
-    await service.findAll(pagination);
+  it('findAll filtra pela organização de quem chama e por aprovação só quando informada (CA-65)', async () => {
+    await service.findAll(pagination, 'org-1', { isApproved: false });
+    await service.findAll(pagination, 'org-1');
 
-    expect(userRepo.findAndCount).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: { isApproved: false } }));
-    expect(userRepo.findAndCount).toHaveBeenNthCalledWith(2, expect.objectContaining({ where: {} }));
+    expect(userRepo.findAndCount).toHaveBeenNthCalledWith(1, expect.objectContaining({ where: { organizationId: 'org-1', isApproved: false } }));
+    expect(userRepo.findAndCount).toHaveBeenNthCalledWith(2, expect.objectContaining({ where: { organizationId: 'org-1' } }));
   });
 
   it('findAll devolve a equipe de cada usuário e se respondeu o questionário', async () => {
     userRepo.findAndCount.mockResolvedValue([[{ id: 'u1' }, { id: 'u2' }], 2]);
-    membership.teamsOf.mockResolvedValue(new Map([['u1', { id: 't1', name: 'Resgate', isAdmin: false }]]));
+    membership.teamsOf.mockResolvedValue(new Map([['u1', { id: 't1', name: 'Resgate', isAdmin: false, systemKey: null }]]));
     applicationRepo.find.mockResolvedValue([{ userId: 'u2' }]);
 
-    const result = await service.findAll(pagination);
+    const result = await service.findAll(pagination, 'org-1');
 
     expect(membership.teamsOf).toHaveBeenCalledWith(['u1', 'u2']);
     expect(result.data).toEqual([
-      { id: 'u1', team: { id: 't1', name: 'Resgate', isAdmin: false }, hasApplication: false },
+      { id: 'u1', team: { id: 't1', name: 'Resgate', isAdmin: false, systemKey: null }, hasApplication: false },
       { id: 'u2', team: null, hasApplication: true },
     ]);
   });
@@ -356,28 +377,66 @@ describe('UserService', () => {
   it('findAll filtra por equipe', async () => {
     membership.userIdsOfTeam.mockResolvedValue(['u1', 'u3']);
 
-    await service.findAll(pagination, { teamId: 't1' });
+    await service.findAll(pagination, 'org-1', { teamId: 't1' });
 
-    expect(userRepo.findAndCount).toHaveBeenCalledWith(expect.objectContaining({ where: { id: In(['u1', 'u3']) } }));
+    expect(userRepo.findAndCount).toHaveBeenCalledWith(expect.objectContaining({ where: { organizationId: 'org-1', id: In(['u1', 'u3']) } }));
+  });
+
+  describe('findInOrganization (RN-36)', () => {
+    it('devolve o usuário da própria organização', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-1' });
+
+      expect(await service.findInOrganization('u1', 'org-1')).toEqual({ id: 'u1', organizationId: 'org-1' });
+    });
+
+    it('usuário de outra organização, inexistente ou organização ausente respondem o mesmo 404', async () => {
+      userRepo.findOne.mockResolvedValueOnce({ id: 'u1', organizationId: 'org-2' });
+      await expect(service.findInOrganization('u1', 'org-1')).rejects.toThrow(new NotFoundException('Usuário não encontrado.'));
+
+      userRepo.findOne.mockResolvedValueOnce(null);
+      await expect(service.findInOrganization('x', 'org-1')).rejects.toThrow(new NotFoundException('Usuário não encontrado.'));
+
+      // Sem organização no token, undefined nunca vira "sem filtro"
+      userRepo.findOne.mockResolvedValueOnce({ id: 'u1', organizationId: 'org-1' });
+      await expect(service.findInOrganization('u1', undefined)).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe('findByEmail', () => {
+    it('pede o hash da senha explicitamente (a coluna é select:false), só para o login', async () => {
+      passwordQuery.getOne.mockResolvedValue({ id: 'u1', password: 'hash' });
+
+      expect(await service.findByEmail('ana@teste.com')).toEqual({ id: 'u1', password: 'hash' });
+      expect(passwordQuery.addSelect).toHaveBeenCalledWith('user.password');
+      expect(passwordQuery.where).toHaveBeenCalledWith('user.email = :email', { email: 'ana@teste.com' });
+    });
   });
 
   describe('update', () => {
     it('lança NotFoundException quando o usuário não existe', async () => {
       userRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.update('u1', {}, 'u1')).rejects.toThrow(NotFoundException);
+      await expect(service.update('u1', {}, 'u1', false, 'org-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('usuário de outra organização dá 404, mesmo para quem gerencia (CA-65)', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-2' });
+
+      await expect(service.update('u1', {}, 'admin', true, 'org-1')).rejects.toThrow(NotFoundException);
+      expect(userRepo.update).not.toHaveBeenCalled();
     });
 
     it('não-admin não pode editar outro usuário', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1' });
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-1' });
 
-      await expect(service.update('u1', {}, 'u2', false)).rejects.toThrow(ForbiddenException);
+      await expect(service.update('u1', {}, 'u2', false, 'org-1')).rejects.toThrow(ForbiddenException);
     });
 
     it('não-admin editando o próprio perfil só altera campos pessoais', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1' });
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-1' });
 
-      await service.update('u1', { fullName: 'Nova', email: 'x@x.com', profileId: 'p-admin' } as any, 'u1', false);
+      await service.update('u1', { fullName: 'Nova', email: 'x@x.com', profileId: 'p-admin' } as any, 'u1', false, 'org-1');
+      expect(managerQuery).not.toHaveBeenCalled();
 
       expect(userRepo.update).toHaveBeenCalledWith('u1', {
         fullName: 'Nova',
@@ -388,12 +447,77 @@ describe('UserService', () => {
       });
     });
 
-    it('admin pode alterar qualquer campo de qualquer usuário', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1' });
+    it('admin pode alterar qualquer campo de qualquer usuário da organização', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-1' });
 
-      await service.update('u1', { email: 'x@x.com', profileId: 'p-admin' } as any, 'admin', true);
+      await service.update('u1', { profileId: 'p-admin' } as any, 'admin', true, 'org-1');
 
-      expect(userRepo.update).toHaveBeenCalledWith('u1', { email: 'x@x.com', profileId: 'p-admin', updatedBy: 'admin' });
+      expect(userRepo.update).toHaveBeenCalledWith('u1', { profileId: 'p-admin', updatedBy: 'admin' });
+    });
+
+    describe('troca de e-mail pelo admin', () => {
+      const target = { id: 'u1', email: 'antigo@teste.com', organizationId: 'org-1' };
+      beforeEach(() => {
+        userRepo.findOne.mockResolvedValue(target);
+        passwordQuery.getOne.mockResolvedValue(null);
+      });
+
+      it('grava o e-mail normalizado, revoga as sessões, fecha códigos abertos e derruba o websocket', async () => {
+        await service.update('u1', { email: ' Novo@Teste.COM ' }, 'admin', true, 'org-1', true);
+
+        expect(userRepo.update).toHaveBeenCalledWith('u1', { email: 'novo@teste.com', passwordChangedAt: expect.any(Date), updatedBy: 'admin' });
+        expect(managerQuery).toHaveBeenCalledWith(expect.stringContaining('UPDATE password_reset_codes'), ['u1']);
+        expect(managerQuery).toHaveBeenCalledWith(expect.stringContaining('UPDATE email_change_requests SET closed_at'), ['u1']);
+        expect(realtime.disconnectUser).toHaveBeenCalledWith('u1');
+      });
+
+      it('e-mail já usado por outro usuário (sem diferenciar maiúsculas) dá 409 e não grava', async () => {
+        passwordQuery.getOne.mockResolvedValue({ id: 'u2' });
+
+        const call = service.update('u1', { email: 'Outro@Teste.com' }, 'admin', true, 'org-1', true);
+
+        await expect(call).rejects.toThrow(new ConflictException('Este e-mail já está em uso.'));
+        expect(passwordQuery.where).toHaveBeenCalledWith('lower(user.email) = :email', { email: 'outro@teste.com' });
+        expect(userRepo.update).not.toHaveBeenCalled();
+        expect(realtime.disconnectUser).not.toHaveBeenCalled();
+      });
+
+      it('violação de unique do banco (corrida) também dá 409', async () => {
+        userRepo.update.mockRejectedValue(Object.assign(new Error('duplicate key'), { code: '23505' }));
+
+        await expect(service.update('u1', { email: 'novo@teste.com' }, 'admin', true, 'org-1', true)).rejects.toThrow(new ConflictException('Este e-mail já está em uso.'));
+        expect(managerQuery).not.toHaveBeenCalled();
+      });
+
+      it('quem só gerencia Voluntários (fora da equipe Admin) não troca o e-mail de outro: 403, e os outros campos continuam editáveis', async () => {
+        await expect(service.update('u1', { email: 'novo@teste.com' }, 'gestor', true, 'org-1', false)).rejects.toThrow(new ForbiddenException('Só o Admin pode alterar o e-mail.'));
+        expect(userRepo.update).not.toHaveBeenCalled();
+        expect(realtime.disconnectUser).not.toHaveBeenCalled();
+
+        await service.update('u1', { fullName: 'Ana', email: ' ANTIGO@teste.com' }, 'gestor', true, 'org-1', false);
+        expect(userRepo.update).toHaveBeenCalledWith('u1', { fullName: 'Ana', updatedBy: 'gestor' });
+      });
+
+      it('o mesmo e-mail (após normalizar) é no-op: nada é revogado', async () => {
+        await service.update('u1', { email: ' ANTIGO@teste.com', fullName: 'Ana' }, 'admin', true, 'org-1', true);
+
+        expect(userRepo.update).toHaveBeenCalledWith('u1', { fullName: 'Ana', updatedBy: 'admin' });
+        expect(managerQuery).not.toHaveBeenCalled();
+        expect(realtime.disconnectUser).not.toHaveBeenCalled();
+      });
+
+      it('admin trocando o PRÓPRIO e-mail por esta rota dá 400', async () => {
+        const call = service.update('u1', { email: 'novo@teste.com' }, 'u1', true, 'org-1');
+
+        await expect(call).rejects.toThrow(new BadRequestException('Altere seu e-mail em Editar perfil.'));
+        expect(userRepo.update).not.toHaveBeenCalled();
+      });
+
+      it('admin reenviando o próprio e-mail sem mudar não dá erro', async () => {
+        await service.update('u1', { email: 'antigo@teste.com', fullName: 'Ana' }, 'u1', true, 'org-1');
+
+        expect(userRepo.update).toHaveBeenCalledWith('u1', { fullName: 'Ana', updatedBy: 'u1' });
+      });
     });
   });
 
@@ -401,15 +525,23 @@ describe('UserService', () => {
     it('lançam NotFoundException quando o usuário não existe', async () => {
       userRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.activate('x')).rejects.toThrow(NotFoundException);
-      await expect(service.reject('x')).rejects.toThrow(NotFoundException);
+      await expect(service.activate('x', 'admin', 'org-1')).rejects.toThrow(NotFoundException);
+      await expect(service.reject('x', 'admin', 'org-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('usuário de outra organização dá 404 (CA-65)', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-2' });
+
+      await expect(service.activate('u1', 'admin', 'org-1')).rejects.toThrow(NotFoundException);
+      await expect(service.reject('u1', 'admin', 'org-1')).rejects.toThrow(NotFoundException);
+      expect(userRepo.update).not.toHaveBeenCalled();
     });
 
     it('ativam e desativam o usuário', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1' });
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-1' });
 
-      await service.activate('u1', 'admin');
-      await service.reject('u1', 'admin');
+      await service.activate('u1', 'admin', 'org-1');
+      await service.reject('u1', 'admin', 'org-1');
 
       expect(userRepo.update).toHaveBeenNthCalledWith(1, 'u1', { isActive: true, updatedBy: 'admin' });
       expect(userRepo.update).toHaveBeenNthCalledWith(2, 'u1', { isActive: false, updatedBy: 'admin' });
@@ -420,14 +552,22 @@ describe('UserService', () => {
     it('lança NotFoundException quando o usuário não existe', async () => {
       userRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.approve('x', 't1', 'admin')).rejects.toThrow(NotFoundException);
+      await expect(service.approve('x', 't1', 'admin', 'org-1')).rejects.toThrow(NotFoundException);
+    });
+
+    it('usuário de outra organização dá 404 e não aprova nem envia e-mail', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-2' });
+
+      await expect(service.approve('u1', 't1', 'admin', 'org-1')).rejects.toThrow(NotFoundException);
+      expect(membership.assign).not.toHaveBeenCalled();
+      expect(mailService.sendApprovalEmail).not.toHaveBeenCalled();
     });
 
     it('coloca na equipe antes de aprovar', async () => {
       const user = { id: 'u1', fullName: 'Ana', organizationId: 'org-1' };
       userRepo.findOne.mockResolvedValue(user);
 
-      await service.approve('u1', 't1', 'admin');
+      await service.approve('u1', 't1', 'admin', 'org-1');
 
       expect(membership.assign).toHaveBeenCalledWith(user, 't1', 'admin');
       expect(membership.assign.mock.invocationCallOrder[0]).toBeLessThan(userRepo.update.mock.invocationCallOrder[0]);
@@ -437,16 +577,16 @@ describe('UserService', () => {
       userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-1' });
       membership.assign.mockRejectedValue(new BadRequestException('Equipe não encontrada nesta organização.'));
 
-      await expect(service.approve('u1', 'tx', 'admin')).rejects.toThrow('Equipe não encontrada nesta organização.');
+      await expect(service.approve('u1', 'tx', 'admin', 'org-1')).rejects.toThrow('Equipe não encontrada nesta organização.');
       expect(userRepo.update).not.toHaveBeenCalled();
       expect(mailService.sendApprovalEmail).not.toHaveBeenCalled();
     });
 
     it('aprova, gera token com o perfil e envia email de acesso', async () => {
       const updated = { id: 'u1', email: 'ana@teste.com', fullName: 'Ana', profileId: 'p1', profile: { name: 'VOLUNTEER' }, organizationId: 'org-1' };
-      userRepo.findOne.mockResolvedValueOnce({ id: 'u1' }).mockResolvedValueOnce(updated);
+      userRepo.findOne.mockResolvedValueOnce({ id: 'u1', organizationId: 'org-1' }).mockResolvedValueOnce(updated);
 
-      const result = await service.approve('u1', 't1', 'admin');
+      const result = await service.approve('u1', 't1', 'admin', 'org-1');
 
       expect(userRepo.update).toHaveBeenCalledWith('u1', { isApproved: true, updatedBy: 'admin' });
       expect(jwtService.sign).toHaveBeenCalledWith({
@@ -463,10 +603,10 @@ describe('UserService', () => {
 
   describe('reject', () => {
     it('não desativa o último membro da equipe Admin', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1' });
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-1' });
       membership.ensureNotLastAdmin.mockRejectedValue(new BadRequestException('A equipe Admin precisa de ao menos um membro ativo.'));
 
-      await expect(service.reject('u1', 'admin')).rejects.toThrow('A equipe Admin precisa de ao menos um membro ativo.');
+      await expect(service.reject('u1', 'admin', 'org-1')).rejects.toThrow('A equipe Admin precisa de ao menos um membro ativo.');
       expect(userRepo.update).not.toHaveBeenCalled();
     });
   });
@@ -476,41 +616,120 @@ describe('UserService', () => {
       const user = { id: 'u1', organizationId: 'org-1' };
       userRepo.findOne.mockResolvedValue(user);
 
-      await service.changeTeam('u1', 't2', 'admin');
+      await service.changeTeam('u1', 't2', 'admin', 'org-1');
 
       expect(membership.assign).toHaveBeenCalledWith(user, 't2', 'admin');
     });
 
+    it('usuário de outra organização dá 404', async () => {
+      userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-2' });
+
+      await expect(service.changeTeam('u1', 't2', 'admin', 'org-1')).rejects.toThrow(NotFoundException);
+      expect(membership.assign).not.toHaveBeenCalled();
+    });
+
     it('lança NotFoundException quando o usuário não existe', async () => {
       userRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.changeTeam('x', 't2', 'admin')).rejects.toThrow(NotFoundException);
+      await expect(service.changeTeam('x', 't2', 'admin', 'org-1')).rejects.toThrow(NotFoundException);
     });
   });
 
   describe('changePassword', () => {
+    const profileUser = { id: 'u1', email: 'ana@teste.com', fullName: 'Ana', password: 'hash', profileId: 'p1', profile: { name: 'VOLUNTEER' }, organizationId: 'org-1' };
+
     it('lança NotFoundException quando o usuário não existe', async () => {
-      userRepo.findOne.mockResolvedValue(null);
+      passwordQuery.getOne.mockResolvedValue(null);
 
       await expect(service.changePassword('x', { currentPassword: 'a', newPassword: 'b' })).rejects.toThrow(NotFoundException);
     });
 
-    it('lança BadRequestException com senha atual incorreta', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1', password: 'hash' });
+    it('lança BadRequestException com senha atual incorreta, sem gravar nem derrubar sessões', async () => {
+      passwordQuery.getOne.mockResolvedValue(profileUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
       await expect(service.changePassword('u1', { currentPassword: 'errada', newPassword: 'nova' })).rejects.toThrow(BadRequestException);
       expect(userRepo.update).not.toHaveBeenCalled();
+      expect(jwtService.sign).not.toHaveBeenCalled();
     });
 
-    it('grava a nova senha com hash', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1', password: 'hash' });
+    it('pede o hash da senha atual explicitamente (select:false)', async () => {
+      passwordQuery.getOne.mockResolvedValue(profileUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.changePassword('u1', { currentPassword: 'atual', newPassword: 'nova' });
+
+      expect(passwordQuery.addSelect).toHaveBeenCalledWith('user.password');
+      expect(bcrypt.compare).toHaveBeenCalledWith('atual', 'hash');
+    });
+
+    it('grava a nova senha com hash e password_changed_at, e devolve um token novo (CA-45)', async () => {
+      passwordQuery.getOne.mockResolvedValue(profileUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
       const result = await service.changePassword('u1', { currentPassword: 'atual', newPassword: 'nova' });
 
-      expect(userRepo.update).toHaveBeenCalledWith('u1', { password: 'hashed:nova' });
-      expect(result.message).toBe('Senha alterada com sucesso.');
+      expect(userRepo.update).toHaveBeenCalledWith('u1', { password: 'hashed:nova', passwordChangedAt: expect.any(Date) });
+      expect(jwtService.sign).toHaveBeenCalledWith({ sub: 'u1', email: 'ana@teste.com', profileId: 'p1', profileName: 'VOLUNTEER', organizationId: 'org-1' });
+      expect(result).toEqual({ message: 'Senha alterada com sucesso.', access_token: 'jwt-token' });
+    });
+
+    it('assina o token só depois de gravar a troca (RN-29, RN-30) e avisa por e-mail', async () => {
+      passwordQuery.getOne.mockResolvedValue(profileUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.changePassword('u1', { currentPassword: 'atual', newPassword: 'nova' });
+
+      expect(userRepo.update.mock.invocationCallOrder[0]).toBeLessThan(jwtService.sign.mock.invocationCallOrder[0]);
+      expect(mailService.sendPasswordChangedEmail).toHaveBeenCalledWith('ana@teste.com', 'Ana');
+    });
+  });
+
+  describe('websockets abertos caem junto com a sessão (SEC-BUG-01)', () => {
+    const user = { id: 'u1', email: 'ana@teste.com', fullName: 'Ana', profileId: 'p1', profile: { name: 'VOLUNTEER' }, organizationId: 'org-1' };
+
+    it('troca de senha pelo perfil', async () => {
+      passwordQuery.getOne.mockResolvedValue({ ...user, password: 'hash' });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.changePassword('u1', { currentPassword: 'a', newPassword: 'nova' });
+
+      expect(realtime.disconnectUser).toHaveBeenCalledWith('u1');
+    });
+
+    it('reset pela tela Voluntários', async () => {
+      userRepo.findOne.mockResolvedValue(user);
+
+      await service.resetPassword('u1', 'org-1');
+
+      expect(realtime.disconnectUser).toHaveBeenCalledWith('u1');
+    });
+
+    it('desativação (reject e edição com isActive=false) e troca de equipe', async () => {
+      userRepo.findOne.mockResolvedValue(user);
+
+      await service.reject('u1', 'admin', 'org-1');
+      await service.update('u1', { isActive: false }, 'admin', true, 'org-1');
+      await service.changeTeam('u1', 't2', 'admin', 'org-1');
+
+      expect(realtime.disconnectUser).toHaveBeenCalledTimes(3);
+    });
+
+    it('edição que não desativa não derruba o websocket', async () => {
+      userRepo.findOne.mockResolvedValue(user);
+
+      await service.update('u1', { fullName: 'Ana Maria' }, 'admin', true, 'org-1');
+
+      expect(realtime.disconnectUser).not.toHaveBeenCalled();
+    });
+
+    it('troca de senha recusada não derruba nada', async () => {
+      passwordQuery.getOne.mockResolvedValue({ ...user, password: 'hash' });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await service.changePassword('u1', { currentPassword: 'x', newPassword: 'nova' }).catch(() => undefined);
+
+      expect(realtime.disconnectUser).not.toHaveBeenCalled();
     });
   });
 
@@ -565,20 +784,42 @@ describe('UserService', () => {
   });
 
   describe('resetPassword', () => {
+    const target = { id: 'u1', email: 'ana@teste.com', fullName: 'Ana', organizationId: 'org-1' };
+
     it('lança NotFoundException quando o usuário não existe', async () => {
       userRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.resetPassword('x')).rejects.toThrow(NotFoundException);
+      await expect(service.resetPassword('x', 'org-1')).rejects.toThrow(NotFoundException);
     });
 
-    it('gera senha temporária de 8 caracteres e envia por email', async () => {
-      userRepo.findOne.mockResolvedValue({ id: 'u1', email: 'ana@teste.com', fullName: 'Ana' });
+    it('usuário de outra organização dá 404, sem trocar a senha nem mandar e-mail (CA-63)', async () => {
+      userRepo.findOne.mockResolvedValue({ ...target, organizationId: 'org-2' });
 
-      await service.resetPassword('u1');
+      await expect(service.resetPassword('u1', 'org-1')).rejects.toThrow(new NotFoundException('Usuário não encontrado.'));
+      expect(userRepo.update).not.toHaveBeenCalled();
+      expect(mailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+    });
+
+    it('volante dá 400, sem trocar a senha nem mandar e-mail (CA-42)', async () => {
+      userRepo.findOne.mockResolvedValue(target);
+      access.isFloatingVolunteer.mockResolvedValue(true);
+
+      await expect(service.resetPassword('u1', 'org-1')).rejects.toThrow(
+        new BadRequestException('Voluntários volantes não usam o painel. Troque a equipe antes de redefinir a senha.'),
+      );
+      expect(access.isFloatingVolunteer).toHaveBeenCalledWith('u1');
+      expect(userRepo.update).not.toHaveBeenCalled();
+      expect(mailService.sendPasswordResetEmail).not.toHaveBeenCalled();
+    });
+
+    it('gera senha temporária de 8 caracteres, grava password_changed_at e envia por email (CA-44)', async () => {
+      userRepo.findOne.mockResolvedValue(target);
+
+      await service.resetPassword('u1', 'org-1');
 
       const [, , tempPassword] = mailService.sendPasswordResetEmail.mock.calls[0];
       expect(tempPassword).toHaveLength(8);
-      expect(userRepo.update).toHaveBeenCalledWith('u1', { password: `hashed:${tempPassword}` });
+      expect(userRepo.update).toHaveBeenCalledWith('u1', { password: `hashed:${tempPassword}`, passwordChangedAt: expect.any(Date) });
     });
   });
 });

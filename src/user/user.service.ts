@@ -24,9 +24,12 @@ import { paginate } from '../common/paginate.helper';
 import { TeamMembershipService } from '../team/team-membership.service';
 import { TeamService } from '../team/team.service';
 import { TeamSystemKey } from '../team/team.entity';
+import { AccessService } from '../access/access.service';
+import { RealtimeService } from '../realtime/realtime.service';
 import { guardianFields } from './volunteer-age';
 import { normalizeCpf, normalizeEmail, normalizePersonName } from '../common/validation/person';
 import { VolunteerApplication } from '../volunteer-application/volunteer-application.entity';
+import { closePendingEmailChange, closeRecoveryCodes } from './email-change-pending';
 
 /** O ValidationPipe global não grava a normalização no body: nome, e-mail e CPF vão limpos para o banco. */
 function normalizedPerson(dto: { fullName: string; cpf: string; email: string; guardianName?: string }) {
@@ -37,6 +40,8 @@ function normalizedPerson(dto: { fullName: string; cpf: string; email: string; g
     guardianName: normalizePersonName(dto.guardianName) as string | undefined,
   };
 }
+
+const EMAIL_IN_USE_MESSAGE = 'Este e-mail já está em uso.';
 
 const EMPTY_TUTORIAL: TutorialProgress = { tours: {}, disabled: false };
 
@@ -55,6 +60,8 @@ export class UserService {
     private readonly teams: TeamService,
     @InjectRepository(VolunteerApplication)
     private readonly applicationRepository: Repository<VolunteerApplication>,
+    private readonly access: AccessService,
+    private readonly realtime: RealtimeService,
   ) {}
 
   async create(dto: CreateUserDto, createdBy: string = null) {
@@ -165,11 +172,14 @@ export class UserService {
     if (user.isConfirmed) throw new BadRequestException('Esta conta já foi confirmada.');
     user.isConfirmed = true;
     user.confirmationCode = null;
-    return this.userRepository.save(user);
+    // O save devolve as colunas select:false preenchidas (null): nenhuma delas volta na resposta (RN-35)
+    const { password: _hash, confirmationCode: _code, passwordChangedAt: _changed, passwordResetLockedUntil: _locked, ...confirmed } = await this.userRepository.save(user);
+    return confirmed;
   }
 
-  async findAll(pagination: PaginationDto, filters: { isApproved?: boolean; teamId?: string } = {}) {
-    const where: Record<string, unknown> = {};
+  /** Só usuários da organização de quem chama (RN-36). */
+  async findAll(pagination: PaginationDto, organizationId: string, filters: { isApproved?: boolean; teamId?: string } = {}) {
+    const where: Record<string, unknown> = { organizationId };
     if (filters.isApproved !== undefined) where.isApproved = filters.isApproved;
     // Equipe fica em volunteers.teamId: filtra pelos usuários dela
     if (filters.teamId) where.id = In(await this.membership.userIdsOfTeam(filters.teamId));
@@ -198,14 +208,21 @@ export class UserService {
     return this.userRepository.findOne({ where: { id } });
   }
 
-  async findByEmail(email: string) {
-    return this.userRepository.findOne({ where: { email } });
+  /** Usuário de outra organização responde 404, igual a inexistente (RN-36). */
+  async findInOrganization(id: string, organizationId: string) {
+    const user = await this.userRepository.findOne({ where: { id } });
+    if (!user || user.organizationId !== organizationId) throw new NotFoundException('Usuário não encontrado.');
+    return user;
   }
 
-  /** `canManage`: quem edita Voluntários altera qualquer usuário; os demais só o próprio perfil. */
-  async update(id: string, dto: UpdateUserDto, updatedBy: string = null, canManage = false) {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) throw new NotFoundException('Usuário não encontrado.');
+  /** Só o login lê o hash da senha (a coluna é select:false). */
+  async findByEmail(email: string) {
+    return this.userRepository.createQueryBuilder('user').leftJoinAndSelect('user.profile', 'profile').addSelect('user.password').where('user.email = :email', { email }).getOne();
+  }
+
+  /** `canManage`: quem edita Voluntários altera qualquer usuário da organização; os demais só o próprio perfil. */
+  async update(id: string, dto: UpdateUserDto, updatedBy: string = null, canManage = false, organizationId: string = null, isAdminTeam = false) {
+    const current = await this.findInOrganization(id, organizationId);
 
     const isAdmin = canManage;
 
@@ -219,21 +236,58 @@ export class UserService {
     if (data.fullName !== undefined) data.fullName = normalizePersonName(data.fullName) as string;
     if (data.cpf !== undefined) data.cpf = normalizeCpf(data.cpf) as string;
 
-    await this.userRepository.update(id, { ...data, updatedBy });
+    // E-mail só muda pela edição do admin em outro usuário; igual ao atual é no-op (o painel reenvia o formulário inteiro)
+    let emailChanged = false;
+    if (data.email !== undefined) {
+      data.email = normalizeEmail(data.email) as string;
+      if (data.email === current.email?.trim().toLowerCase()) {
+        delete data.email;
+      } else if (id === updatedBy) {
+        throw new BadRequestException('Altere seu e-mail em Editar perfil.');
+      } else if (!isAdminTeam) {
+        // D-12: só a equipe Admin troca o e-mail de outro usuário; Voluntários (Editar) segue editando o resto
+        throw new ForbiddenException('Só o Admin pode alterar o e-mail.');
+      } else {
+        await this.assertEmailAvailable(data.email, id);
+        emailChanged = true;
+      }
+    }
+
+    // Trocar o e-mail revoga as sessões: iat anterior é recusado pelo guard e pelo websocket, como na troca de senha
+    const revoke = emailChanged ? { passwordChangedAt: new Date() } : {};
+    try {
+      await this.userRepository.update(id, { ...data, ...revoke, updatedBy });
+    } catch (error) {
+      // Corrida: outro cadastro pegou o e-mail entre a checagem e a gravação (unique_violation)
+      if (emailChanged && (error as { code?: string }).code === '23505') throw new ConflictException(EMAIL_IN_USE_MESSAGE);
+      throw error;
+    }
+    if (emailChanged) {
+      // Código de recuperação aberto foi pedido para o e-mail antigo
+      await closeRecoveryCodes(this.userRepository.manager, id);
+      // Pedido de troca do próprio e-mail pendente deixa de valer (RN-31)
+      await closePendingEmailChange(this.userRepository.manager, id, 'admin');
+      await this.realtime.disconnectUser(id);
+    }
+    // Desativado pela edição: o websocket aberto cai junto com a sessão
+    if (data.isActive === false) await this.realtime.disconnectUser(id);
     return this.userRepository.findOne({ where: { id } });
   }
 
-  async activate(id: string, updatedBy: string = null) {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) throw new NotFoundException('Usuário não encontrado.');
+  private async assertEmailAvailable(email: string, exceptUserId: string) {
+    const taken = await this.userRepository.createQueryBuilder('user').where('lower(user.email) = :email', { email }).andWhere('user.id <> :id', { id: exceptUserId }).getOne();
+    if (taken) throw new ConflictException(EMAIL_IN_USE_MESSAGE);
+  }
+
+  async activate(id: string, updatedBy: string = null, organizationId: string = null) {
+    await this.findInOrganization(id, organizationId);
     await this.userRepository.update(id, { isActive: true, updatedBy });
     return this.userRepository.findOne({ where: { id } });
   }
 
   /** Aprovar exige a equipe: é ela que define o acesso às telas. */
-  async approve(id: string, teamId: string, updatedBy: string = null) {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) throw new NotFoundException('Usuário não encontrado.');
+  async approve(id: string, teamId: string, updatedBy: string = null, organizationId: string = null) {
+    const user = await this.findInOrganization(id, organizationId);
     await this.membership.assign(user, teamId, updatedBy);
     await this.userRepository.update(id, { isApproved: true, updatedBy });
     const updated = await this.userRepository.findOne({ where: { id } });
@@ -243,29 +297,41 @@ export class UserService {
     return updated;
   }
 
-  async reject(id: string, updatedBy: string = null) {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) throw new NotFoundException('Usuário não encontrado.');
+  async reject(id: string, updatedBy: string = null, organizationId: string = null) {
+    await this.findInOrganization(id, organizationId);
     await this.membership.ensureNotLastAdmin(id);
     await this.userRepository.update(id, { isActive: false, updatedBy });
+    await this.realtime.disconnectUser(id);
     return this.userRepository.findOne({ where: { id } });
   }
 
-  async changeTeam(id: string, teamId: string, updatedBy: string = null) {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) throw new NotFoundException('Usuário não encontrado.');
+  async changeTeam(id: string, teamId: string, updatedBy: string = null, organizationId: string = null) {
+    const user = await this.findInOrganization(id, organizationId);
     await this.membership.assign(user, teamId, updatedBy);
+    // Pode ter virado volante: o websocket aberto cai e a reconexão passa pelas checagens de novo
+    await this.realtime.disconnectUser(id);
     return user;
   }
 
+  /** Troca pelo perfil: derruba as outras sessões (password_changed_at) e devolve um token novo para a atual (RN-29). */
   async changePassword(id: string, dto: ChangePasswordDto) {
-    const user = await this.userRepository.findOne({ where: { id } });
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .leftJoinAndSelect('user.profile', 'profile')
+      .addSelect('user.password')
+      .where('user.id = :id', { id })
+      .getOne();
     if (!user) throw new NotFoundException('Usuário não encontrado.');
     const match = await bcrypt.compare(dto.currentPassword, user.password);
     if (!match) throw new BadRequestException('Senha atual incorreta.');
     const hashed = await bcrypt.hash(dto.newPassword, 10);
-    await this.userRepository.update(id, { password: hashed });
-    return { message: 'Senha alterada com sucesso.' };
+    await this.userRepository.update(id, { password: hashed, passwordChangedAt: new Date() });
+    await closePendingEmailChange(this.userRepository.manager, id, 'troca_de_senha');
+    await this.realtime.disconnectUser(id);
+    // Assinado depois da gravação: o iat fica no mesmo segundo da troca ou depois, e o guard só recusa iat menor (RN-30)
+    const access_token = this.jwtService.sign({ sub: user.id, email: user.email, profileId: user.profileId, profileName: user.profile?.name, organizationId: user.organizationId });
+    await this.mailService.sendPasswordChangedEmail(user.email, user.fullName);
+    return { message: 'Senha alterada com sucesso.', access_token };
   }
 
   async updateTutorial(id: string, dto: UpdateTutorialDto) {
@@ -289,12 +355,17 @@ export class UserService {
     return progress;
   }
 
-  async resetPassword(id: string) {
-    const user = await this.userRepository.findOne({ where: { id } });
-    if (!user) throw new NotFoundException('Usuário não encontrado.');
+  /** Reset pela tela Voluntários: só da organização de quem chama e nunca de volante (RN-27). Derruba as sessões do usuário (RN-28). */
+  async resetPassword(id: string, organizationId: string = null) {
+    const user = await this.findInOrganization(id, organizationId);
+    if (await this.access.isFloatingVolunteer(id)) {
+      throw new BadRequestException('Voluntários volantes não usam o painel. Troque a equipe antes de redefinir a senha.');
+    }
     const newPassword = randomUUID().slice(0, 8);
     const hashed = await bcrypt.hash(newPassword, 10);
-    await this.userRepository.update(id, { password: hashed });
+    await this.userRepository.update(id, { password: hashed, passwordChangedAt: new Date() });
+    await closePendingEmailChange(this.userRepository.manager, id, 'troca_de_senha');
+    await this.realtime.disconnectUser(id);
     await this.mailService.sendPasswordResetEmail(user.email, user.fullName, newPassword);
     return { message: 'Senha redefinida e enviada por e-mail.' };
   }

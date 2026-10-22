@@ -67,7 +67,9 @@ describe('Cadastro de voluntário volante (e2e)', () => {
 
     const user = await userRepo.findOne({ where: { id: res.body.id } });
     expect(user).toEqual(expect.objectContaining({ isApproved: true, isConfirmed: true, consentAt: expect.any(Date) }));
-    expect(user.password).toMatch(/^\$2[aby]\$/);
+    // password é select:false: só aparece pedindo
+    const { password } = await userRepo.findOne({ where: { id: user.id }, select: { id: true, password: true } });
+    expect(password).toMatch(/^\$2[aby]\$/);
 
     const volunteer = await volunteerRepo.findOne({ where: { userId: user.id }, relations: { team: true } });
     expect(volunteer.team).toEqual(expect.objectContaining({ name: 'Voluntário Volante', systemKey: 'FLOATING_VOLUNTEER' }));

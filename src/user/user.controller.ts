@@ -52,9 +52,9 @@ export class UserController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @RequireAccess(Screen.VOLUNTEERS, AccessLevel.VIEW)
   @ApiOperation({ summary: 'Listar usuários', description: 'Acesso: Voluntários (Visualizar). Filtros: isApproved, teamId. Cada usuário vem com a equipe.' })
-  findAll(@Query() pagination: PaginationDto, @Query('isApproved') isApproved?: string, @Query('teamId') teamId?: string) {
+  findAll(@Query() pagination: PaginationDto, @Req() req, @Query('isApproved') isApproved?: string, @Query('teamId') teamId?: string) {
     const approved = isApproved !== undefined ? isApproved === 'true' : undefined;
-    return this.userService.findAll(pagination, { isApproved: approved, teamId: teamId || undefined });
+    return this.userService.findAll(pagination, req.user.organizationId, { isApproved: approved, teamId: teamId || undefined });
   }
 
   @Get(':id/application')
@@ -69,19 +69,19 @@ export class UserController {
   @Get(':id')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Buscar usuário por ID', description: 'Qualquer usuário logado.' })
-  findOne(@Param('id') id: string) {
-    return this.userService.findOne(id);
+  @ApiOperation({ summary: 'Buscar usuário por ID', description: 'Qualquer usuário logado, só da própria organização (outra organização responde 404).' })
+  findOne(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
+    return this.userService.findInOrganization(id, req.user.organizationId);
   }
 
   @Patch(':id')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Atualizar usuário', description: 'Próprio perfil: qualquer usuário. Outros usuários: Voluntários (Editar).' })
-  async update(@Param('id') id: string, @Body() dto: UpdateUserDto, @Req() req) {
+  @ApiOperation({ summary: 'Atualizar usuário', description: 'Próprio perfil: qualquer usuário. Outros usuários: Voluntários (Editar). Só da própria organização.' })
+  async update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateUserDto, @Req() req) {
     const access = await this.accessService.forUser(req.user.id);
     const canManage = !!access && (access.isAdmin || hasLevel(access.permissions[Screen.VOLUNTEERS], AccessLevel.EDIT));
-    return this.userService.update(id, dto, req.user.id, canManage);
+    return this.userService.update(id, dto, req.user.id, canManage, req.user.organizationId, !!access?.isAdmin);
   }
 
   @Patch(':id/activate')
@@ -89,8 +89,8 @@ export class UserController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @RequireAccess(Screen.VOLUNTEERS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Ativar usuário', description: 'Acesso: Voluntários (Editar).' })
-  activate(@Param('id') id: string, @Req() req) {
-    return this.userService.activate(id, req.user.id);
+  activate(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
+    return this.userService.activate(id, req.user.id, req.user.organizationId);
   }
 
   @Patch(':id/approve')
@@ -98,8 +98,8 @@ export class UserController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @AdminOnly()
   @ApiOperation({ summary: 'Aprovar usuário', description: 'Somente equipe Admin. Exige a equipe do voluntário (teamId).' })
-  approve(@Param('id') id: string, @Body() dto: ApproveUserDto, @Req() req) {
-    return this.userService.approve(id, dto.teamId, req.user.id);
+  approve(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ApproveUserDto, @Req() req) {
+    return this.userService.approve(id, dto.teamId, req.user.id, req.user.organizationId);
   }
 
   @Patch(':id/reject')
@@ -107,8 +107,8 @@ export class UserController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @AdminOnly()
   @ApiOperation({ summary: 'Rejeitar/desativar usuário', description: 'Somente equipe Admin. Não desativa o último membro da equipe Admin.' })
-  reject(@Param('id') id: string, @Req() req) {
-    return this.userService.reject(id, req.user.id);
+  reject(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
+    return this.userService.reject(id, req.user.id, req.user.organizationId);
   }
 
   @Patch(':id/team')
@@ -116,23 +116,29 @@ export class UserController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @AdminOnly()
   @ApiOperation({ summary: 'Trocar equipe do usuário', description: 'Somente equipe Admin. A equipe Admin precisa de ao menos um membro ativo.' })
-  changeTeam(@Param('id') id: string, @Body() dto: ApproveUserDto, @Req() req) {
-    return this.userService.changeTeam(id, dto.teamId, req.user.id);
+  changeTeam(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ApproveUserDto, @Req() req) {
+    return this.userService.changeTeam(id, dto.teamId, req.user.id, req.user.organizationId);
   }
 
   @Patch(':id/reset-password')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, AccessGuard)
   @RequireAccess(Screen.VOLUNTEERS, AccessLevel.EDIT)
-  @ApiOperation({ summary: 'Resetar senha do usuário', description: 'Acesso: Voluntários (Editar).' })
-  resetPassword(@Param('id') id: string) {
-    return this.userService.resetPassword(id);
+  @ApiOperation({
+    summary: 'Resetar senha do usuário',
+    description: 'Acesso: Voluntários (Editar). Só da própria organização (outra responde 404) e nunca de voluntário volante (400). Derruba as sessões do usuário.',
+  })
+  resetPassword(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
+    return this.userService.resetPassword(id, req.user.organizationId);
   }
 
   @Patch('me/password')
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Alterar própria senha', description: 'Qualquer usuário logado.' })
+  @ApiOperation({
+    summary: 'Alterar própria senha',
+    description: 'Qualquer usuário logado. Derruba as outras sessões e devolve `access_token` novo para a sessão atual.',
+  })
   changePassword(@Body() dto: ChangePasswordDto, @Req() req) {
     return this.userService.changePassword(req.user.id, dto);
   }

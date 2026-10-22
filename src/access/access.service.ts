@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Volunteer } from '../volunteer/volunteer.entity';
 import { TeamPermission } from '../team/team-permission.entity';
+import { TeamSystemKey } from '../team/team.entity';
 import { ADMIN_PERMISSIONS, UserAccess } from './access';
 
 @Injectable()
@@ -26,5 +27,12 @@ export class AccessService {
 
     const rows = await this.permissionRepository.find({ where: { teamId: team.id } });
     return { ...base, permissions: Object.fromEntries(rows.map((row) => [row.screen, row.level])) };
+  }
+
+  /** Volante = a equipe ativa do usuário é a Voluntário Volante. Vale pela equipe, não pela matriz de permissões dela. */
+  async isFloatingVolunteer(userId: string): Promise<boolean> {
+    if (!userId) return false;
+    const volunteer = await this.volunteerRepository.findOne({ where: { userId, isActive: true }, relations: { team: true } });
+    return volunteer?.team?.systemKey === TeamSystemKey.FLOATING_VOLUNTEER;
   }
 }

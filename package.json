@@ -99,6 +99,9 @@
       "adoption-form/dto/*.ts",
       "!app.service.ts"
     ],
-    "coverageDirectory": "../coverage"
+    "coverageDirectory": "../coverage",
+    "setupFiles": [
+      "<rootDir>/../test/unit-env.js"
+    ]
   }
 }

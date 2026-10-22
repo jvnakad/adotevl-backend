@@ -157,9 +157,76 @@ describe('MailService', () => {
       await service.sendScheduleCodeEmail('isa@teste.com', 'Isa Kaori', '482913');
 
       const [message] = mockSend.mock.calls[0] as any[];
-      expect(message.subject).toBe('Seu código para a agenda: 482913 — AdoteVL');
+      expect(message.subject).toBe('Seu código para a agenda — AdoteVL');
       expect(message.html).toContain('482913');
-      expect(message.html).toContain('10 minutos');
+      expect(message.html).toContain('5 minutos');
+      expect(message.html).not.toContain('10 minutos');
+    });
+  });
+
+  describe('esqueci minha senha', () => {
+    it('código: assunto fixo e preheader sem os 6 dígitos, código em destaque no corpo', async () => {
+      await service.sendPasswordResetCodeEmail('ana@teste.com', 'Ana Souza', '482913');
+
+      const [message] = mockSend.mock.calls[0] as any[];
+      expect(message.to).toBe('ana@teste.com');
+      expect(message.subject).toBe('Seu código para redefinir a senha — AdoteVL');
+      expect(message.subject).not.toContain('482913');
+      expect(message.html).toContain('Use o código para criar uma nova senha.');
+      expect(message.html).toContain('482913');
+      expect(message.html).toContain('Ele vale por 5 minutos. Se pedir outro, use sempre o último.');
+      expect(message.html).toContain('Se não foi você que pediu, ignore este e-mail. Sua senha continua a mesma.');
+      // O código aparece uma vez só: nem preheader nem título o repetem
+      expect(message.html.split('482913')).toHaveLength(2);
+    });
+
+    it('nome do usuário é escapado nos dois e-mails (CA-69)', async () => {
+      const name = '<script>alert(1)</script>\r\nBcc: x@x.com';
+
+      await service.sendPasswordResetCodeEmail('ana@teste.com', name, '482913');
+      await service.sendPasswordChangedEmail('ana@teste.com', name);
+
+      for (const [message] of mockSend.mock.calls as any[]) {
+        expect(message.html).not.toContain('<script>');
+        expect(message.subject).not.toMatch(/[\r\n]/);
+      }
+    });
+
+    it('senha alterada: data e hora de Brasília, botão para o painel e canais da ONG, sem senha nem código', async () => {
+      await service.sendPasswordChangedEmail('ana@teste.com', 'Ana Souza', new Date('2026-10-21T15:30:00Z'));
+
+      const [message] = mockSend.mock.calls[0] as any[];
+      expect(message.subject).toBe('Sua senha foi alterada — AdoteVL');
+      expect(message.html).toContain('21/10/2026');
+      expect(message.html).toContain('12:30');
+      expect(message.html).toContain('href="https://app.adotevl.org/signin"');
+      expect(message.html).toContain('Entrar no painel');
+      expect(message.html).toContain('Não foi você? Fale com a gente agora');
+      expect(message.html).toContain('https://wa.me/5541995422456');
+    });
+
+    it('falha de envio do código não grava os 6 dígitos no log (CA-68)', async () => {
+      const log = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+      mockSend.mockResolvedValueOnce({ data: null, error: { name: 'validation_error', message: 'API key is invalid' } } as any);
+
+      await service.sendPasswordResetCodeEmail('ana@teste.com', 'Ana', '482913');
+
+      expect(log).toHaveBeenCalledTimes(1);
+      expect(log.mock.calls[0][0]).not.toContain('482913');
+    });
+  });
+
+  describe('código da troca de e-mail', () => {
+    it('falha de envio não loga o endereço novo, nem na mensagem do provedor', async () => {
+      const logger = jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+      mockSend.mockResolvedValueOnce({ data: null, error: { message: 'Invalid recipient novo@exemplo.com' } } as any);
+
+      await service.sendEmailChangeCodeEmail('novo@exemplo.com', '123456');
+
+      const line = String(logger.mock.calls[0][0]);
+      expect(line).toContain('*@exemplo.com');
+      expect(line).not.toContain('novo@exemplo.com');
+      expect(line).not.toContain('123456');
     });
   });
 
@@ -173,7 +240,7 @@ describe('MailService', () => {
       await local.sendScheduleCodeEmail('isa@teste.com', 'Isa', '482913');
 
       expect(mockCreateTransport).toHaveBeenCalledWith({ host: 'mailpit', port: 1025, secure: false });
-      expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({ from: 'AdoteVL <noreply@adotevl.org>', to: 'isa@teste.com', subject: 'Seu código para a agenda: 482913 — AdoteVL' }));
+      expect(mockSendMail).toHaveBeenCalledWith(expect.objectContaining({ from: 'AdoteVL <noreply@adotevl.org>', to: 'isa@teste.com', subject: 'Seu código para a agenda — AdoteVL' }));
       expect(mockSend).not.toHaveBeenCalled();
     });
 

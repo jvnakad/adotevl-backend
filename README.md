@@ -19,7 +19,7 @@ npm install
 
 ```env
 DATABASE_URL=postgresql://usuario:senha@host:porta/banco
-JWT_SECRET=sua_chave_secreta
+JWT_SECRET=gere_um_segredo_aleatorio_de_15_ou_mais_caracteres
 RESEND_API_KEY=sua_chave_resend
 MAIL_FROM=AdoteVL <noreply@seudominio.com>
 APP_URL=http://localhost:5173
@@ -72,9 +72,11 @@ Cria 8 tipos ativos e 1 excluído (com um produto vinculado) e 45 produtos (42 a
 
 Segurança: só roda com a `DATABASE_URL` em `localhost`/`127.0.0.1` e fora de `NODE_ENV=production`. É idempotente: se a organização já tem dados de estoque, não faz nada (use `--reset` para recriar).
 
+`JWT_SECRET` é obrigatório e precisa ter 15 caracteres ou mais: sem ele (ou com `changeme`/`sua_chave_secreta`) a API não sobe. Gere um com `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"`. Trocar o valor derruba todas as sessões e os links de acesso já enviados.
+
 Com `STORAGE_DRIVER=local` as fotos são gravadas em `./uploads` e servidas em `http://localhost:3000/uploads/...`.
 
-Testes e2e contra o banco local:
+Testes e2e (só contra Postgres local): o e2e **não lê o `.env`**, que pode apontar para produção. Defina `DATABASE_URL` no processo, com host `localhost` ou `127.0.0.1`; sem isso, ou com outro host, a suíte falha logo no início. Exemplo:
 
 ```bash
 DATABASE_URL="postgresql://adotevl:adotevl@localhost:5432/adotevl?sslmode=disable" JWT_SECRET=test-secret RESEND_API_KEY=re_fake npm run test:e2e

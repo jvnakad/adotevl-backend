@@ -41,6 +41,11 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas.');
     }
 
+    // Volante não usa o painel. Só depois da senha certa, para não abrir um canal de enumeração (RN-26)
+    if (await this.accessService.isFloatingVolunteer(user.id)) {
+      throw new UnauthorizedException('Credenciais inválidas.');
+    }
+
     const payload = { sub: user.id, email: user.email, profileId: user.profileId, profileName: user.profile?.name, organizationId: user.organizationId };
     const token = this.jwtService.sign(payload);
 

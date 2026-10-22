@@ -32,6 +32,19 @@ export class RealtimeService {
     this.server = server;
   }
 
+  /**
+   * Derruba todos os sockets do usuário (troca de senha, desativação, troca de equipe): o handshake só vale na conexão.
+   * Quem ainda tem direito reconecta e passa pelas checagens de novo. Nunca lança.
+   */
+  async disconnectUser(userId: string): Promise<void> {
+    if (!this.server || !userId) return;
+    try {
+      this.server.in(RealtimeService.userRoom(userId)).disconnectSockets(true);
+    } catch (error) {
+      this.logger.warn(`Falha ao desconectar os sockets do usuário: ${(error as Error).message}`);
+    }
+  }
+
   registerRoomType(prefix: string, authorizer: RoomAuthorizer) {
     this.authorizers.set(prefix, authorizer);
   }

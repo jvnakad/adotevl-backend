@@ -58,3 +58,36 @@ describe('AccessService.forUser', () => {
     expect(volunteerRepo.findOne).not.toHaveBeenCalled();
   });
 });
+
+describe('AccessService.isFloatingVolunteer', () => {
+  let volunteerRepo: MockRepository;
+  let service: AccessService;
+
+  beforeEach(() => {
+    volunteerRepo = createMockRepository();
+    service = new AccessService(volunteerRepo as any, createMockRepository() as any);
+  });
+
+  it('equipe ativa Voluntário Volante = volante, seja qual for a matriz de permissões dela', async () => {
+    volunteerRepo.findOne.mockResolvedValue({ userId: 'u1', team: { id: 't9', isActive: true, systemKey: 'FLOATING_VOLUNTEER' } });
+
+    expect(await service.isFloatingVolunteer('u1')).toBe(true);
+    expect(volunteerRepo.findOne).toHaveBeenCalledWith({ where: { userId: 'u1', isActive: true }, relations: { team: true } });
+  });
+
+  it.each([
+    ['outra equipe padrão', { team: { systemKey: 'FIXED_VOLUNTEER' } }],
+    ['equipe sem chave de sistema', { team: { systemKey: null } }],
+    ['vínculo sem equipe', { team: null }],
+    ['sem vínculo ativo', null],
+  ])('%s não é volante', async (_label, volunteer) => {
+    volunteerRepo.findOne.mockResolvedValue(volunteer);
+
+    expect(await service.isFloatingVolunteer('u1')).toBe(false);
+  });
+
+  it('sem id não consulta o banco', async () => {
+    expect(await service.isFloatingVolunteer(undefined)).toBe(false);
+    expect(volunteerRepo.findOne).not.toHaveBeenCalled();
+  });
+});

@@ -13,69 +13,145 @@ const contextFor = (request: Record<string, any>) =>
 
 const payload = { sub: 'u1', email: 'ana@teste.com', profileId: 'p1', profileName: 'ADMIN', organizationId: 'org-1', iat: 1 };
 
+const INVALID = 'Token inválido ou expirado.';
+const activeState = { isActive: true, passwordChangedAt: null, systemKey: null };
+
 describe('JwtAuthGuard', () => {
   let jwtService: { verify: jest.Mock };
+  let dataSource: { query: jest.Mock };
   let guard: JwtAuthGuard;
+  const request = () => ({ headers: { authorization: 'Bearer abc' } }) as any;
 
   beforeEach(() => {
     jwtService = { verify: jest.fn(() => payload) };
-    guard = new JwtAuthGuard(jwtService as any);
+    dataSource = { query: jest.fn(async () => [activeState]) };
+    guard = new JwtAuthGuard(jwtService as any, dataSource as any);
   });
 
   it.each([
     ['sem header', {}],
     ['sem prefixo Bearer', { authorization: 'Token abc' }],
-  ])('rejeita requisição %s', (_label, headers) => {
-    expect(() => guard.canActivate(contextFor({ headers }))).toThrow(new UnauthorizedException('Token não fornecido.'));
+  ])('rejeita requisição %s', async (_label, headers) => {
+    await expect(guard.canActivate(contextFor({ headers }))).rejects.toThrow(new UnauthorizedException('Token não fornecido.'));
   });
 
-  it('rejeita token inválido ou expirado', () => {
+  it('rejeita token inválido ou expirado', async () => {
     jwtService.verify.mockImplementation(() => {
       throw new Error('jwt expired');
     });
 
-    expect(() => guard.canActivate(contextFor({ headers: { authorization: 'Bearer abc' } }))).toThrow('Token inválido ou expirado.');
+    await expect(guard.canActivate(contextFor(request()))).rejects.toThrow(INVALID);
+    expect(dataSource.query).not.toHaveBeenCalled();
   });
 
-  it('preenche req.user com os dados do token', () => {
-    const request: any = { headers: { authorization: 'Bearer abc' } };
+  it('preenche req.user com os dados do token e confere só HS256', async () => {
+    const req = request();
 
-    expect(guard.canActivate(contextFor(request))).toBe(true);
-    expect(jwtService.verify).toHaveBeenCalledWith('abc');
-    expect(request.user).toEqual({ id: 'u1', email: 'ana@teste.com', profileId: 'p1', profileName: 'ADMIN', organizationId: 'org-1' });
+    expect(await guard.canActivate(contextFor(req))).toBe(true);
+    expect(jwtService.verify).toHaveBeenCalledWith('abc', { algorithms: ['HS256'] });
+    expect(req.user).toEqual({ id: 'u1', email: 'ana@teste.com', profileId: 'p1', profileName: 'ADMIN', organizationId: 'org-1' });
+  });
+
+  it('lê o estado do usuário pelo id do token, numa query enxuta (sem joins eager)', async () => {
+    await guard.canActivate(contextFor(request()));
+
+    const [sql, params] = dataSource.query.mock.calls[0];
+    expect(params).toEqual(['u1']);
+    expect(sql).toContain('FROM users u');
+    expect(sql).toContain('password_changed_at');
+  });
+
+  it.each([
+    ['token da agenda', { ...payload, scope: 'schedule' }],
+    ['token de redefinição de senha', { ...payload, scope: 'password-reset', codeId: 'c1' }],
+    ['token sem iat (CA-57)', { ...payload, iat: undefined }],
+    ['token sem sub', { ...payload, sub: undefined }],
+  ])('recusa %s sem nem consultar o banco', async (_label, claims) => {
+    jwtService.verify.mockReturnValue(claims);
+
+    await expect(guard.canActivate(contextFor(request()))).rejects.toThrow(INVALID);
+    expect(dataSource.query).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['usuário inexistente', []],
+    ['usuário inativo', [{ ...activeState, isActive: false }]],
+    ['volante (CA-60)', [{ ...activeState, systemKey: 'FLOATING_VOLUNTEER' }]],
+  ])('recusa %s (RN-32)', async (_label, rows) => {
+    dataSource.query.mockResolvedValue(rows);
+
+    await expect(guard.canActivate(contextFor(request()))).rejects.toThrow(INVALID);
+  });
+
+  it('usuário de outra equipe passa', async () => {
+    dataSource.query.mockResolvedValue([{ ...activeState, systemKey: 'FIXED_VOLUNTEER' }]);
+
+    expect(await guard.canActivate(contextFor(request()))).toBe(true);
+  });
+
+  describe('sessão revogada pela troca de senha (RN-21, RN-30)', () => {
+    // iat do token = 1 s; compara em segundos inteiros
+    const changedAt = (seconds: number, millis = 0) => new Date(seconds * 1000 + millis);
+
+    it('iat menor que o segundo da troca é recusado', async () => {
+      dataSource.query.mockResolvedValue([{ ...activeState, passwordChangedAt: changedAt(2) }]);
+
+      await expect(guard.canActivate(contextFor(request()))).rejects.toThrow(INVALID);
+    });
+
+    it('iat no mesmo segundo da troca vale (o token novo do perfil, RN-30), mesmo com milissegundos', async () => {
+      dataSource.query.mockResolvedValue([{ ...activeState, passwordChangedAt: changedAt(1, 900) }]);
+
+      expect(await guard.canActivate(contextFor(request()))).toBe(true);
+    });
+
+    it('iat maior que a troca vale', async () => {
+      jwtService.verify.mockReturnValue({ ...payload, iat: 10 });
+      dataSource.query.mockResolvedValue([{ ...activeState, passwordChangedAt: changedAt(2) }]);
+
+      expect(await guard.canActivate(contextFor(request()))).toBe(true);
+    });
   });
 });
 
 describe('OptionalJwtAuthGuard', () => {
   let jwtService: { verify: jest.Mock };
+  let dataSource: { query: jest.Mock };
   let guard: OptionalJwtAuthGuard;
 
   beforeEach(() => {
     jwtService = { verify: jest.fn(() => payload) };
-    guard = new OptionalJwtAuthGuard(jwtService as any);
+    dataSource = { query: jest.fn(async () => [activeState]) };
+    guard = new OptionalJwtAuthGuard(jwtService as any, dataSource as any);
   });
 
-  it('libera requisição sem token e sem usuário', () => {
+  it('libera requisição sem token e sem usuário', async () => {
     const request: any = { headers: {} };
 
-    expect(guard.canActivate(contextFor(request))).toBe(true);
+    expect(await guard.canActivate(contextFor(request))).toBe(true);
     expect(request.user).toBeUndefined();
     expect(jwtService.verify).not.toHaveBeenCalled();
   });
 
-  it('valida o token quando enviado', () => {
+  it('valida o token quando enviado', async () => {
     const request: any = { headers: { authorization: 'Bearer abc' } };
 
-    expect(guard.canActivate(contextFor(request))).toBe(true);
+    expect(await guard.canActivate(contextFor(request))).toBe(true);
     expect(request.user.id).toBe('u1');
   });
 
-  it('rejeita token enviado mas inválido', () => {
+  it('rejeita token enviado mas inválido', async () => {
     jwtService.verify.mockImplementation(() => {
       throw new Error('invalid');
     });
 
-    expect(() => guard.canActivate(contextFor({ headers: { authorization: 'Bearer abc' } }))).toThrow(UnauthorizedException);
+    await expect(guard.canActivate(contextFor({ headers: { authorization: 'Bearer abc' } }))).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('rejeita token enviado de usuário volante', async () => {
+    dataSource.query.mockResolvedValue([{ ...activeState, systemKey: 'FLOATING_VOLUNTEER' }]);
+
+    await expect(guard.canActivate(contextFor({ headers: { authorization: 'Bearer abc' } }))).rejects.toThrow(UnauthorizedException);
   });
 });
 

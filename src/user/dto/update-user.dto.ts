@@ -1,11 +1,15 @@
 import { IsString, IsOptional, IsDateString, Matches } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsCpf, IsFullName } from '../../common/validation/person';
+import { IsCpf, IsFullName, IsPersonEmail } from '../../common/validation/person';
 
 export class UpdateUserDto {
   @ApiPropertyOptional({ description: 'Nome completo' })
   @IsFullName({ optional: true })
   fullName?: string;
+
+  @ApiPropertyOptional({ description: 'E-mail de login (só o admin altera o de outro usuário)' })
+  @IsPersonEmail({ optional: true })
+  email?: string;
 
   @ApiPropertyOptional({ description: 'CPF (somente números, 11 dígitos)' })
   @IsCpf({ optional: true })

@@ -6,7 +6,7 @@ jest.mock('bcryptjs', () => ({ compare: jest.fn() }));
 
 describe('AuthService', () => {
   let userService: { findByEmail: jest.Mock; findOne: jest.Mock };
-  let accessService: { forUser: jest.Mock };
+  let accessService: { forUser: jest.Mock; isFloatingVolunteer: jest.Mock };
   let jwtService: { sign: jest.Mock };
   let service: AuthService;
 
@@ -28,7 +28,7 @@ describe('AuthService', () => {
     jest.clearAllMocks();
     userService = { findByEmail: jest.fn(), findOne: jest.fn() };
     jwtService = { sign: jest.fn(() => 'jwt-token') };
-    accessService = { forUser: jest.fn(async () => null) };
+    accessService = { forUser: jest.fn(async () => null), isFloatingVolunteer: jest.fn(async () => false) };
     service = new AuthService(userService as any, jwtService as any, accessService as any);
   });
 
@@ -53,6 +53,33 @@ describe('AuthService', () => {
 
       await expect(service.login(credentials)).rejects.toThrow('Credenciais inválidas.');
       expect(jwtService.sign).not.toHaveBeenCalled();
+    });
+
+    it('volante com a senha certa recebe a mesma mensagem de senha errada e nenhum token (CA-39, CA-41)', async () => {
+      userService.findByEmail.mockResolvedValue(activeUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      accessService.isFloatingVolunteer.mockResolvedValue(true);
+
+      await expect(service.login(credentials)).rejects.toThrow(new UnauthorizedException('Credenciais inválidas.'));
+      expect(accessService.isFloatingVolunteer).toHaveBeenCalledWith('u1');
+      expect(jwtService.sign).not.toHaveBeenCalled();
+    });
+
+    it('a checagem de volante só roda depois da senha certa (CA-62)', async () => {
+      userService.findByEmail.mockResolvedValue(activeUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      accessService.isFloatingVolunteer.mockResolvedValue(true);
+
+      await expect(service.login(credentials)).rejects.toThrow('Credenciais inválidas.');
+      expect(accessService.isFloatingVolunteer).not.toHaveBeenCalled();
+    });
+
+    it('volante promovido a outra equipe entra normalmente (CA-40)', async () => {
+      userService.findByEmail.mockResolvedValue(activeUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      accessService.isFloatingVolunteer.mockResolvedValue(false);
+
+      expect((await service.login(credentials)).access_token).toBe('jwt-token');
     });
 
     it('devolve token com dados do perfil e da organização', async () => {

@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { Team } from './team.entity';
+import { Team, TeamSystemKey } from './team.entity';
 import { Volunteer } from '../volunteer/volunteer.entity';
 import { User } from '../user/user.entity';
 
@@ -51,10 +51,10 @@ export class TeamMembershipService {
 
   /** Equipe ativa de cada usuário (para listar voluntários com a equipe). */
   async teamsOf(userIds: string[]) {
-    const teams = new Map<string, { id: string; name: string; isAdmin: boolean }>();
+    const teams = new Map<string, { id: string; name: string; isAdmin: boolean; systemKey: TeamSystemKey | null }>();
     if (!userIds.length) return teams;
     const volunteers = await this.volunteerRepository.find({ where: { userId: In(userIds), isActive: true }, relations: { team: true } });
-    volunteers.forEach((volunteer) => volunteer.team && teams.set(volunteer.userId, { id: volunteer.team.id, name: volunteer.team.name, isAdmin: volunteer.team.isAdmin }));
+    volunteers.forEach((volunteer) => volunteer.team && teams.set(volunteer.userId, { id: volunteer.team.id, name: volunteer.team.name, isAdmin: volunteer.team.isAdmin, systemKey: volunteer.team.systemKey ?? null }));
     return teams;
   }
 

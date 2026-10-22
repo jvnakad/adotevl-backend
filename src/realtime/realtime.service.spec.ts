@@ -16,6 +16,25 @@ describe('RealtimeService', () => {
     service = new RealtimeService();
   });
 
+  describe('disconnectUser', () => {
+    it('desconecta todos os sockets da room do usuário', async () => {
+      const disconnectSockets = jest.fn();
+      const server = { in: jest.fn(() => ({ disconnectSockets })) };
+      service.attach(server as any);
+
+      await service.disconnectUser('u-alice');
+
+      expect(server.in).toHaveBeenCalledWith('user:u-alice');
+      expect(disconnectSockets).toHaveBeenCalledWith(true);
+    });
+
+    it('sem servidor ou com falha não lança', async () => {
+      await expect(service.disconnectUser('u-alice')).resolves.toBeUndefined();
+      service.attach({ in: () => { throw new Error('boom'); } } as any);
+      await expect(service.disconnectUser('u-alice')).resolves.toBeUndefined();
+    });
+  });
+
   describe('canJoin', () => {
     it('org:<id> só da própria organização; user:<id> só do próprio usuário', async () => {
       expect(await service.canJoin(alice, 'org:org-1')).toBe(true);

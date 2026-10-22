@@ -21,8 +21,8 @@ export class PublicScheduleController {
 
   @Get()
   @ApiOperation({ summary: 'Mês da agenda (LP)', description: 'Rota pública. `organizationId` e `month=AAAA-MM`. Nunca traz nomes; com a sessão, os horários do próprio voluntário vêm com `mine` e `id`.' })
-  month(@Query('organizationId') organizationId: string, @Query('month') month: string, @Headers('authorization') authorization?: string) {
-    const session = this.accessService.optionalSession(authorization);
+  async month(@Query('organizationId') organizationId: string, @Query('month') month: string, @Headers('authorization') authorization?: string) {
+    const session = await this.accessService.optionalSession(authorization);
     const userId = session?.organizationId === organizationId ? session.userId : null;
     return this.scheduleService.month(organizationId, month, { userId, isAdmin: false });
   }
@@ -54,7 +54,7 @@ export class PublicScheduleController {
   @UseGuards(ThrottlerGuard)
   @ApiOperation({ summary: 'Marcar horário (LP)', description: 'Sessão da agenda. Mesmas regras do sistema. Cada marcação consome o código: outro horário exige novo código (401).' })
   async book(@Body() dto: PublicCreateShiftDto, @Headers('authorization') authorization: string) {
-    const { userId, organizationId, codeId } = this.accessService.session(authorization);
+    const { userId, organizationId, codeId } = await this.accessService.session(authorization);
     await this.accessService.assertCanBook(codeId);
     const shift = await this.scheduleService.book({ ...dto, organizationId }, { id: userId, canManage: false, public: true });
     // Só consome depois de marcar: erro de validação (horário cruzado, dia trancado) não gasta o código
@@ -64,8 +64,8 @@ export class PublicScheduleController {
 
   @Delete('shifts/:id')
   @ApiOperation({ summary: 'Desmarcar horário (LP)', description: 'Sessão da agenda. Até 24h antes.' })
-  cancel(@Param('id', ParseUUIDPipe) id: string, @Headers('authorization') authorization: string) {
-    const { userId, organizationId } = this.accessService.session(authorization);
+  async cancel(@Param('id', ParseUUIDPipe) id: string, @Headers('authorization') authorization: string) {
+    const { userId, organizationId } = await this.accessService.session(authorization);
     return this.scheduleService.cancel(id, organizationId, { id: userId, canManage: false, public: true });
   }
 

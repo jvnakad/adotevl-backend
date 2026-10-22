@@ -2,7 +2,9 @@ import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConnectedSocket, MessageBody, OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit, SubscribeMessage, WebSocketGateway } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
+import { DataSource } from 'typeorm';
 import { RealtimeService, RealtimeUser } from './realtime.service';
+import { isPanelSessionValid } from '../auth/jwt-auth.guard';
 
 /** Tempo para o cliente renovar o token depois de `auth:expired` antes de ser desconectado. */
 export const TOKEN_REFRESH_GRACE_MS = 15_000;
@@ -28,6 +30,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   constructor(
     private readonly jwt: JwtService,
     private readonly realtime: RealtimeService,
+    private readonly dataSource: DataSource,
   ) {}
 
   afterInit(server: Server) {
@@ -98,8 +101,10 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   private async authenticate(token: string | undefined): Promise<{ user: RealtimeUser; exp: number }> {
     if (!token) throw new Error('UNAUTHORIZED');
     try {
-      const claims = await this.jwt.verifyAsync<{ sub: string; organizationId: string; exp: number }>(token);
+      const claims = await this.jwt.verifyAsync<{ sub: string; organizationId: string; exp: number; iat: number }>(token, { algorithms: ['HS256'] });
       if (!claims.sub || !claims.organizationId) throw new Error('UNAUTHORIZED');
+      // Mesmas checagens do JwtAuthGuard: scope, iat, inativo, volante e senha trocada
+      if (!(await isPanelSessionValid(this.dataSource, claims))) throw new Error('UNAUTHORIZED');
       return { user: { id: claims.sub, organizationId: claims.organizationId }, exp: claims.exp };
     } catch (error) {
       throw new Error((error as Error).name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'UNAUTHORIZED');

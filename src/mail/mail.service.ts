@@ -23,17 +23,21 @@ export class MailService {
     }
   }
 
-  private async send(to: string, subject: string, html: string) {
+  /** `hideRecipient`: endereço ainda não confirmado, então a falha de envio registra só o domínio. */
+  private async send(to: string, subject: string, html: string, hideRecipient = false) {
     const from = process.env.MAIL_FROM || 'AdoteVL <onboarding@resend.dev>';
+    const target = hideRecipient ? `*@${to.split('@')[1] ?? '?'}` : to;
+    // A mensagem do provedor costuma repetir o endereço: com `hideRecipient` ele sai dela também
+    const mask = (message: unknown) => (hideRecipient ? String(message ?? '').split(to).join(target) : String(message ?? ''));
     try {
       if (this.smtp) {
         await this.smtp.sendMail({ from, to, subject, html });
         return;
       }
       const { error } = (await this.resend.emails.send({ from, to, subject, html })) ?? {};
-      if (error) this.logger.error(`E-mail "${subject}" para ${to} não enviado: ${error.message}`);
+      if (error) this.logger.error(`E-mail "${subject}" para ${target} não enviado: ${mask(error.message)}`);
     } catch (error) {
-      this.logger.error(`E-mail "${subject}" para ${to} não enviado: ${(error as Error).message}`);
+      this.logger.error(`E-mail "${subject}" para ${target} não enviado: ${mask((error as Error).message)}`);
     }
   }
 
@@ -52,6 +56,63 @@ export class MailService {
           paragraph('Sua senha foi redefinida por um administrador. Use a senha temporária abaixo para acessar o sistema:'),
           highlight(newPassword),
           paragraph('Por segurança, troque a senha depois do primeiro acesso.'),
+        ].join(''),
+      }),
+    );
+  }
+
+  /** Código do "Esqueci minha senha". Assunto fixo, sem o código: falha de envio registra o assunto em log (RN-19). */
+  async sendPasswordResetCodeEmail(to: string, name: string, code: string) {
+    await this.send(
+      to,
+      'Seu código para redefinir a senha — AdoteVL',
+      emailLayout({
+        preheader: 'Use o código para criar uma nova senha.',
+        title: `Olá, ${firstName(name)}!`,
+        body: [
+          paragraph('Use este código para criar uma nova senha no sistema:'),
+          highlight(code),
+          paragraph('Ele vale por 5 minutos. Se pedir outro, use sempre o último.'),
+          paragraph('Se não foi você que pediu, ignore este e-mail. Sua senha continua a mesma.'),
+        ].join(''),
+      }),
+    );
+  }
+
+  /** Código da troca do próprio e-mail, enviado ao e-mail NOVO. Sem nome (pode ser endereço de outra pessoa) e sem o código no assunto. */
+  async sendEmailChangeCodeEmail(to: string, code: string) {
+    await this.send(
+      to,
+      'Seu código para confirmar o novo e-mail — AdoteVL',
+      emailLayout({
+        preheader: 'Use o código para confirmar a troca de e-mail.',
+        title: 'Olá!',
+        body: [
+          paragraph('Recebemos um pedido para usar este e-mail no acesso ao painel da AdoteVL.'),
+          highlight(code),
+          paragraph('Ele vale por 5 minutos. Se pedir outro, use sempre o último.'),
+          paragraph('Se não foi você, ignore este e-mail. Este endereço não será usado sem o código.'),
+        ].join(''),
+      }),
+      true,
+    );
+  }
+
+  /** Aviso depois de qualquer troca de senha. Sem senha, código nem token (RN-20). */
+  async sendPasswordChangedEmail(to: string, name: string, now = new Date()) {
+    const when = now.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    await this.send(
+      to,
+      'Sua senha foi alterada — AdoteVL',
+      emailLayout({
+        preheader: 'Avisamos por segurança: a senha da sua conta foi alterada.',
+        title: `Olá, ${firstName(name)}!`,
+        body: [
+          paragraph(`A senha da sua conta foi alterada em <strong>${when}</strong> (horário de Brasília).`),
+          button(`${this.appUrl()}/signin`, 'Entrar no painel'),
+          paragraph(
+            `Não foi você? Fale com a gente agora pelo <a href="${ORG_CHANNELS.whatsapp}" style="color:#fd5028;font-weight:700;text-decoration:none;">WhatsApp</a> ou pelo e-mail <a href="mailto:${ORG_CHANNELS.email}" style="color:#fd5028;font-weight:700;text-decoration:none;">${ORG_CHANNELS.email}</a>.`,
+          ),
         ].join(''),
       }),
     );
@@ -144,14 +205,14 @@ export class MailService {
   async sendScheduleCodeEmail(to: string, name: string, code: string) {
     await this.send(
       to,
-      `Seu código para a agenda: ${code} — AdoteVL`,
+      'Seu código para a agenda — AdoteVL',
       emailLayout({
         preheader: 'Use o código para marcar seu voluntariado.',
         title: `Olá, ${firstName(name)}!`,
         body: [
           paragraph('Use este código para marcar seu voluntariado na agenda:'),
           highlight(code),
-          paragraph('Ele vale por 10 minutos. Se não foi você que pediu, ignore este e-mail.'),
+          paragraph('Ele vale por 5 minutos. Se não foi você que pediu, ignore este e-mail.'),
         ].join(''),
       }),
     );

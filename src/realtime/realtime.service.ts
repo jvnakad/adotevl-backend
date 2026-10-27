@@ -47,13 +47,14 @@ export class RealtimeService {
   }
 
   /**
-   * Derruba os sockets de uma família de refresh revogada (logout, reuso, recusa, teto, limite de 10). O filtro é `socket.data.fid`,
-   * não a room: um cliente que saísse da room por outro caminho cairia do mesmo jeito (SEC-BUG-01). Nunca lança.
+   * Derruba os sockets de uma família de refresh revogada (logout, reuso, recusa, teto, limite de 10). Busca na room `family:<fid>` (que o
+   * cliente não consegue deixar: room:leave a ignora, SEC-BUG-01) e confere `socket.data.fid` antes de desconectar. Nunca lança.
    */
   async disconnectFamily(familyId: string): Promise<void> {
     if (!this.server || !familyId) return;
     try {
-      const sockets = await this.server.fetchSockets();
+      // Duas defesas: só a room da família (sem varrer todos os sockets) e, dentro dela, o socket.data.fid confere antes de derrubar
+      const sockets = await this.server.in(RealtimeService.familyRoom(familyId)).fetchSockets();
       for (const socket of sockets) if (socket.data?.fid === familyId) socket.disconnect(true);
     } catch (error) {
       this.logger.warn(`Falha ao desconectar os sockets da família: ${(error as Error).message}`);

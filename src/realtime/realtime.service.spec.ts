@@ -38,15 +38,17 @@ describe('RealtimeService', () => {
   describe('disconnectFamily (RN-37, SEC-BUG-01)', () => {
     const remote = (fid?: string) => ({ data: { user: alice, fid }, disconnect: jest.fn() });
 
-    it('derruba só os sockets cujo data.fid é a família, mesmo fora da room', async () => {
+    it('busca na room da família e só derruba os sockets cujo data.fid confere', async () => {
       const a1 = remote('fam-A');
       const a2 = remote('fam-A');
       const b = remote('fam-B');
       const legacy = remote(undefined);
-      service.attach({ fetchSockets: jest.fn(async () => [a1, b, legacy, a2]) } as any);
+      const server = { in: jest.fn(() => ({ fetchSockets: jest.fn(async () => [a1, b, legacy, a2]) })) };
+      service.attach(server as any);
 
       await service.disconnectFamily('fam-A');
 
+      expect(server.in).toHaveBeenCalledWith('family:fam-A');
       expect(a1.disconnect).toHaveBeenCalledWith(true);
       expect(a2.disconnect).toHaveBeenCalledWith(true);
       expect(b.disconnect).not.toHaveBeenCalled();
@@ -55,7 +57,7 @@ describe('RealtimeService', () => {
 
     it('sem servidor, sem id ou com falha não lança', async () => {
       await expect(service.disconnectFamily('fam-A')).resolves.toBeUndefined();
-      service.attach({ fetchSockets: async () => { throw new Error('boom'); } } as any);
+      service.attach({ in: () => ({ fetchSockets: async () => { throw new Error('boom'); } }) } as any);
       await expect(service.disconnectFamily('fam-A')).resolves.toBeUndefined();
       await expect(service.disconnectFamily('')).resolves.toBeUndefined();
     });

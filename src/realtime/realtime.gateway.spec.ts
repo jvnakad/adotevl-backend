@@ -1,5 +1,4 @@
 import { RealtimeGateway } from './realtime.gateway';
-import { isPanelSessionValid } from '../auth/jwt-auth.guard';
 
 const claims = { sub: 'u1', organizationId: 'org-1', exp: 9999999999, iat: 100 };
 const active = { isActive: true, passwordChangedAt: null, systemKey: null };
@@ -33,13 +32,5 @@ describe('RealtimeGateway: autenticação do handshake', () => {
     dataSource.query.mockResolvedValue(rows);
 
     await expect(authenticate('t')).rejects.toThrow('UNAUTHORIZED');
-  });
-});
-
-describe('isPanelSessionValid', () => {
-  it('iat no mesmo segundo da troca vale', async () => {
-    const dataSource = { query: jest.fn(async () => [{ ...active, passwordChangedAt: new Date(100_900) }]) };
-
-    expect(await isPanelSessionValid(dataSource as any, claims)).toBe(true);
   });
 });

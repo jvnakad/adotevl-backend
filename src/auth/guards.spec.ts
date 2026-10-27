@@ -56,7 +56,7 @@ describe('JwtAuthGuard', () => {
     await guard.canActivate(contextFor(request()));
 
     const [sql, params] = dataSource.query.mock.calls[0];
-    expect(params).toEqual(['u1']);
+    expect(params).toEqual(['u1', null]);
     expect(sql).toContain('FROM users u');
     expect(sql).toContain('password_changed_at');
   });
@@ -110,6 +110,37 @@ describe('JwtAuthGuard', () => {
       dataSource.query.mockResolvedValue([{ ...activeState, passwordChangedAt: changedAt(2) }]);
 
       expect(await guard.canActivate(contextFor(request()))).toBe(true);
+    });
+  });
+  describe('família do refresh (fid, SEC-09)', () => {
+    const FID = '3f2b8c1e-5a7d-4e9b-8c3a-1d2e3f4a5b6c';
+
+    it('fid de família viva passa, com a mesma consulta (0 idas a mais ao banco)', async () => {
+      jwtService.verify.mockReturnValue({ ...payload, fid: FID });
+      dataSource.query.mockResolvedValue([{ ...activeState, familyAlive: true }]);
+
+      expect(await guard.canActivate(contextFor(request()))).toBe(true);
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      expect(dataSource.query.mock.calls[0][1]).toEqual(['u1', FID]);
+    });
+
+    it('fid de família revogada dá 401', async () => {
+      jwtService.verify.mockReturnValue({ ...payload, fid: FID });
+      dataSource.query.mockResolvedValue([{ ...activeState, familyAlive: false }]);
+
+      await expect(guard.canActivate(contextFor(request()))).rejects.toThrow(INVALID);
+    });
+
+    it('fid que não é UUID dá 401 sem consultar o banco (sem 500)', async () => {
+      jwtService.verify.mockReturnValue({ ...payload, fid: "x'; DROP TABLE users;--" });
+
+      await expect(guard.canActivate(contextFor(request()))).rejects.toThrow(INVALID);
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
+    it('access sem fid (legado de 8 h, aprovação) segue a regra antiga', async () => {
+      expect(await guard.canActivate(contextFor(request()))).toBe(true);
+      expect(dataSource.query.mock.calls[0][1]).toEqual(['u1', null]);
     });
   });
 });

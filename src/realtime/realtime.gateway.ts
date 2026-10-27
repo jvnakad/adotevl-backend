@@ -4,7 +4,7 @@ import { ConnectedSocket, MessageBody, OnGatewayConnection, OnGatewayDisconnect,
 import type { Server, Socket } from 'socket.io';
 import { DataSource } from 'typeorm';
 import { RealtimeService, RealtimeUser } from './realtime.service';
-import { isPanelSessionValid } from '../auth/jwt-auth.guard';
+import { isPanelSessionValid } from '../auth/session-state';
 
 /** Tempo para o cliente renovar o token depois de `auth:expired` antes de ser desconectado. */
 export const TOKEN_REFRESH_GRACE_MS = 15_000;

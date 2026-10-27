@@ -8,7 +8,6 @@ import { AuthController } from './auth.controller';
 import { UserModule } from '../user/user.module';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from './jwt-auth.guard';
-import { RolesGuard } from './roles.guard';
 import { jwtSecret } from './jwt-secret';
 import { accessTokenTtl } from './panel-token';
 import { PasswordResetService } from './password-reset.service';
@@ -31,7 +30,7 @@ import { User } from '../user/user.entity';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, PasswordResetService, RefreshTokenService, JwtStrategy, JwtAuthGuard, RolesGuard],
-  exports: [JwtAuthGuard, RolesGuard, JwtModule, RefreshTokenService],
+  providers: [AuthService, PasswordResetService, RefreshTokenService, JwtStrategy, JwtAuthGuard],
+  exports: [JwtAuthGuard, JwtModule, RefreshTokenService],
 })
 export class AuthModule {}

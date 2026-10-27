@@ -452,9 +452,9 @@ describe('UserService', () => {
     it('admin pode alterar qualquer campo de qualquer usuário da organização', async () => {
       userRepo.findOne.mockResolvedValue({ id: 'u1', organizationId: 'org-1' });
 
-      await service.update('u1', { profileId: 'p-admin' } as any, 'admin', true, 'org-1');
+      await service.update('u1', { phone: '11999990000' }, 'admin', true, 'org-1');
 
-      expect(userRepo.update).toHaveBeenCalledWith('u1', { profileId: 'p-admin', updatedBy: 'admin' });
+      expect(userRepo.update).toHaveBeenCalledWith('u1', { phone: '11999990000', updatedBy: 'admin' });
     });
 
     describe('troca de e-mail pelo admin', () => {

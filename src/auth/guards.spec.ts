@@ -1,8 +1,6 @@
-import { ExecutionContext, ForbiddenException, UnauthorizedException } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
+import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { OptionalJwtAuthGuard } from './optional-jwt-auth.guard';
-import { RolesGuard } from './roles.guard';
 
 const contextFor = (request: Record<string, any>) =>
   ({
@@ -183,37 +181,5 @@ describe('OptionalJwtAuthGuard', () => {
     dataSource.query.mockResolvedValue([{ ...activeState, systemKey: 'FLOATING_VOLUNTEER' }]);
 
     await expect(guard.canActivate(contextFor({ headers: { authorization: 'Bearer abc' } }))).rejects.toThrow(UnauthorizedException);
-  });
-});
-
-describe('RolesGuard', () => {
-  let reflector: { getAllAndOverride: jest.Mock };
-  let guard: RolesGuard;
-
-  beforeEach(() => {
-    reflector = { getAllAndOverride: jest.fn() };
-    guard = new RolesGuard(reflector as unknown as Reflector);
-  });
-
-  it('libera rota sem @Roles', () => {
-    reflector.getAllAndOverride.mockReturnValue(undefined);
-
-    expect(guard.canActivate(contextFor({}))).toBe(true);
-  });
-
-  it('libera perfil permitido', () => {
-    reflector.getAllAndOverride.mockReturnValue(['ADMIN', 'VOLUNTEER']);
-
-    expect(guard.canActivate(contextFor({ user: { profileName: 'VOLUNTEER' } }))).toBe(true);
-    expect(reflector.getAllAndOverride).toHaveBeenCalledWith('roles', [expect.any(Function), expect.any(Function)]);
-  });
-
-  it.each([
-    ['perfil não permitido', { user: { profileName: 'FINANCIAL' } }],
-    ['requisição sem usuário', {}],
-  ])('bloqueia %s', (_label, request) => {
-    reflector.getAllAndOverride.mockReturnValue(['ADMIN']);
-
-    expect(() => guard.canActivate(contextFor(request))).toThrow(ForbiddenException);
   });
 });

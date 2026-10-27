@@ -42,7 +42,7 @@ src/<feature>/
   dto/update-<feature>.dto.ts
 ```
 - `src/common/` — `PaginationDto` e `paginate(repo, pagination, where?, relations?, order?)` → `{ data, total, page, limit, totalPages }`.
-- `src/auth/` — `JwtAuthGuard`, `RolesGuard`, `@Roles(...)`, `OptionalJwtAuthGuard` (rota pública que aceita token opcional).
+- `src/auth/` — `JwtAuthGuard`, `OptionalJwtAuthGuard` (rota pública que aceita token opcional), sessão do painel (`RefreshTokenService`, `session-state.ts`, `panel-token.ts`; ver "Sessão").
 - `src/storage/` — `StorageService.upload(path, buffer, mimetype)` → URL pública; `remove(paths)`. Módulo `@Global`.
 - `src/mail/` — `MailService` (Resend).
 - `src/autentique/` — `AutentiqueService` (`createDocument`, `getDocument`, `deleteDocument`, `downloadFile`). Módulo `@Global`; token lido sob demanda (sem `AUTENTIQUE_TOKEN` → 503).
@@ -68,10 +68,10 @@ src/<feature>/
 
 ### Controllers
 - `@ApiTags('<Nome em PT>')`, `@Controller('<rota-kebab-plural>')`.
-- Rota protegida: `@ApiBearerAuth()` + `@UseGuards(JwtAuthGuard, AccessGuard)` + `@RequireAccess(Screen.X, AccessLevel.VIEW|EDIT)` (ou `@AdminOnly()` para ações só da equipe Admin). `@Roles`/`RolesGuard` são legado — não usar.
+- Rota protegida: `@ApiBearerAuth()` + `@UseGuards(JwtAuthGuard, AccessGuard)` + `@RequireAccess(Screen.X, AccessLevel.VIEW|EDIT)` (ou `@AdminOnly()` para ações só da equipe Admin). `RolesGuard` e `@Roles` não existem mais.
 - `@ApiOperation({ summary: '...', description: 'Acesso: Pets (Editar)' })` — sempre dizer a tela e o nível ("Somente equipe Admin" / "Qualquer usuário logado" / "Rota pública").
 - Usuário logado: `req.user` = `{ id, email, profileId, profileName, organizationId }`. Passar `req.user.id` para `createdBy/updatedBy` e filtrar por `req.user.organizationId`.
-- Perfis `ADMIN`/`FINANCIAL`/`VOLUNTEER` são **legado**: ficam no usuário e no JWT, mas não dão acesso. O acesso vem da equipe (ver "Acesso por equipe").
+- Perfis `ADMIN`/`FINANCIAL`/`VOLUNTEER` são **legado**: ficam no usuário e no JWT só como informação, e nenhuma decisão de autorização os lê. `profileId` não faz parte de `CreateUserDto` nem de `UpdateUserDto` (o `ValidationPipe` descarta). O acesso vem da equipe (ver "Acesso por equipe").
 - Ids de rota: `ParseUUIDPipe`.
 
 ### Services

@@ -26,11 +26,6 @@ export class UpdateUserDto {
   @IsDateString({}, { message: 'Informe uma data válida no formato YYYY-MM-DD.' })
   birthDate?: string;
 
-  @ApiPropertyOptional({ description: 'ID do perfil' })
-  @IsOptional()
-  @IsString()
-  profileId?: string;
-
   @ApiPropertyOptional({ description: 'Ativo/inativo' })
   @IsOptional()
   isActive?: boolean;

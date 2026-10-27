@@ -49,6 +49,7 @@ import { VolunteerShift } from '../src/volunteer-schedule/volunteer-shift.entity
 import { ScheduleLock } from '../src/volunteer-schedule/schedule-lock.entity';
 import { ScheduleAccessCode } from '../src/volunteer-schedule/schedule-access-code.entity';
 import { PasswordResetCode } from '../src/auth/password-reset-code.entity';
+import { RefreshToken } from '../src/auth/refresh-token.entity';
 import { EmailChangeRequest } from '../src/user/email-change-request.entity';
 import { EmailChangeEvent } from '../src/user/email-change-event.entity';
 import { VolunteerScheduleModule } from '../src/volunteer-schedule/volunteer-schedule.module';
@@ -220,7 +221,7 @@ class MockAutentiqueModule {}
       entities: [
         Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, PasswordResetCode, EmailChangeRequest, EmailChangeEvent, ScheduleInstitution, ProductType, Product, StockHistoryEvent,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, PasswordResetCode, RefreshToken, EmailChangeRequest, EmailChangeEvent, ScheduleInstitution, ProductType, Product, StockHistoryEvent,
         MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification,
       ],
       synchronize: true,

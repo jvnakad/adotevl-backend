@@ -12,6 +12,7 @@ import { RolesGuard } from './roles.guard';
 import { jwtSecret } from './jwt-secret';
 import { PasswordResetService } from './password-reset.service';
 import { PasswordResetCode } from './password-reset-code.entity';
+import { RefreshToken } from './refresh-token.entity';
 import { User } from '../user/user.entity';
 
 @Global()
@@ -19,7 +20,7 @@ import { User } from '../user/user.entity';
   imports: [
     UserModule,
     PassportModule,
-    TypeOrmModule.forFeature([User, PasswordResetCode]),
+    TypeOrmModule.forFeature([User, PasswordResetCode, RefreshToken]),
     // Limite por IP das rotas do "Esqueci minha senha" (@Throttle por rota); o controle real é por conta, no banco
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 5 }]),
     // Sem fallback: com JWT_SECRET ausente ou fraco o boot falha aqui

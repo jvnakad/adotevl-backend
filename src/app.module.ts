@@ -42,6 +42,7 @@ import { VolunteerShift } from './volunteer-schedule/volunteer-shift.entity';
 import { ScheduleLock } from './volunteer-schedule/schedule-lock.entity';
 import { ScheduleAccessCode } from './volunteer-schedule/schedule-access-code.entity';
 import { PasswordResetCode } from './auth/password-reset-code.entity';
+import { RefreshToken } from './auth/refresh-token.entity';
 import { EmailChangeRequest } from './user/email-change-request.entity';
 import { EmailChangeEvent } from './user/email-change-event.entity';
 import { VolunteerScheduleModule } from './volunteer-schedule/volunteer-schedule.module';
@@ -78,7 +79,7 @@ import { MarketingHistoryEvent } from './marketing/entities/marketing-history-ev
     TypeOrmModule.forRoot({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, PasswordResetCode, EmailChangeRequest, EmailChangeEvent, ScheduleInstitution, ProductType, Product, StockHistoryEvent, MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification],
+      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, PasswordResetCode, RefreshToken, EmailChangeRequest, EmailChangeEvent, ScheduleInstitution, ProductType, Product, StockHistoryEvent, MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification],
       synchronize: true,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
     }),

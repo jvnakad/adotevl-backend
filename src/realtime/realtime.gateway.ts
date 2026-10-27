@@ -12,6 +12,8 @@ const MAX_TIMER_MS = 2 ** 31 - 1;
 
 interface SocketData {
   user: RealtimeUser;
+  /** Família do refresh (claim `fid`); ausente no access legado de 8 h e no link de aprovação */
+  fid?: string;
   /** exp do JWT em segundos */
   exp: number;
   expiryTimer?: NodeJS.Timeout;
@@ -38,7 +40,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     server.use(async (socket, next) => {
       try {
         const claims = await this.authenticate(this.tokenOf(socket));
-        socket.data = { user: claims.user, exp: claims.exp } as SocketData;
+        socket.data = { user: claims.user, exp: claims.exp, fid: claims.fid } as SocketData;
         next();
       } catch (error) {
         next(error as Error);
@@ -49,6 +51,7 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   handleConnection(socket: Socket) {
     const data = socket.data as SocketData;
     socket.join([RealtimeService.orgRoom(data.user.organizationId), RealtimeService.userRoom(data.user.id)]);
+    if (data.fid) socket.join(RealtimeService.familyRoom(data.fid));
     this.scheduleExpiry(socket);
     socket.emit('realtime:ready', { userId: data.user.id, organizationId: data.user.organizationId });
   }
@@ -70,8 +73,8 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   async leave(@MessageBody() body: { room?: string }, @ConnectedSocket() socket: Socket) {
     const room = typeof body?.room === 'string' ? body.room : '';
     const data = socket.data as SocketData;
-    // As rooms automáticas (org e user) não saem
-    if (room !== RealtimeService.orgRoom(data.user.organizationId) && room !== RealtimeService.userRoom(data.user.id)) await socket.leave(room);
+    // As rooms automáticas (org, user e family) não saem: sair de family: escaparia do disconnectFamily (SEC-BUG-01)
+    if (!RealtimeGateway.isAutomaticRoom(data, room)) await socket.leave(room);
     return { ok: true, room };
   }
 
@@ -84,11 +87,21 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       if (claims.user.id !== data.user.id) return { ok: false, error: 'UNAUTHORIZED' };
       data.exp = claims.exp;
       data.user = claims.user;
+      // Família nova (ex.: troca de senha): o socket sai da room antiga e entra na nova, para a revogação da antiga não derrubá-lo (RN-37)
+      if (claims.fid !== data.fid) {
+        if (data.fid) await socket.leave(RealtimeService.familyRoom(data.fid));
+        if (claims.fid) await socket.join(RealtimeService.familyRoom(claims.fid));
+        data.fid = claims.fid;
+      }
       this.scheduleExpiry(socket);
       return { ok: true };
     } catch (error) {
       return { ok: false, error: (error as Error).message };
     }
+  }
+
+  private static isAutomaticRoom(data: SocketData, room: string): boolean {
+    return room === RealtimeService.orgRoom(data.user.organizationId) || room === RealtimeService.userRoom(data.user.id) || room.startsWith('family:');
   }
 
   private tokenOf(socket: Socket): string | undefined {
@@ -98,14 +111,14 @@ export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     return typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7) : undefined;
   }
 
-  private async authenticate(token: string | undefined): Promise<{ user: RealtimeUser; exp: number }> {
+  private async authenticate(token: string | undefined): Promise<{ user: RealtimeUser; exp: number; fid?: string }> {
     if (!token) throw new Error('UNAUTHORIZED');
     try {
-      const claims = await this.jwt.verifyAsync<{ sub: string; organizationId: string; exp: number; iat: number }>(token, { algorithms: ['HS256'] });
+      const claims = await this.jwt.verifyAsync<{ sub: string; organizationId: string; exp: number; iat: number; fid?: string }>(token, { algorithms: ['HS256'] });
       if (!claims.sub || !claims.organizationId) throw new Error('UNAUTHORIZED');
-      // Mesmas checagens do JwtAuthGuard: scope, iat, inativo, volante e senha trocada
+      // Mesmas checagens do JwtAuthGuard: scope, iat, fid revogado, inativo, volante e senha trocada
       if (!(await isPanelSessionValid(this.dataSource, claims))) throw new Error('UNAUTHORIZED');
-      return { user: { id: claims.sub, organizationId: claims.organizationId }, exp: claims.exp };
+      return { user: { id: claims.sub, organizationId: claims.organizationId }, exp: claims.exp, fid: claims.fid };
     } catch (error) {
       throw new Error((error as Error).name === 'TokenExpiredError' ? 'TOKEN_EXPIRED' : 'UNAUTHORIZED');
     }

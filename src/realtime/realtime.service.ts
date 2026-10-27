@@ -19,6 +19,7 @@ export const ROOM_ERRORS = { REVOKED: 'room:revoked' } as const;
  * Rooms:
  * - `org:<organizationId>`: automática na conexão; só da própria organização.
  * - `user:<userId>`: automática; só o próprio usuário.
+ * - `family:<fid>`: automática quando o access tem `fid`; o cliente não entra nem sai (só o `auth:refresh` troca). Cai com `disconnectFamily`.
  * - `<prefixo>:<id>` registrado por um módulo (ex.: `marketing-board:<orgId>`): entra com `room:join`, com checagem de permissão.
  */
 @Injectable()
@@ -45,12 +46,27 @@ export class RealtimeService {
     }
   }
 
+  /**
+   * Derruba os sockets de uma família de refresh revogada (logout, reuso, recusa, teto, limite de 10). O filtro é `socket.data.fid`,
+   * não a room: um cliente que saísse da room por outro caminho cairia do mesmo jeito (SEC-BUG-01). Nunca lança.
+   */
+  async disconnectFamily(familyId: string): Promise<void> {
+    if (!this.server || !familyId) return;
+    try {
+      const sockets = await this.server.fetchSockets();
+      for (const socket of sockets) if (socket.data?.fid === familyId) socket.disconnect(true);
+    } catch (error) {
+      this.logger.warn(`Falha ao desconectar os sockets da família: ${(error as Error).message}`);
+    }
+  }
+
   registerRoomType(prefix: string, authorizer: RoomAuthorizer) {
     this.authorizers.set(prefix, authorizer);
   }
 
   static orgRoom = (organizationId: string) => `org:${organizationId}`;
   static userRoom = (userId: string) => `user:${userId}`;
+  static familyRoom = (familyId: string) => `family:${familyId}`;
 
   /** O usuário pode estar nesta room agora? Permissão lida na hora (revogação vale na próxima entrada ou emissão). */
   async canJoin(user: RealtimeUser, room: string): Promise<boolean> {
@@ -61,6 +77,8 @@ export class RealtimeService {
     if (!id) return false;
     if (prefix === 'org') return id === user.organizationId;
     if (prefix === 'user') return id === user.id;
+    // family: é automática, vem do fid do access; ninguém entra por room:join
+    if (prefix === 'family') return false;
     const authorizer = this.authorizers.get(prefix);
     if (!authorizer) return false;
     try {

@@ -49,3 +49,12 @@ export function panelTokenPayload(subject: PanelTokenSubject, familyId?: string)
     ...(familyId ? { fid: familyId } : {}),
   };
 }
+
+/** Único ponto que converte um `User` (com `profile` carregado) nos dados do token do painel. */
+export const panelTokenSubjectOf = (user: { id: string; email: string; profileId: string; profile?: { name?: string } | null; organizationId: string }): PanelTokenSubject => ({
+  id: user.id,
+  email: user.email,
+  profileId: user.profileId,
+  profileName: user.profile?.name,
+  organizationId: user.organizationId,
+});

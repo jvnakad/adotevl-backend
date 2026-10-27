@@ -8,6 +8,7 @@ import { UserService } from '../user/user.service';
 import { LoginDto } from './dto/login.dto';
 import { AccessService } from '../access/access.service';
 import { RefreshTokenService } from './refresh-token.service';
+import { panelTokenSubjectOf } from './panel-token';
 
 @Injectable()
 export class AuthService {
@@ -47,10 +48,7 @@ export class AuthService {
     }
 
     // Depois de todas as recusas: volante e senha errada nunca gravam refresh (CA-05)
-    const { access_token, refresh_token } = await this.refreshTokens.issue(
-      { id: user.id, email: user.email, profileId: user.profileId, profileName: user.profile?.name, organizationId: user.organizationId },
-      userAgent,
-    );
+    const { access_token, refresh_token } = await this.refreshTokens.issue(panelTokenSubjectOf(user), userAgent);
 
     return {
       access_token,

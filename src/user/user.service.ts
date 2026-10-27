@@ -27,7 +27,7 @@ import { TeamSystemKey } from '../team/team.entity';
 import { AccessService } from '../access/access.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { RefreshTokenService } from '../auth/refresh-token.service';
-import { APPROVAL_LINK_TTL, panelTokenPayload } from '../auth/panel-token';
+import { APPROVAL_LINK_TTL, panelTokenPayload, panelTokenSubjectOf } from '../auth/panel-token';
 import { guardianFields } from './volunteer-age';
 import { normalizeCpf, normalizeEmail, normalizePersonName } from '../common/validation/person';
 import { VolunteerApplication } from '../volunteer-application/volunteer-application.entity';
@@ -296,7 +296,7 @@ export class UserService {
     const updated = await this.userRepository.findOne({ where: { id } });
     // Link do e-mail: 8 h explícito, sem fid e sem refresh (o padrão do módulo é o access curto, RN-20, SEC-17)
     const token = this.jwtService.sign(
-      panelTokenPayload({ id: updated.id, email: updated.email, profileId: updated.profileId, profileName: updated.profile?.name, organizationId: updated.organizationId }),
+      panelTokenPayload(panelTokenSubjectOf(updated)),
       { expiresIn: APPROVAL_LINK_TTL },
     );
     await this.mailService.sendApprovalEmail(updated.email, updated.fullName, token);
@@ -335,10 +335,7 @@ export class UserService {
     await closePendingEmailChange(this.userRepository.manager, id, 'troca_de_senha');
     await this.realtime.disconnectUser(id);
     // Emitido depois da gravação: a família nasce no mesmo ms da troca ou depois, e o iat do access fica no mesmo segundo ou depois (RN-06, RN-30)
-    const { access_token, refresh_token } = await this.refreshTokens.issue(
-      { id: user.id, email: user.email, profileId: user.profileId, profileName: user.profile?.name, organizationId: user.organizationId },
-      userAgent,
-    );
+    const { access_token, refresh_token } = await this.refreshTokens.issue(panelTokenSubjectOf(user), userAgent);
     await this.mailService.sendPasswordChangedEmail(user.email, user.fullName);
     return { message: 'Senha alterada com sucesso.', access_token, refresh_token };
   }

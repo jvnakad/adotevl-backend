@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { TeamService } from './team.service';
 import { TeamMembershipService } from './team-membership.service';
+import { affectedOf } from '../common/query-result';
 import { AccessLevel, Screen, ScreenPermissions } from '../access/access';
 
 // Acesso que cada perfil legado tinha antes das equipes (ninguém perde acesso na migração)
@@ -80,7 +81,7 @@ export class AccessMigrationService implements OnModuleInit {
 
   private async markMigrated(organizationId: string) {
     const result = await this.dataSource.query('UPDATE organizations SET access_migrated_at = now() WHERE id = $1 AND access_migrated_at IS NULL', [organizationId]);
-    return Array.isArray(result) ? ((result[1] as number) ?? 0) > 0 : true;
+    return affectedOf(result) > 0;
   }
 
   private async migrateOrganization(organizationId: string) {

@@ -1,5 +1,5 @@
 import { JwtService } from '@nestjs/jwt';
-import { accessTokenTtl, APPROVAL_LINK_TTL, panelJwtOptions, panelTokenPayload } from './panel-token';
+import { accessTokenTtl, APPROVAL_LINK_TTL, panelJwtOptions, panelTokenPayload, panelTokenSubjectOf } from './panel-token';
 
 describe('accessTokenTtl', () => {
   const env = { ...process.env };
@@ -94,5 +94,21 @@ describe('JwtModule do painel (SEC-06, §11.3)', () => {
       expect(claims).not.toHaveProperty('fid');
       expect(claims).not.toHaveProperty('scope');
     }
+  });
+});
+
+describe('panelTokenSubjectOf', () => {
+  it('converte o usuário com perfil nos dados do token (único ponto)', () => {
+    expect(panelTokenSubjectOf({ id: 'u1', email: 'a@b.c', profileId: 'p1', profile: { name: 'VOLUNTEER' }, organizationId: 'o1', outro: 'x' } as any)).toEqual({
+      id: 'u1',
+      email: 'a@b.c',
+      profileId: 'p1',
+      profileName: 'VOLUNTEER',
+      organizationId: 'o1',
+    });
+  });
+
+  it('sem perfil carregado o profileName fica indefinido', () => {
+    expect(panelTokenSubjectOf({ id: 'u1', email: 'a@b.c', profileId: 'p1', organizationId: 'o1' }).profileName).toBeUndefined();
   });
 });

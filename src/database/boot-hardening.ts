@@ -119,11 +119,21 @@ async function revokeAndEnableRls(dataSource: DataSource): Promise<{ changed: st
         if (row.kind !== 'S' && !row.rls) await runner.query(`ALTER TABLE ${table} ENABLE ROW LEVEL SECURITY`);
         changed.push(row.name);
       } catch (error) {
-        if (!isLockTimeout(error)) throw error;
-        skipped.push(row.name);
+        if (isLockTimeout(error)) {
+          skipped.push(row.name);
+        } else {
+          // Não derruba o boot: a falha fechada de refresh_tokens é garantida pelo passo C. Só tabela e código, nunca o texto do erro
+          log('db_hardening.step_failed', { table: row.name, code: (error as any)?.code ?? (error as any)?.driverError?.code ?? 'unknown' }, 'error');
+        }
       }
     }
   } finally {
+    // A conexão volta para o pool: o lock_timeout não pode vazar para as queries da API
+    try {
+      await runner.query('RESET lock_timeout');
+    } catch {
+      // conexão já quebrada: o release descarta
+    }
     await runner.release();
   }
   return { changed, skipped };

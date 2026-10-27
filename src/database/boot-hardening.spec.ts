@@ -17,6 +17,7 @@ type Setup = {
   claimed?: number;
   stampFails?: boolean;
   lockedTable?: string;
+  failTable?: { name: string; code?: string };
   entityTables?: string[];
 };
 
@@ -34,6 +35,7 @@ function build(setup: Setup = {}) {
       query: async (sql: string) => {
         runnerCalls.push(sql);
         if (setup.lockedTable && sql.includes(`"${setup.lockedTable}"`)) throw Object.assign(new Error('lock'), { code: '55P03' });
+        if (setup.failTable && sql.includes(`"${setup.failTable.name}"`)) throw Object.assign(new Error('permissão negada para a senha=segredo'), { code: setup.failTable.code ?? '42501' });
       },
     }),
     query: jest.fn(async (sql: string) => {
@@ -108,9 +110,48 @@ describe('hardenDataSource (RN-38 a RN-40)', () => {
       'ALTER TABLE public."ok_table" ENABLE ROW LEVEL SECURITY',
       'REVOKE ALL ON SEQUENCE public."serial_seq" FROM PUBLIC',
       'REVOKE ALL ON TABLE public."weird""name" FROM anon',
+      'RESET lock_timeout',
     ]);
     const applied = logs.find((l) => l.event === 'db_hardening.applied');
     expect(applied.changed).toEqual(['pets', 'ok_table', 'serial_seq', 'weird"name']);
+  });
+
+  it('RESET lock_timeout roda no fim, antes de devolver a conexão ao pool, mesmo com erro no meio', async () => {
+    const { dataSource, runnerCalls } = build({ failTable: { name: 'pets' }, exposure: [{ name: 'pets', kind: 'r', rls: false, exposedTo: null }] });
+
+    await hardenDataSource(dataSource);
+
+    expect(runnerCalls[0]).toBe(`SET lock_timeout = '3s'`);
+    expect(runnerCalls[runnerCalls.length - 1]).toBe('RESET lock_timeout');
+  });
+
+  it('erro de SQL que não é lock timeout não derruba o boot: loga step_failed com tabela e código, sem o texto do erro, e segue', async () => {
+    const { dataSource, runnerCalls, order } = build({
+      failTable: { name: 'pets' },
+      exposure: [
+        { name: 'pets', kind: 'r', rls: false, exposedTo: 'anon' },
+        { name: 'users', kind: 'r', rls: false, exposedTo: null },
+      ],
+    });
+
+    await expect(hardenDataSource(dataSource)).resolves.toBeUndefined();
+
+    expect(logs.find((l) => l.event === 'db_hardening.step_failed')).toEqual({ level: 'error', event: 'db_hardening.step_failed', table: 'pets', code: '42501' });
+    expect(JSON.stringify(logs)).not.toContain('segredo');
+    expect(runnerCalls).toContain('ALTER TABLE public."users" ENABLE ROW LEVEL SECURITY');
+    expect(logs.find((l) => l.event === 'db_hardening.applied').changed).toEqual(['users']);
+    expect(order).toEqual(['A', 'sync', 'B-read', 'C', 'D']);
+  });
+
+  it('com o erro em refresh_tokens o boot segue até o passo C, que é quem derruba se ela ficou exposta', async () => {
+    const { dataSource } = build({
+      failTable: { name: 'refresh_tokens' },
+      exposure: [{ name: 'refresh_tokens', kind: 'r', rls: false, exposedTo: 'anon' }],
+      verify: [{ table: 'refresh_tokens', rls: false, forceRls: false, owned: true, exposed: true }],
+    });
+
+    await expect(hardenDataSource(dataSource)).rejects.toBeInstanceOf(BootHardeningError);
+    expect(logs.map((l) => l.event)).toContain('db_hardening.step_failed');
   });
 
   it('boot já endurecido: nenhum comando de escrita e changed vazio (idempotente)', async () => {

@@ -6,11 +6,13 @@ import { AppModule } from './app.module';
 import { isLocalStorage, LOCAL_UPLOADS_DIR } from './storage/storage.service';
 import { localUploadsMiddleware } from './storage/local-uploads';
 import { jwtSecret } from './auth/jwt-secret';
+import { accessTokenTtl } from './auth/panel-token';
 
 async function bootstrap() {
-  // Sem JWT_SECRET forte a API não sobe (a mensagem nunca traz o valor)
+  // Sem JWT_SECRET forte ou com ACCESS_TOKEN_TTL inválido a API não sobe (a mensagem nunca traz o valor)
   try {
     jwtSecret();
+    accessTokenTtl();
   } catch (error) {
     Logger.error((error as Error).message, 'Bootstrap');
     process.exit(1);

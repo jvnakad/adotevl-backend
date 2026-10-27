@@ -827,28 +827,3 @@ describe('UserService', () => {
     });
   });
 });
-
-describe('token do e-mail de aprovação (CA-25, SEC-17)', () => {
-  it('vale 8 h (28.800 s) com e sem ACCESS_TOKEN_TTL e não tem fid nem scope', async () => {
-    const { JwtService } = await import('@nestjs/jwt');
-    const { accessTokenTtl, APPROVAL_LINK_TTL, panelTokenPayload } = await import('../auth/panel-token');
-    const jwt = new JwtService({ secret: 'unit-test-secret', signOptions: { expiresIn: accessTokenTtl() } });
-    const env = process.env.ACCESS_TOKEN_TTL;
-    try {
-      for (const ttl of [undefined, '1m']) {
-        if (ttl) process.env.ACCESS_TOKEN_TTL = ttl;
-        else delete process.env.ACCESS_TOKEN_TTL;
-        const signer = new JwtService({ secret: 'unit-test-secret', signOptions: { expiresIn: accessTokenTtl() } });
-        const token = signer.sign(panelTokenPayload({ id: 'u1', email: 'a@b.c', profileId: 'p1', organizationId: 'o1' }), { expiresIn: APPROVAL_LINK_TTL });
-        const claims: any = jwt.decode(token);
-
-        expect(claims.exp - claims.iat).toBe(28_800);
-        expect(claims).not.toHaveProperty('fid');
-        expect(claims).not.toHaveProperty('scope');
-      }
-    } finally {
-      if (env === undefined) delete process.env.ACCESS_TOKEN_TTL;
-      else process.env.ACCESS_TOKEN_TTL = env;
-    }
-  });
-});

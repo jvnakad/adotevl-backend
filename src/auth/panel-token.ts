@@ -1,3 +1,5 @@
+import { jwtSecret } from './jwt-secret';
+
 const DEFAULT_ACCESS_TTL = '15m';
 const MAX_ACCESS_TTL_SECONDS = 60 * 60;
 const TTL_FORMAT = /^([1-9]\d{0,5})([sm])$/;
@@ -15,6 +17,12 @@ export function accessTokenTtl(): number {
   if (!(seconds > 0) || seconds > MAX_ACCESS_TTL_SECONDS) throw new Error('ACCESS_TOKEN_TTL inválido.');
   return seconds;
 }
+
+/**
+ * Opções do JwtModule: o padrão do módulo é o access curto, então um `sign` sem `expiresIn` nunca emite 8 h por esquecimento (SEC-06, §11.3).
+ * Só a aprovação passa `APPROVAL_LINK_TTL`.
+ */
+export const panelJwtOptions = () => ({ secret: jwtSecret(), signOptions: { expiresIn: accessTokenTtl() } });
 
 /** O link do e-mail de aprovação continua valendo 8 h, sem `fid` e sem refresh (RN-20, SEC-17). */
 export const APPROVAL_LINK_TTL = '8h';

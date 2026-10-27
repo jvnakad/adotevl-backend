@@ -1,4 +1,5 @@
-import { accessTokenTtl, APPROVAL_LINK_TTL, panelTokenPayload } from './panel-token';
+import { JwtService } from '@nestjs/jwt';
+import { accessTokenTtl, APPROVAL_LINK_TTL, panelJwtOptions, panelTokenPayload } from './panel-token';
 
 describe('accessTokenTtl', () => {
   const env = { ...process.env };
@@ -52,5 +53,46 @@ describe('panelTokenPayload', () => {
 
   it('nunca tem scope', () => {
     expect(panelTokenPayload(subject, 'f1')).not.toHaveProperty('scope');
+  });
+});
+
+describe('JwtModule do painel (SEC-06, §11.3)', () => {
+  const env = { ...process.env };
+  afterEach(() => {
+    process.env = { ...env };
+  });
+  const claimsOf = (jwt: JwtService, token: string) => jwt.decode(token) as { iat: number; exp: number; fid?: string; scope?: string };
+  const subject = { id: 'u1', email: 'a@b.c', profileId: 'p1', organizationId: 'o1' };
+
+  it('um sign sem expiresIn vale 900 s (nunca 8 h)', () => {
+    delete process.env.ACCESS_TOKEN_TTL;
+    const jwt = new JwtService(panelJwtOptions());
+
+    const claims = claimsOf(jwt, jwt.sign(panelTokenPayload(subject, 'f1')));
+
+    expect(claims.exp - claims.iat).toBe(900);
+  });
+
+  it('segue o ACCESS_TOKEN_TTL', () => {
+    process.env.ACCESS_TOKEN_TTL = '1m';
+    const jwt = new JwtService(panelJwtOptions());
+
+    const claims = claimsOf(jwt, jwt.sign(panelTokenPayload(subject)));
+
+    expect(claims.exp - claims.iat).toBe(60);
+  });
+
+  it('o token do e-mail de aprovação vale 8 h (28.800 s) com e sem ACCESS_TOKEN_TTL, sem fid nem scope', () => {
+    for (const ttl of [undefined, '1m']) {
+      if (ttl) process.env.ACCESS_TOKEN_TTL = ttl;
+      else delete process.env.ACCESS_TOKEN_TTL;
+      const jwt = new JwtService(panelJwtOptions());
+
+      const claims = claimsOf(jwt, jwt.sign(panelTokenPayload(subject), { expiresIn: APPROVAL_LINK_TTL }));
+
+      expect(claims.exp - claims.iat).toBe(28_800);
+      expect(claims).not.toHaveProperty('fid');
+      expect(claims).not.toHaveProperty('scope');
+    }
   });
 });

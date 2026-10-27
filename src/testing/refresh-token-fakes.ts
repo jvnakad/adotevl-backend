@@ -17,6 +17,8 @@ export type Script = {
   revokeAffected?: number;
   failInsert?: boolean;
   failCleanup?: boolean;
+  /** false = o hash do logout não existe / já estava revogado */
+  logoutRow?: boolean;
 };
 
 export function build(script: Script = {}) {
@@ -25,6 +27,7 @@ export function build(script: Script = {}) {
     query: jest.fn(async (sql: string, params: any[] = []) => {
       calls.push({ sql, params });
       if (sql.includes('FOR NO KEY UPDATE')) return [{ '?column?': 1 }];
+      if (sql.includes('token_hash = $1 AND revoked_at IS NULL')) return script.logoutRow === false ? [[], 0] : [[{ userId: USER_ID, familyId: FAMILY }], 1];
       if (sql.includes('SET used_at = now()')) return [script.consume ?? [], script.consume?.length ?? 0];
       if (sql.includes('FROM refresh_tokens WHERE token_hash')) return script.classify ?? [];
       if (sql.includes('LEFT JOIN profiles')) return script.subject ?? [];
@@ -47,7 +50,7 @@ export function build(script: Script = {}) {
     query: jest.fn(async (sql: string, params: any[] = []) => {
       calls.push({ sql, params });
       if (script.failCleanup && sql.includes('DELETE FROM refresh_tokens')) throw new Error('cleanup falhou');
-      if (sql.includes('RETURNING user_id')) return [[{ userId: USER_ID, familyId: FAMILY }], 1];
+      if (sql.includes('token_hash = $1 AND revoked_at IS NULL')) return [[{ userId: USER_ID, familyId: FAMILY }], 1];
       return [];
     }),
   };

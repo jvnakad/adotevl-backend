@@ -4,6 +4,9 @@ import { hashRefresh, newRefreshValue, REFRESH_CLEANUP_SQL, SESSION_EXPIRED_MESS
 import { REFRESH_PURGE_FAMILY_AGE_DAYS, REFRESH_RETENTION_DAYS, REFRESH_TOKEN_TTL_DAYS } from './refresh-token.entity';
 import { build, DAY, FAMILY, NOW, rowFor, Script, state, subject, USER_AGENT, USER_ID } from '../testing/refresh-token-fakes';
 
+// A limpeza roda fora do caminho da resposta (sem await): espera ela terminar antes de olhar as consultas
+const flush = () => new Promise((resolve) => setImmediate(resolve));
+
 let logs: string[];
 beforeEach(() => {
   // Só o Date é falso; timers e microtasks seguem reais
@@ -87,6 +90,7 @@ describe('RefreshTokenService.issue', () => {
     const { service, calls, committed } = build();
 
     await service.issue(subject);
+    await flush();
 
     const cleanup = calls.find((c) => c.sql === REFRESH_CLEANUP_SQL)!;
     expect(committed).toEqual(['commit']);
@@ -98,6 +102,7 @@ describe('RefreshTokenService.issue', () => {
     const { service } = build({ failCleanup: true });
 
     const pair = await service.issue(subject);
+    await flush();
 
     expect(pair.access_token).toBeTruthy();
     expect(logs.some((l) => l.includes('Falha na limpeza'))).toBe(true);
@@ -165,6 +170,7 @@ describe('RefreshTokenService.rotate', () => {
     const { service, calls } = build({ consume: [rowFor()], subject: [state] });
 
     await service.rotate(RAW, ctx);
+    await flush();
 
     const cleanup = calls.find((c) => c.sql === REFRESH_CLEANUP_SQL)!;
     expect(cleanup.params[0]).toBe(USER_ID);
@@ -324,7 +330,7 @@ describe('RefreshTokenService.rotate', () => {
 describe('RefreshTokenService.revokeFamily', () => {
   const RAW = 'B'.repeat(43);
 
-  it('revoga a família do hash num comando só, sem filtrar por validade, loga auth.logout e derruba o socket', async () => {
+  it('revoga a família do hash (2 comandos, 1 transação), sem filtrar por validade, loga auth.logout e derruba o socket', async () => {
     const { service, calls, realtime } = build();
 
     await service.revokeFamily(RAW);
@@ -338,9 +344,23 @@ describe('RefreshTokenService.revokeFamily', () => {
     expect(events()).toContainEqual({ event: 'auth.logout', userId: USER_ID, familyId: FAMILY });
   });
 
+  it('os dois comandos rodam na mesma transação: falha no 2º derruba o 1º e não loga nem derruba socket (ARQ-BUG-08)', async () => {
+    const { service, manager, dataSource, realtime, committed } = build();
+    manager.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('token_hash = $1 AND revoked_at IS NULL')) return [[{ userId: USER_ID, familyId: FAMILY }], 1];
+      throw new Error('2º comando falhou');
+    });
+
+    await expect(service.revokeFamily(RAW)).rejects.toThrow('2º comando falhou');
+
+    expect(committed).toEqual([]);
+    expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+    expect(realtime.disconnectFamily).not.toHaveBeenCalled();
+    expect(events()).toEqual([]);
+  });
+
   it('token desconhecido, vencido, consumido ou já revogado (nada afetado): não lança, não loga, não derruba', async () => {
-    const { service, dataSource, realtime } = build();
-    dataSource.query.mockResolvedValue([]);
+    const { service, realtime } = build({ logoutRow: false });
 
     await expect(service.revokeFamily(RAW)).resolves.toBeUndefined();
 

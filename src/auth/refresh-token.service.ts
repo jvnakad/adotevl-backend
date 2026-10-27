@@ -5,6 +5,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { RealtimeService } from '../realtime/realtime.service';
 import { affectedOf, rowsOf } from '../common/query-result';
 import { jwtSecret } from './jwt-secret';
+import { truncateUserAgent } from './user-agent';
 import { PanelTokenSubject, panelTokenPayload } from './panel-token';
 import {
   REFRESH_FAMILY_MAX_AGE_DAYS,
@@ -21,7 +22,6 @@ export const SESSION_EXPIRED_MESSAGE = 'Sessão expirada. Faça login novamente.
 export type SessionPair = { access_token: string; refresh_token: string };
 
 const DAY_MS = 86_400_000;
-const USER_AGENT_MAX = 255;
 
 type RefusalReason = SessionRefusal | 'expirado' | 'revogado' | 'teto' | 'reuso';
 
@@ -88,7 +88,6 @@ export const newRefreshValue = () => randomBytes(32).toString('base64url');
 /** O que vai para a coluna: HMAC-SHA256 hex com chave derivada do JWT_SECRET (SEC-02). Girar o segredo derruba todos os refresh. */
 export const hashRefresh = (raw: string) => createHmac('sha256', `${jwtSecret()}:refresh`).update(raw).digest('hex');
 
-const truncateUserAgent = (userAgent?: string) => (userAgent ? userAgent.slice(0, USER_AGENT_MAX) : null);
 
 type SubjectRow = SessionState & PanelTokenSubject;
 
@@ -128,7 +127,8 @@ export class RefreshTokenService {
       this.log('auth.refresh_family_evicted', { userId: subject.id, familyId: evictedId }, 'warn');
       await this.realtime.disconnectFamily(evictedId);
     }
-    await this.cleanup(subject.id, null);
+    // Fora do caminho da resposta: sem await; falha só vai para o log (cleanup nunca lança)
+    void this.cleanup(subject.id, null);
     return { access_token: this.jwtService.sign(panelTokenPayload(subject, familyId)), refresh_token: refresh };
   }
 
@@ -151,15 +151,20 @@ export class RefreshTokenService {
     }
 
     this.log('auth.refresh_rotated', { userId: outcome.userId, familyId: outcome.familyId });
-    await this.cleanup(outcome.userId, outcome.familyId);
+    void this.cleanup(outcome.userId, outcome.familyId);
     return { access_token: this.jwtService.sign(panelTokenPayload(outcome.subject, outcome.familyId)), refresh_token: outcome.refresh };
   }
 
   /** Logout: revoga a família do refresh informado. Idempotente: token desconhecido, vencido, consumido ou já revogado não lança nem loga. */
   async revokeFamily(rawRefresh: string): Promise<void> {
-    const [revoked] = rowsOf<{ userId: string; familyId: string }>(await this.dataSource.query(LOGOUT_ROW_SQL, [hashRefresh(rawRefresh)]));
+    // Os dois comandos na mesma transação: falha no 2º desfaz o 1º (nunca sobra família meio revogada). Em READ COMMITTED cada comando
+    // tira snapshot novo, então o 2º ainda enxerga a ponta inserida por uma rotação concorrente já commitada.
+    const revoked = await this.dataSource.transaction(async (manager) => {
+      const [row] = rowsOf<{ userId: string; familyId: string }>(await manager.query(LOGOUT_ROW_SQL, [hashRefresh(rawRefresh)]));
+      if (row) await manager.query(REVOKE_FAMILY_SQL, [row.familyId]);
+      return row;
+    });
     if (!revoked) return;
-    await this.dataSource.query(REVOKE_FAMILY_SQL, [revoked.familyId]);
     this.log('auth.logout', { userId: revoked.userId, familyId: revoked.familyId });
     await this.realtime.disconnectFamily(revoked.familyId);
   }

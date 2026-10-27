@@ -456,6 +456,7 @@ describe('Sessão do painel: refresh token (e2e)', () => {
       await t.session(abel.email); // login: limpeza Q7 do usuário
       const rotated = await t.refresh(second.refresh_token); // renovação: limpeza Q8
       expect(rotated.status).toBe(200);
+      await t.settle();
 
       const ids = (await t.rowsOf(abel.id)).filter((r: any) => r.family_id === familyId).map((r: any) => r.id);
       expect(ids).toEqual(expect.arrayContaining([row0.id, row1.id]));
@@ -476,6 +477,7 @@ describe('Sessão do painel: refresh token (e2e)', () => {
       await t.dataSource.query(`UPDATE refresh_tokens SET family_started_at = now() - interval '50 days' WHERE family_id = $1`, [fid(old)]);
 
       await t.session(bento.email); // Q7
+      await t.settle();
 
       const left = new Set((await t.familiesOf(bento.id)).map((r: any) => r.family_id));
       expect(left.has(fid(dead))).toBe(false);

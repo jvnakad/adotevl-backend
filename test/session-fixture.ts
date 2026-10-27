@@ -118,6 +118,8 @@ export class SessionFixture {
   rowsOf = (userId: string) => this.dataSource.query('SELECT * FROM refresh_tokens WHERE user_id = $1 ORDER BY created_at, id', [userId]);
   familiesOf = (userId: string) => this.dataSource.query('SELECT DISTINCT family_id FROM refresh_tokens WHERE user_id = $1', [userId]);
   sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+  /** A limpeza dos refresh roda depois da resposta, sem await: dá o tempo dela terminar antes de olhar a tabela. */
+  settle = () => this.sleep(500);
 }
 
 export const REFRESH_FORMAT = /^[A-Za-z0-9_-]{43}$/;

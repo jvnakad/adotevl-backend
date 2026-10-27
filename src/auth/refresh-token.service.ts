@@ -66,11 +66,11 @@ const CLASSIFY_SQL = `SELECT user_id AS "userId", family_id AS "familyId", used_
 // Q5: revoga a família toda (sem filtrar por expires_at)
 const REVOKE_FAMILY_SQL = `UPDATE refresh_tokens SET revoked_at = now() WHERE family_id = $1 AND revoked_at IS NULL`;
 
-// Q6: logout, um comando só
-const LOGOUT_SQL = `
+// Q6a: logout revoga a linha do hash (espera o lock de uma rotação concorrente) e devolve a família; Q6b revoga o resto dela com snapshot novo,
+// e por isso enxerga a ponta que a rotação acabou de inserir (sem isso o logout deixaria a ponta nova viva)
+const LOGOUT_ROW_SQL = `
   UPDATE refresh_tokens SET revoked_at = now()
-   WHERE family_id = (SELECT family_id FROM refresh_tokens WHERE token_hash = $1)
-     AND revoked_at IS NULL
+   WHERE token_hash = $1 AND revoked_at IS NULL
   RETURNING user_id AS "userId", family_id AS "familyId"`;
 
 // Q4: limite de famílias ativas (conta a recém-inserida); devolve as expulsas
@@ -157,8 +157,9 @@ export class RefreshTokenService {
 
   /** Logout: revoga a família do refresh informado. Idempotente: token desconhecido, vencido, consumido ou já revogado não lança nem loga. */
   async revokeFamily(rawRefresh: string): Promise<void> {
-    const [revoked] = rowsOf<{ userId: string; familyId: string }>(await this.dataSource.query(LOGOUT_SQL, [hashRefresh(rawRefresh)]));
+    const [revoked] = rowsOf<{ userId: string; familyId: string }>(await this.dataSource.query(LOGOUT_ROW_SQL, [hashRefresh(rawRefresh)]));
     if (!revoked) return;
+    await this.dataSource.query(REVOKE_FAMILY_SQL, [revoked.familyId]);
     this.log('auth.logout', { userId: revoked.userId, familyId: revoked.familyId });
     await this.realtime.disconnectFamily(revoked.familyId);
   }

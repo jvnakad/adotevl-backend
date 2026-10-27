@@ -332,6 +332,8 @@ describe('RefreshTokenService.revokeFamily', () => {
     const revoke = calls.find((c) => c.sql.includes('SET revoked_at = now()'))!;
     expect(revoke.params).toEqual([hashRefresh(RAW)]);
     expect(revoke.sql).not.toContain('expires_at');
+    // 2º comando: o resto da família, com snapshot novo (corrida com a rotação)
+    expect(calls.some((c) => c.sql.includes('WHERE family_id = $1 AND revoked_at IS NULL') && c.params[0] === FAMILY)).toBe(true);
     expect(realtime.disconnectFamily).toHaveBeenCalledWith(FAMILY);
     expect(events()).toContainEqual({ event: 'auth.logout', userId: USER_ID, familyId: FAMILY });
   });

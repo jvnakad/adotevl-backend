@@ -483,20 +483,6 @@ describe('Sessão do painel: refresh token (e2e)', () => {
       expect(left.has(fid(recent))).toBe(true);
       expect(left.has(fid(live))).toBe(true);
     });
-
-    it('o SQL de limpeza do código usa os índices do usuário (sem Seq Scan em refresh_tokens)', async () => {
-      const cora = await t.createUser('Cora Plano');
-      await t.session(cora.email);
-      await t.dataSource.query('ANALYZE refresh_tokens');
-
-      const plan = (
-        await t.dataSource.query(`EXPLAIN ${REFRESH_CLEANUP_SQL}`, [cora.id, REFRESH_RETENTION_DAYS, new Date(Date.now() - REFRESH_PURGE_FAMILY_AGE_DAYS * DAY), null])
-      )
-        .map((r: any) => r['QUERY PLAN'])
-        .join('\n');
-
-      expect(plan).not.toMatch(/Seq Scan on refresh_tokens/);
-    });
   });
 
   describe('desempenho com 10⁴ linhas (arch §6)', () => {
@@ -523,6 +509,20 @@ describe('Sessão do painel: refresh token (e2e)', () => {
       const plan = (await t.dataSource.query(`EXPLAIN ${SESSION_STATE_SQL}`, [dora.id, fid])).map((r: any) => r['QUERY PLAN']).join('\n');
 
       expect(plan).toContain('IDX_refresh_tokens_family_revoked');
+      expect(plan).not.toMatch(/Seq Scan on refresh_tokens/);
+    });
+
+    it('com 10⁴ linhas o SQL de limpeza do código usa os índices do usuário (sem Seq Scan em refresh_tokens)', async () => {
+      const cora = await t.createUser('Cora Plano');
+      await t.session(cora.email);
+      await t.dataSource.query('ANALYZE refresh_tokens');
+
+      const plan = (
+        await t.dataSource.query(`EXPLAIN ${REFRESH_CLEANUP_SQL}`, [cora.id, REFRESH_RETENTION_DAYS, new Date(Date.now() - REFRESH_PURGE_FAMILY_AGE_DAYS * DAY), null])
+      )
+        .map((r: any) => r['QUERY PLAN'])
+        .join('\n');
+
       expect(plan).not.toMatch(/Seq Scan on refresh_tokens/);
     });
 

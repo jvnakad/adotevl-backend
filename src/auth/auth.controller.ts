@@ -12,12 +12,10 @@ import { PasswordResetThrottlerGuard } from './password-reset-throttler.guard';
 import { RefreshTokenService } from './refresh-token.service';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JsonContentTypeGuard } from './json-content-type.guard';
+import { userAgentOf } from './user-agent';
 
 const PER_MINUTE = 60_000;
-const USER_AGENT_MAX = 255;
 
-/** User-Agent truncado em 255: vai só para a tabela, nunca para log (SEC-14). */
-const userAgentOf = (req): string | undefined => (typeof req.headers?.['user-agent'] === 'string' ? req.headers['user-agent'].slice(0, USER_AGENT_MAX) : undefined);
 
 @ApiTags('Auth')
 @Controller('auth')

@@ -26,6 +26,7 @@ describe('UserService', () => {
   let membership: { assign: jest.Mock; ensureNotLastAdmin: jest.Mock; teamsOf: jest.Mock; userIdsOfTeam: jest.Mock };
   let mailService: { sendConfirmationEmail: jest.Mock; sendApprovalEmail: jest.Mock; sendPasswordResetEmail: jest.Mock; sendFloatingWelcomeEmail: jest.Mock; sendPasswordChangedEmail: jest.Mock };
   let jwtService: { sign: jest.Mock };
+  let refreshTokens: { issue: jest.Mock };
   let access: { isFloatingVolunteer: jest.Mock };
   let realtime: { disconnectUser: jest.Mock };
   let managerQuery: jest.Mock;
@@ -77,6 +78,7 @@ describe('UserService', () => {
     applicationRepo.find.mockResolvedValue([]);
     mailService = { sendConfirmationEmail: jest.fn(), sendApprovalEmail: jest.fn(), sendPasswordResetEmail: jest.fn(), sendFloatingWelcomeEmail: jest.fn(), sendPasswordChangedEmail: jest.fn() };
     jwtService = { sign: jest.fn(() => 'jwt-token') };
+    refreshTokens = { issue: jest.fn(async () => ({ access_token: 'access-novo', refresh_token: 'refresh-novo' })) };
     access = { isFloatingVolunteer: jest.fn(async () => false) };
     realtime = { disconnectUser: jest.fn(async () => undefined) };
     passwordQuery = { leftJoinAndSelect: jest.fn().mockReturnThis(), addSelect: jest.fn().mockReturnThis(), where: jest.fn().mockReturnThis(), andWhere: jest.fn().mockReturnThis(), getOne: jest.fn() };
@@ -85,7 +87,7 @@ describe('UserService', () => {
     (userRepo as any).createQueryBuilder = jest.fn(() => passwordQuery);
     membership = { assign: jest.fn(), ensureNotLastAdmin: jest.fn(), teamsOf: jest.fn(async () => new Map()), userIdsOfTeam: jest.fn(async () => []) };
     teams = { ensureDefaultTeams: jest.fn(async () => ({ id: 't-admin' })), systemTeam: jest.fn(async () => ({ id: 't-floating' })) };
-    service = new UserService(userRepo as any, profileRepo as any, orgRepo as any, mailService as any, jwtService as any, membership as any, teams as any, applicationRepo as any, access as any, realtime as any);
+    service = new UserService(userRepo as any, profileRepo as any, orgRepo as any, mailService as any, jwtService as any, membership as any, teams as any, applicationRepo as any, access as any, realtime as any, refreshTokens as any);
   });
 
   describe('create', () => {
@@ -589,13 +591,11 @@ describe('UserService', () => {
       const result = await service.approve('u1', 't1', 'admin', 'org-1');
 
       expect(userRepo.update).toHaveBeenCalledWith('u1', { isApproved: true, updatedBy: 'admin' });
-      expect(jwtService.sign).toHaveBeenCalledWith({
-        sub: 'u1',
-        email: 'ana@teste.com',
-        profileId: 'p1',
-        profileName: 'VOLUNTEER',
-        organizationId: 'org-1',
-      });
+      expect(jwtService.sign).toHaveBeenCalledWith(
+        { sub: 'u1', email: 'ana@teste.com', profileId: 'p1', profileName: 'VOLUNTEER', organizationId: 'org-1' },
+        { expiresIn: '8h' },
+      );
+      expect(refreshTokens.issue).not.toHaveBeenCalled();
       expect(mailService.sendApprovalEmail).toHaveBeenCalledWith('ana@teste.com', 'Ana', 'jwt-token');
       expect(result).toBe(updated);
     });
@@ -650,7 +650,7 @@ describe('UserService', () => {
 
       await expect(service.changePassword('u1', { currentPassword: 'errada', newPassword: 'nova' })).rejects.toThrow(BadRequestException);
       expect(userRepo.update).not.toHaveBeenCalled();
-      expect(jwtService.sign).not.toHaveBeenCalled();
+      expect(refreshTokens.issue).not.toHaveBeenCalled();
     });
 
     it('pede o hash da senha atual explicitamente (select:false)', async () => {
@@ -670,17 +670,21 @@ describe('UserService', () => {
       const result = await service.changePassword('u1', { currentPassword: 'atual', newPassword: 'nova' });
 
       expect(userRepo.update).toHaveBeenCalledWith('u1', { password: 'hashed:nova', passwordChangedAt: expect.any(Date) });
-      expect(jwtService.sign).toHaveBeenCalledWith({ sub: 'u1', email: 'ana@teste.com', profileId: 'p1', profileName: 'VOLUNTEER', organizationId: 'org-1' });
-      expect(result).toEqual({ message: 'Senha alterada com sucesso.', access_token: 'jwt-token' });
+      expect(refreshTokens.issue).toHaveBeenCalledWith({ id: 'u1', email: 'ana@teste.com', profileId: 'p1', profileName: 'VOLUNTEER', organizationId: 'org-1' }, undefined);
+      expect(result).toEqual({ message: 'Senha alterada com sucesso.', access_token: 'access-novo', refresh_token: 'refresh-novo' });
     });
 
-    it('assina o token só depois de gravar a troca (RN-29, RN-30) e avisa por e-mail', async () => {
+    it('emite o par só depois de gravar a troca, de fechar o pedido de e-mail e de derrubar os sockets (RN-06, RN-30) e avisa por e-mail', async () => {
       passwordQuery.getOne.mockResolvedValue(profileUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
 
-      await service.changePassword('u1', { currentPassword: 'atual', newPassword: 'nova' });
+      await service.changePassword('u1', { currentPassword: 'atual', newPassword: 'nova' }, 'Mozilla/5.0');
 
-      expect(userRepo.update.mock.invocationCallOrder[0]).toBeLessThan(jwtService.sign.mock.invocationCallOrder[0]);
+      const issueOrder = refreshTokens.issue.mock.invocationCallOrder[0];
+      expect(userRepo.update.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
+      expect(managerQuery.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
+      expect(realtime.disconnectUser.mock.invocationCallOrder[0]).toBeLessThan(issueOrder);
+      expect(refreshTokens.issue.mock.calls[0][1]).toBe('Mozilla/5.0');
       expect(mailService.sendPasswordChangedEmail).toHaveBeenCalledWith('ana@teste.com', 'Ana');
     });
   });
@@ -821,5 +825,30 @@ describe('UserService', () => {
       expect(tempPassword).toHaveLength(8);
       expect(userRepo.update).toHaveBeenCalledWith('u1', { password: `hashed:${tempPassword}`, passwordChangedAt: expect.any(Date) });
     });
+  });
+});
+
+describe('token do e-mail de aprovação (CA-25, SEC-17)', () => {
+  it('vale 8 h (28.800 s) com e sem ACCESS_TOKEN_TTL e não tem fid nem scope', async () => {
+    const { JwtService } = await import('@nestjs/jwt');
+    const { accessTokenTtl, APPROVAL_LINK_TTL, panelTokenPayload } = await import('../auth/panel-token');
+    const jwt = new JwtService({ secret: 'unit-test-secret', signOptions: { expiresIn: accessTokenTtl() } });
+    const env = process.env.ACCESS_TOKEN_TTL;
+    try {
+      for (const ttl of [undefined, '1m']) {
+        if (ttl) process.env.ACCESS_TOKEN_TTL = ttl;
+        else delete process.env.ACCESS_TOKEN_TTL;
+        const signer = new JwtService({ secret: 'unit-test-secret', signOptions: { expiresIn: accessTokenTtl() } });
+        const token = signer.sign(panelTokenPayload({ id: 'u1', email: 'a@b.c', profileId: 'p1', organizationId: 'o1' }), { expiresIn: APPROVAL_LINK_TTL });
+        const claims: any = jwt.decode(token);
+
+        expect(claims.exp - claims.iat).toBe(28_800);
+        expect(claims).not.toHaveProperty('fid');
+        expect(claims).not.toHaveProperty('scope');
+      }
+    } finally {
+      if (env === undefined) delete process.env.ACCESS_TOKEN_TTL;
+      else process.env.ACCESS_TOKEN_TTL = env;
+    }
   });
 });

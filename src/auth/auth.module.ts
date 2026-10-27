@@ -12,6 +12,7 @@ import { RolesGuard } from './roles.guard';
 import { jwtSecret } from './jwt-secret';
 import { accessTokenTtl } from './panel-token';
 import { PasswordResetService } from './password-reset.service';
+import { RefreshTokenService } from './refresh-token.service';
 import { PasswordResetCode } from './password-reset-code.entity';
 import { RefreshToken } from './refresh-token.entity';
 import { User } from '../user/user.entity';
@@ -30,7 +31,7 @@ import { User } from '../user/user.entity';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, PasswordResetService, JwtStrategy, JwtAuthGuard, RolesGuard],
-  exports: [JwtAuthGuard, RolesGuard, JwtModule],
+  providers: [AuthService, PasswordResetService, RefreshTokenService, JwtStrategy, JwtAuthGuard, RolesGuard],
+  exports: [JwtAuthGuard, RolesGuard, JwtModule, RefreshTokenService],
 })
 export class AuthModule {}

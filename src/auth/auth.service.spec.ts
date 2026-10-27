@@ -7,7 +7,7 @@ jest.mock('bcryptjs', () => ({ compare: jest.fn() }));
 describe('AuthService', () => {
   let userService: { findByEmail: jest.Mock; findOne: jest.Mock };
   let accessService: { forUser: jest.Mock; isFloatingVolunteer: jest.Mock };
-  let jwtService: { sign: jest.Mock };
+  let refreshTokens: { issue: jest.Mock };
   let service: AuthService;
 
   const activeUser = {
@@ -27,9 +27,9 @@ describe('AuthService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     userService = { findByEmail: jest.fn(), findOne: jest.fn() };
-    jwtService = { sign: jest.fn(() => 'jwt-token') };
+    refreshTokens = { issue: jest.fn(async () => ({ access_token: 'jwt-token', refresh_token: 'refresh-value' })) };
     accessService = { forUser: jest.fn(async () => null), isFloatingVolunteer: jest.fn(async () => false) };
-    service = new AuthService(userService as any, jwtService as any, accessService as any);
+    service = new AuthService(userService as any, accessService as any, refreshTokens as any);
   });
 
   describe('login', () => {
@@ -52,7 +52,7 @@ describe('AuthService', () => {
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
       await expect(service.login(credentials)).rejects.toThrow('Credenciais inválidas.');
-      expect(jwtService.sign).not.toHaveBeenCalled();
+      expect(refreshTokens.issue).not.toHaveBeenCalled();
     });
 
     it('volante com a senha certa recebe a mesma mensagem de senha errada e nenhum token (CA-39, CA-41)', async () => {
@@ -62,7 +62,7 @@ describe('AuthService', () => {
 
       await expect(service.login(credentials)).rejects.toThrow(new UnauthorizedException('Credenciais inválidas.'));
       expect(accessService.isFloatingVolunteer).toHaveBeenCalledWith('u1');
-      expect(jwtService.sign).not.toHaveBeenCalled();
+      expect(refreshTokens.issue).not.toHaveBeenCalled();
     });
 
     it('a checagem de volante só roda depois da senha certa (CA-62)', async () => {
@@ -89,17 +89,41 @@ describe('AuthService', () => {
       const result = await service.login(credentials);
 
       expect(bcrypt.compare).toHaveBeenCalledWith('senha123', 'hash');
-      expect(jwtService.sign).toHaveBeenCalledWith({
-        sub: 'u1',
-        email: 'ana@teste.com',
-        profileId: 'p1',
-        profileName: 'ADMIN',
-        organizationId: 'org-1',
-      });
+      expect(refreshTokens.issue).toHaveBeenCalledWith({ id: 'u1', email: 'ana@teste.com', profileId: 'p1', profileName: 'ADMIN', organizationId: 'org-1' }, undefined);
       expect(result).toEqual({
         access_token: 'jwt-token',
+        refresh_token: 'refresh-value',
         user: { id: 'u1', fullName: 'Ana', email: 'ana@teste.com', profileId: 'p1', organizationId: 'org-1' },
       });
+    });
+
+    it('repassa o User-Agent para a emissão', async () => {
+      userService.findByEmail.mockResolvedValue(activeUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await service.login(credentials, 'Mozilla/5.0');
+
+      expect(refreshTokens.issue.mock.calls[0][1]).toBe('Mozilla/5.0');
+    });
+
+    it.each([
+      ['usuário inexistente', null],
+      ['usuário inativo', { ...activeUser, isActive: false }],
+      ['conta não confirmada', { ...activeUser, isConfirmed: false }],
+      ['conta não aprovada', { ...activeUser, isApproved: false }],
+    ])('%s não emite refresh (CA-05)', async (_label, user) => {
+      userService.findByEmail.mockResolvedValue(user);
+
+      await expect(service.login(credentials)).rejects.toThrow(UnauthorizedException);
+      expect(refreshTokens.issue).not.toHaveBeenCalled();
+    });
+
+    it('falha ao emitir o refresh derruba o login (nenhum access sai sem família)', async () => {
+      userService.findByEmail.mockResolvedValue(activeUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      refreshTokens.issue.mockRejectedValue(new Error('db'));
+
+      await expect(service.login(credentials)).rejects.toThrow('db');
     });
   });
 

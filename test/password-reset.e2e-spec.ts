@@ -53,7 +53,8 @@ describe('Esqueci minha senha, sessões e volante (e2e)', () => {
   const forgot = (email: string, ip?: string) => post('/auth/forgot-password', { email }, ip);
   const verify = (email: string, code: string, ip?: string) => post('/auth/forgot-password/verify', { email, code }, ip);
   const reset = (resetToken: string, password: string, ip?: string) => post('/auth/reset-password', { resetToken, password }, ip);
-  const login = (email: string, password = 'senha123') => request(server()).post('/auth/login').send({ email, password });
+  // IP novo a cada login: o login tem limite de 10 por minuto por IP e a suíte faz dezenas
+  const login = (email: string, password = 'senha123') => request(server()).post('/auth/login').set('X-Forwarded-For', nextIp()).send({ email, password });
   const bearer = (token: string) => ({ Authorization: `Bearer ${token}` });
   const me = (token: string) => request(server()).get('/auth/me').set(bearer(token));
   const tokenOf = async (email: string, password = 'senha123') => (await login(email, password)).body.access_token as string;
@@ -226,7 +227,7 @@ describe('Esqueci minha senha, sessões e volante (e2e)', () => {
 
       const changed = await request(server()).patch('/users/me/password').set(bearer(browserA)).send({ currentPassword: 'senha123', newPassword: 'NovaSenha#2026' });
       expect(changed.status).toBe(200);
-      expect(changed.body).toEqual({ message: 'Senha alterada com sucesso.', access_token: expect.any(String) });
+      expect(changed.body).toEqual({ message: 'Senha alterada com sucesso.', access_token: expect.any(String), refresh_token: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/) });
       expect(mail.passwordChangedSentTo).toContain(user.email);
 
       // Token novo vale na hora (mesmo segundo da troca, RN-30); o antigo do A e o do B caem

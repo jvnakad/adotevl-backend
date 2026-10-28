@@ -92,9 +92,16 @@ describe('AdoptionContractService', () => {
   let autentique: { createDocument: jest.Mock; getDocument: jest.Mock; deleteDocument: jest.Mock; downloadFile: jest.Mock; getAccount: jest.Mock; signDocument: jest.Mock };
   let history: { resolveUserName: jest.Mock; recordMany: jest.Mock; findByForm: jest.Mock };
   let service: AdoptionContractService;
+  // Resultado da consulta "outra ficha com termo vivo para o mesmo pet" (null = nenhuma)
+  let liveContractElsewhere: jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    liveContractElsewhere = jest.fn(async () => null);
+    const queryBuilder = () => {
+      const builder: any = { innerJoin: () => builder, select: () => builder, where: () => builder, andWhere: () => builder, limit: () => builder, getRawOne: liveContractElsewhere };
+      return builder;
+    };
     contractRepo = createMockRepository();
     formRepo = createMockRepository();
     petRepo = createMockRepository();
@@ -102,6 +109,8 @@ describe('AdoptionContractService', () => {
     manager = {
       getRepository: jest.fn((entity) => ({ AdoptionContract: tx.contract, AdoptionForm: tx.form, Pet: tx.pet })[entity.name]),
     };
+    (contractRepo as any).createQueryBuilder = queryBuilder;
+    (tx.contract as any).createQueryBuilder = queryBuilder;
     (contractRepo as any).manager = { transaction: jest.fn(async (work) => work(manager)) };
     storage = {
       uploadPrivate: jest.fn(async () => undefined),
@@ -463,6 +472,50 @@ describe('AdoptionContractService', () => {
       expect(error).toBeInstanceOf(BadRequestException);
       expect(error.getResponse()).toEqual({ statusCode: 400, code: 'PET_ALREADY_ADOPTED', message: expect.stringContaining('já foi adotado') });
       expect(autentique.createDocument).not.toHaveBeenCalled();
+    });
+
+    describe('um termo vivo por pet', () => {
+      const withPet = () => {
+        contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
+        petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', status: PetStatus.EM_PROCESSO, fotos: [] });
+      };
+
+      it('outra ficha com termo vivo no mesmo pet: 400 PET_IN_OTHER_CONTRACT antes de gerar PDF ou enviar', async () => {
+        withPet();
+        liveContractElsewhere.mockResolvedValue({ name: 'João Souza' });
+
+        const error = await service.generate('form-1', 'org-1').catch((e) => e);
+
+        expect(error).toBeInstanceOf(BadRequestException);
+        expect(error.getResponse()).toEqual({
+          statusCode: 400,
+          code: 'PET_IN_OTHER_CONTRACT',
+          message: 'O pet Rex já tem um termo de adoção em andamento em outra ficha (João Souza). Cancele aquele termo ou escolha outro pet.',
+        });
+        expect(buildContractPdf).not.toHaveBeenCalled();
+        expect(autentique.createDocument).not.toHaveBeenCalled();
+      });
+
+      it('termo da outra ficha cancelado ou recusado deixa de contar e libera a geração', async () => {
+        withPet();
+        liveContractElsewhere.mockResolvedValueOnce({ name: 'João Souza' }).mockResolvedValue(null);
+
+        await expect(service.generate('form-1', 'org-1')).rejects.toThrow('já tem um termo de adoção em andamento');
+        await expect(service.generate('form-1', 'org-1')).resolves.toBeDefined();
+        expect(autentique.createDocument).toHaveBeenCalledTimes(1);
+      });
+
+      it('corrida: o outro termo aparece só na checagem dentro da transação (pet travado) e a geração é desfeita', async () => {
+        withPet();
+        liveContractElsewhere.mockResolvedValueOnce(null).mockResolvedValueOnce({ name: 'João Souza' });
+
+        await expect(service.generate('form-1', 'org-1')).rejects.toMatchObject({ response: { code: 'PET_IN_OTHER_CONTRACT' } });
+
+        expect(tx.pet.findOne).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'pet-1' }, lock: { mode: 'pessimistic_write' } }));
+        expect(tx.contract.update).not.toHaveBeenCalled();
+        expect(storage.removePrivate).toHaveBeenCalled();
+        expect(autentique.deleteDocument).toHaveBeenCalledWith('doc-1');
+      });
     });
 
     it('exige pet vinculado', async () => {

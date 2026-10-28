@@ -1,7 +1,7 @@
 import { BadGatewayException, BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
-import { PetAlreadyAdoptedException } from '../adoption-form/pet-already-adopted.exception';
+import { PetAlreadyAdoptedException, PetInOtherContractException } from '../adoption-form/pet-already-adopted.exception';
 import { AdoptionContract, ContractData, ContractSignatureStatus } from './adoption-contract.entity';
 import { AdoptionForm, AdoptionFormStatus } from '../adoption-form/adoption-form.entity';
 import { Pet, PetStatus } from '../pet/pet.entity';
@@ -138,6 +138,8 @@ export class AdoptionContractService {
 
     const pet = await this.petRepository.findOne({ where: { id: form.petId }, relations: { fotos: true } });
     if (pet?.status === PetStatus.ADOTADO) throw new PetAlreadyAdoptedException(pet.name);
+    // Falha rápida, antes do PDF e do Autentique; a checagem definitiva é refeita na transação, com o pet travado
+    await this.assertNoLiveContractElsewhere(this.contractRepository, form, pet?.name);
     const firstPhoto = [...(pet?.fotos ?? [])].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
     const petPhoto = firstPhoto?.url ? await loadImageAsDataUrl(firstPhoto.url) : null;
     const { clauses } = numberClauses(contract.clauses);
@@ -199,6 +201,9 @@ export class AdoptionContractService {
           },
         ],
         async (manager) => {
+          // Trava o pet: dois generate simultâneos do mesmo pet se serializam aqui e o segundo vê o termo do primeiro
+          await manager.getRepository(Pet).findOne({ where: { id: form.petId }, select: { id: true }, lock: { mode: 'pessimistic_write' } });
+          await this.assertNoLiveContractElsewhere(manager.getRepository(AdoptionContract), form, pet?.name);
           await manager.getRepository(AdoptionContract).update(contract.id, {
             version,
             pdfStoragePath: storagePath,
@@ -237,6 +242,24 @@ export class AdoptionContractService {
       throw error;
     }
     return this.findByForm(formId, organizationId, userId);
+  }
+
+  // Termo vivo = enviado/assinado (não cancelado nem recusado) de outra ficha ativa não reprovada com o mesmo pet
+  private async assertNoLiveContractElsewhere(contracts: Repository<AdoptionContract>, form: AdoptionForm, petName?: string) {
+    const other = await contracts
+      .createQueryBuilder('c')
+      .innerJoin(AdoptionForm, 'f', 'f.id = c.adoptionFormId')
+      .select('f.fullName', 'name')
+      .where('f.petId = :petId AND f.id <> :id AND f.organizationId = :org AND f.isActive = true AND f.status <> :rejected', {
+        petId: form.petId,
+        id: form.id,
+        org: form.organizationId,
+        rejected: AdoptionFormStatus.REPROVADO,
+      })
+      .andWhere('c.signatureStatus IN (:...live)', { live: [ContractSignatureStatus.PENDENTE, ContractSignatureStatus.ASSINADO] })
+      .limit(1)
+      .getRawOne<{ name: string }>();
+    if (other) throw new PetInOtherContractException(petName ?? 'selecionado', other.name);
   }
 
   // Botão "Atualizar status" do front (alternativa ao webhook)

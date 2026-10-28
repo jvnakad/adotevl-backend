@@ -278,7 +278,7 @@ export async function joinTeam(app: INestApplication, user: TestUser, access: 'A
   const team =
     access === 'ADMIN'
       ? await teams.ensureAdminTeam(user.organizationId)
-      : await teams.create({ name: `Equipe ${user.fullName}`, organizationId: user.organizationId });
+      : await teams.create({ name: `Equipe ${user.fullName}` }, user.organizationId);
   if (access !== 'ADMIN') await teams.setPermissions(team.id, access);
   await app.get(TeamMembershipService).assign({ birthDate: null, ...user }, team.id, null);
   return team;

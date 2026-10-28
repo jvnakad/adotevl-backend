@@ -95,12 +95,12 @@ describe('AuthService', () => {
       expect(refreshTokens.issue).not.toHaveBeenCalled();
     });
 
-    it('volante com a senha certa recebe orientação amigável e nenhum token (CA-39, CA-41)', async () => {
+    it('volante com a senha certa recebe a mesma mensagem da senha errada e nenhum token (CA-39, CA-41)', async () => {
       userService.findByEmail.mockResolvedValue(activeUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       accessService.isFloatingVolunteer.mockResolvedValue(true);
 
-      await expect(service.login(credentials)).rejects.toThrow(new UnauthorizedException('Voluntários volantes não usam o painel. Marque seus horários pela página de voluntariado no site da Adote.'));
+      await expect(service.login(credentials)).rejects.toThrow(new UnauthorizedException('Credenciais inválidas.'));
       expect(accessService.isFloatingVolunteer).toHaveBeenCalledWith('u1');
       expect(refreshTokens.issue).not.toHaveBeenCalled();
     });

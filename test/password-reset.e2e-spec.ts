@@ -760,9 +760,12 @@ describe('Esqueci minha senha, sessões e volante (e2e)', () => {
       const again = await request(server()).get('/users?limit=100').set(auth);
       expect(listed.body.data.every((user: any) => user.team === null || 'systemKey' in user.team)).toBe(true);
       expect(again.body.data.find((user: any) => user.id === volante.id).team).toEqual(expect.objectContaining({ systemKey: 'FLOATING_VOLUNTEER' }));
-      // O código de confirmação foi gravado e a confirmação funcionou, só não volta na resposta
+      // O código de confirmação foi gravado e a confirmação funcionou; a resposta só traz mensagem e situação, sem dados sensíveis
       expect(responses[9].status).toBe(200);
-      expect(responses[9].body).toEqual(expect.objectContaining({ id: target.id, isConfirmed: true }));
+      expect(responses[9].body).toEqual(expect.objectContaining({ message: expect.any(String), isApproved: expect.any(Boolean) }));
+      expect(responses[9].body).not.toHaveProperty('cpf');
+      expect(responses[9].body).not.toHaveProperty('phone');
+      expect(responses[9].body).not.toHaveProperty('password');
     }, 40000);
 
     it('usuário de outra organização dá 404 em todas as rotas por id, e a lista traz só a própria organização (CA-65)', async () => {

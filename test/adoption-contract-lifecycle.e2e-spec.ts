@@ -202,7 +202,7 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     expect(board.body.columns[0].items[0]).toEqual(expect.objectContaining({ petId: null, petName: null }));
 
     // 3. Contrato antes da aprovação e transições proibidas
-    expect((await auth(api().get(`/adoption-forms/${formId}/contract`))).status).toBe(400);
+    expect((await auth(api().get(`/adoption-forms/${formId}/contract`))).status).toBe(409);
     const manualContract = await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'CONTRATO_GERADO' });
     expect(manualContract.status).toBe(400);
     expect(manualContract.body.message).toBe('Movimentação de status não permitida.');

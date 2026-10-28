@@ -63,10 +63,9 @@ export class AuthService {
     }
     this.lockout.recordSuccess(dto.email);
 
-    // Volante não usa o painel. Só depois da senha certa, para não abrir um canal de enumeração (RN-26)
-    // Só quem acertou a senha chega aqui, então a orientação não revela nada a terceiros (diverge do texto genérico da ES/RN-26 por decisão do produto)
+    // Volante não usa o painel. Mesma mensagem da senha errada para não abrir canal de enumeração (ES/RN-26)
     if (await this.accessService.isFloatingVolunteer(user.id)) {
-      throw new UnauthorizedException('Voluntários volantes não usam o painel. Marque seus horários pela página de voluntariado no site da Adote.');
+      throw new UnauthorizedException('Credenciais inválidas.');
     }
 
     // Depois de todas as recusas: volante e senha errada nunca gravam refresh (CA-05)

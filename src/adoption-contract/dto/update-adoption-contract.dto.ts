@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, IsUUID, MaxLength, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsInt, IsObject, IsOptional, IsString, MaxLength, ValidateNested } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export const MAX_CLAUSE_LENGTH = 20000;
@@ -24,11 +24,6 @@ export class ContractClauseDto {
 }
 
 export class UpdateAdoptionContractDto {
-  @ApiPropertyOptional({ description: 'Pet vinculado ao termo de adoção (null desvincula)', nullable: true })
-  @IsOptional()
-  @IsUUID('all', { message: 'Pet inválido.' })
-  petId?: string | null;
-
   @ApiPropertyOptional({
     description: 'Dados do termo de adoção: { adopter: { name, age, birthDate, rg, cpf, email, phone, profession, address }, animal: { name, species (CANINA|FELINA), sex (MACHO|FEMEA), breed, coat, distinctiveMarks, age, castrated, vaccinated, temperament, usesMedication, medicationDetails }, signature: { city, date } }',
   })

@@ -4,12 +4,11 @@ import { AdoptionContract } from './adoption-contract.entity';
 import { AdoptionForm } from '../adoption-form/adoption-form.entity';
 import { Pet } from '../pet/pet.entity';
 import { AdoptionHistoryModule } from '../adoption-history/adoption-history.module';
-import { NotificationModule } from '../notification/notification.module';
 import { AdoptionContractService } from './adoption-contract.service';
 import { AdoptionContractController } from './adoption-contract.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AdoptionContract, AdoptionForm, Pet]), AdoptionHistoryModule, NotificationModule],
+  imports: [TypeOrmModule.forFeature([AdoptionContract, AdoptionForm, Pet]), AdoptionHistoryModule],
   controllers: [AdoptionContractController],
   providers: [AdoptionContractService],
   exports: [AdoptionContractService],

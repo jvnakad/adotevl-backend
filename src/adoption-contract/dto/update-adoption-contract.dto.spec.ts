@@ -18,19 +18,14 @@ describe('UpdateAdoptionContractDto', () => {
   it('aceita pet, dados e cláusulas válidos', async () => {
     expect(
       await messagesOf({
-        petId: '1b4e28ba-2fa1-41d2-883f-0016d3cca427',
         data: { adopter: { name: 'Maria' } },
         clauses: [clause(), clause({ key: 'entrega', order: 2, removed: true })],
       }),
     ).toEqual([]);
   });
 
-  it('petId null desvincula o pet', async () => {
-    expect(await messagesOf({ petId: null })).toEqual([]);
-  });
-
-  it('recusa pet que não é UUID e dados que não são objeto', async () => {
-    expect(await messagesOf({ petId: 'rex', data: 'texto' })).toEqual(expect.arrayContaining(['Pet inválido.', 'Dados do termo de adoção inválidos.']));
+  it('recusa dados que não são objeto', async () => {
+    expect(await messagesOf({ data: 'texto' })).toEqual(expect.arrayContaining(['Dados do termo de adoção inválidos.']));
   });
 
   it('cláusulas precisam ser uma lista', async () => {

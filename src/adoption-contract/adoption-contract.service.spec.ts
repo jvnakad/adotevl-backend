@@ -122,7 +122,7 @@ describe('AdoptionContractService', () => {
       getAccount: jest.fn(async () => ({ name: 'Júlia Dezordi Ruas', email: 'ong@teste.com' })),
       signDocument: jest.fn(async () => undefined),
     };
-    service = new AdoptionContractService(contractRepo as any, formRepo as any, petRepo as any, storage as any, history as any, autentique as any, { notifyMany: jest.fn(async () => undefined) } as any);
+    service = new AdoptionContractService(contractRepo as any, formRepo as any, petRepo as any, storage as any, history as any, autentique as any);
 
     formRepo.findOne.mockResolvedValue(baseForm());
     contractRepo.findOne.mockResolvedValue(storedContract());
@@ -154,26 +154,7 @@ describe('AdoptionContractService', () => {
       const saved = contractRepo.save.mock.calls[0][0];
       expect(saved.petId).toBeNull();
       expect(saved.data.animal).toEqual(expect.objectContaining({ name: 'Mel', species: 'CANINA' }));
-      expect(contract.suggestedPetId).toBe('pet-9');
       expect(petRepo.update).not.toHaveBeenCalled();
-    });
-
-    it('pet escolhido que já foi adotado não é sugerido', async () => {
-      formRepo.findOne.mockResolvedValue({ ...baseForm(AdoptionFormStatus.APROVADO), desiredPetId: 'pet-9' });
-      petRepo.findOne.mockResolvedValue({ id: 'pet-9', name: 'Mel', status: PetStatus.ADOTADO, fotos: [] });
-
-      const contract = await service.findByForm('form-1', 'org-1');
-
-      expect(contract.suggestedPetId).toBeNull();
-    });
-
-    it('com pet já vinculado não sugere outro', async () => {
-      formRepo.findOne.mockResolvedValue({ ...baseForm(AdoptionFormStatus.APROVADO, 'pet-1'), desiredPetId: 'pet-9' });
-      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
-
-      const contract = await service.findByForm('form-1', 'org-1');
-
-      expect(contract.suggestedPetId).toBeNull();
     });
 
     it('cria o rascunho do modelo pré-preenchido com a ficha e o pet vinculado', async () => {
@@ -344,64 +325,26 @@ describe('AdoptionContractService', () => {
     });
 
     describe('pet', () => {
-      it('vincula o pet: preenche campos vazios do animal, reserva o pet e libera o anterior', async () => {
-        const data = buildInitialData(baseForm() as any);
-        data.animal.name = 'Nome digitado';
-        contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-old', data }));
-        petRepo.findOne.mockImplementation(async ({ where }) =>
-          where.id === 'pet-new'
-            ? { id: 'pet-new', name: 'Mia', species: 'Gato', sex: 'Femea', status: PetStatus.DISPONIVEL, castration: false }
-            : { id: 'pet-old', name: 'Rex', status: PetStatus.EM_PROCESSO },
-        );
+      it('o termo não escolhe pet: petId no payload é ignorado e nada é reservado', async () => {
+        contractRepo.findOne.mockResolvedValue(storedContract());
 
-        await service.update('form-1', { petId: 'pet-new' }, 'org-1', 'user-1');
+        await service.update('form-1', { petId: 'pet-x', data: {} } as any, 'org-1', 'user-1');
 
-        const saved = tx.contract.update.mock.calls[0][1];
-        expect(saved.petId).toBe('pet-new');
-        expect(saved.data.animal).toEqual(expect.objectContaining({ name: 'Nome digitado', species: 'FELINA', sex: 'FEMEA', castrated: false }));
-        expect(tx.form.update).toHaveBeenCalledWith('form-1', { petId: 'pet-new', updatedBy: 'user-1' });
-        expect(tx.pet.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-old', organizationId: expect.any(String) }), { status: PetStatus.DISPONIVEL, updatedBy: 'user-1' });
-        expect(tx.pet.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-new', organizationId: expect.any(String) }), { status: PetStatus.EM_PROCESSO, updatedBy: 'user-1' });
-        expect(recordedEvents()).toEqual([
-          expect.objectContaining({
-            type: AdoptionHistoryType.PET_VINCULADO,
-            description: 'Pet Mia vinculado ao termo de adoção',
-            metadata: { before: { id: 'pet-old', name: 'Rex' }, after: { id: 'pet-new', name: 'Mia' } },
-          }),
-        ]);
-      });
-
-      it('busca o pet só na organização do usuário', async () => {
-        petRepo.findOne.mockResolvedValue(null);
-
-        await expect(service.update('form-1', { petId: 'pet-x' }, 'org-1')).rejects.toThrow('Pet não encontrado.');
-        expect(petRepo.findOne).toHaveBeenCalledWith({ where: { id: 'pet-x', organizationId: 'org-1', isActive: true } });
-      });
-
-      it('não vincula pet já adotado', async () => {
-        petRepo.findOne.mockResolvedValue({ id: 'pet-1', status: PetStatus.ADOTADO });
-
-        await expect(service.update('form-1', { petId: 'pet-1' }, 'org-1')).rejects.toThrow('O pet selecionado não está disponível para adoção.');
-      });
-
-      it('mesmo pet não gera evento nem mexe em pets', async () => {
-        contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
-
-        await service.update('form-1', { petId: 'pet-1' }, 'org-1');
-
+        expect(tx.contract.update.mock.calls[0][1]).not.toHaveProperty('petId');
+        expect(tx.form.update).not.toHaveBeenCalled();
         expect(tx.pet.update).not.toHaveBeenCalled();
-        expect(recordedEvents()).toEqual([]);
+        expect(recordedEvents().filter((event) => event.type === AdoptionHistoryType.PET_VINCULADO)).toEqual([]);
       });
 
-      it('petId null desvincula', async () => {
-        contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
-        petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', status: PetStatus.EM_PROCESSO });
+      it('rascunho acompanha o pet vinculado à ficha depois (card ou edição do pet) e refaz o animal', async () => {
+        formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.APROVADO, 'pet-new'));
+        contractRepo.findOne.mockResolvedValue(storedContract({ petId: null }));
+        petRepo.findOne.mockResolvedValue({ id: 'pet-new', name: 'Mia', species: 'Gato', sex: 'Femea', status: PetStatus.EM_PROCESSO, castration: false, fotos: [] });
 
-        await service.update('form-1', { petId: null }, 'org-1');
+        const contract = await service.findByForm('form-1', 'org-1', 'user-1');
 
-        expect(tx.form.update).toHaveBeenCalledWith('form-1', { petId: null, updatedBy: null });
-        expect(tx.pet.update).toHaveBeenCalledWith(expect.objectContaining({ id: 'pet-1', organizationId: expect.any(String) }), { status: PetStatus.DISPONIVEL, updatedBy: null });
-        expect(recordedEvents()[0].description).toBe('Pet Rex desvinculado do termo de adoção');
+        expect(contractRepo.update).toHaveBeenCalledWith('contract-1', { petId: 'pet-new', data: expect.objectContaining({ animal: expect.objectContaining({ name: 'Mia', species: 'FELINA' }) }) });
+        expect(contract.petId).toBe('pet-new');
       });
     });
   });
@@ -425,6 +368,9 @@ describe('AdoptionContractService', () => {
   });
 
   describe('generate', () => {
+    // O pet do termo é o da ficha (formRepo), não mais escolhido no termo
+    beforeEach(() => formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.APROVADO, 'pet-1')));
+
     it.each([AdoptionFormStatus.PENDENTE, AdoptionFormStatus.REPROVADO])('ficha %s não gera o termo', async (status) => {
       formRepo.findOne.mockResolvedValue(baseForm(status, 'pet-1'));
 
@@ -508,7 +454,19 @@ describe('AdoptionContractService', () => {
       expect(tx.contract.update).not.toHaveBeenCalled();
     });
 
+    it('pet já ADOTADO bloqueia a geração com PET_ALREADY_ADOPTED', async () => {
+      contractRepo.findOne.mockResolvedValue(storedContract({ petId: 'pet-1' }));
+      petRepo.findOne.mockResolvedValue({ id: 'pet-1', name: 'Rex', status: PetStatus.ADOTADO, fotos: [] });
+
+      const error = await service.generate('form-1', 'org-1').catch((e) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect(error.getResponse()).toEqual({ statusCode: 400, code: 'PET_ALREADY_ADOPTED', message: expect.stringContaining('já foi adotado') });
+      expect(autentique.createDocument).not.toHaveBeenCalled();
+    });
+
     it('exige pet vinculado', async () => {
+      formRepo.findOne.mockResolvedValue(baseForm(AdoptionFormStatus.APROVADO));
       await expect(service.generate('form-1', 'org-1')).rejects.toThrow('Vincule um pet antes de gerar o termo de adoção.');
     });
 

@@ -234,9 +234,12 @@ describe('Fluxo do termo de adoção (e2e)', () => {
     expect(noPet.status).toBe(400);
     expect(noPet.body.message).toBe('Vincule um pet antes de gerar o termo de adoção.');
 
-    // 7. Vincular pet: adotado é recusado; disponível é reservado e preenche o animal
-    expect((await auth(api().put(`/adoption-forms/${formId}/contract`)).send({ petId: adopted.id })).status).toBe(400);
-    const linked = await auth(api().put(`/adoption-forms/${formId}/contract`)).send({ petId: rex.id });
+    // 7. Vínculo sai do termo e vai para o card: pet adotado é recusado; disponível é reservado e preenche o animal
+    const adoptedTry = await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'APROVADO', petId: adopted.id });
+    expect(adoptedTry.status).toBe(400);
+    expect(adoptedTry.body.code).toBe('PET_ALREADY_ADOPTED');
+    expect((await auth(api().patch(`/adoption-forms/${formId}/status`)).send({ status: 'APROVADO', petId: rex.id })).status).toBe(200);
+    const linked = await auth(api().get(`/adoption-forms/${formId}/contract`));
     expect(linked.status).toBe(200);
     expect(linked.body.petId).toBe(rex.id);
     expect(linked.body.pet).toEqual(expect.objectContaining({ id: rex.id, name: 'Rex' }));

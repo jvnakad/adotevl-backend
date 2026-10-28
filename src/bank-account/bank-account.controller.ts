@@ -19,7 +19,7 @@ export class BankAccountController {
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Cadastrar conta bancária', description: 'Acesso: Contas bancárias (Editar)' })
   create(@Body() dto: CreateBankAccountDto, @Request() req) {
-    return this.bankAccountService.create({ ...dto, organizationId: req.user.organizationId });
+    return this.bankAccountService.create(dto, req.user.organizationId);
   }
 
   @Get()
@@ -33,21 +33,21 @@ export class BankAccountController {
   @Get(':id')
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.VIEW)
   @ApiOperation({ summary: 'Buscar conta bancária por ID', description: 'Acesso: Contas bancárias (Visualizar)' })
-  findOne(@Param('id') id: string) {
-    return this.bankAccountService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.bankAccountService.findOne(id, req.user.organizationId);
   }
 
   @Put(':id')
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Atualizar conta bancária', description: 'Acesso: Contas bancárias (Editar)' })
-  update(@Param('id') id: string, @Body() dto: Partial<CreateBankAccountDto>) {
-    return this.bankAccountService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: Partial<CreateBankAccountDto>, @Request() req) {
+    return this.bankAccountService.update(id, dto, req.user.organizationId);
   }
 
   @Delete(':id')
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Desativar conta bancária', description: 'Acesso: Contas bancárias (Editar)' })
-  remove(@Param('id') id: string) {
-    return this.bankAccountService.remove(id);
+  remove(@Param('id') id: string, @Request() req) {
+    return this.bankAccountService.remove(id, req.user.organizationId);
   }
 }

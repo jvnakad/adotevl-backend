@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { BankAccount } from './bank-account.entity';
@@ -13,8 +13,9 @@ export class BankAccountService {
     private readonly bankAccountRepository: Repository<BankAccount>,
   ) {}
 
-  async create(dto: CreateBankAccountDto) {
-    const bankAccount = this.bankAccountRepository.create(dto);
+  async create(dto: CreateBankAccountDto, organizationId: string) {
+    // A organização é sempre a do usuário autenticado (o DTO não a aceita)
+    const bankAccount = this.bankAccountRepository.create({ ...dto, organizationId });
     return this.bankAccountRepository.save(bankAccount);
   }
 
@@ -23,16 +24,21 @@ export class BankAccountService {
     return paginate(this.bankAccountRepository, pagination, where);
   }
 
-  async findOne(id: string) {
-    return this.bankAccountRepository.findOne({ where: { id } });
+  /** Conta da organização informada; de outra organização responde como inexistente (404). */
+  async findOne(id: string, organizationId: string) {
+    const account = await this.bankAccountRepository.findOne({ where: { id, organizationId } });
+    if (!account) throw new NotFoundException('Conta bancária não encontrada.');
+    return account;
   }
 
-  async update(id: string, dto: Partial<CreateBankAccountDto>) {
-    await this.bankAccountRepository.update(id, dto);
-    return this.bankAccountRepository.findOne({ where: { id } });
+  async update(id: string, dto: Partial<CreateBankAccountDto>, organizationId: string) {
+    await this.findOne(id, organizationId);
+    await this.bankAccountRepository.update({ id, organizationId }, dto);
+    return this.findOne(id, organizationId);
   }
 
-  async remove(id: string) {
-    await this.bankAccountRepository.update(id, { isActive: false });
+  async remove(id: string, organizationId: string) {
+    await this.findOne(id, organizationId);
+    await this.bankAccountRepository.update({ id, organizationId }, { isActive: false });
   }
 }

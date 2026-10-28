@@ -278,7 +278,7 @@ describe('TeamService', () => {
     it('cria equipe quando o nome é único na organização', async () => {
       repo.findOne.mockResolvedValue(null);
 
-      const result = await service.create({ name: 'Resgate', organizationId: 'org-1' } as any, 'user-1');
+      const result = await service.create({ name: 'Resgate' }, 'org-1', 'user-1');
 
       expect(repo.findOne).toHaveBeenCalledWith({ where: { name: 'Resgate', organizationId: 'org-1' } });
       expect(result).toEqual(expect.objectContaining({ name: 'Resgate', createdBy: 'user-1', accessConfiguredAt: expect.any(Date) }));
@@ -287,7 +287,7 @@ describe('TeamService', () => {
     it('lança ConflictException com nome repetido na organização', async () => {
       repo.findOne.mockResolvedValue({ id: 't1' });
 
-      await expect(service.create({ name: 'Resgate', organizationId: 'org-1' } as any)).rejects.toThrow(ConflictException);
+      await expect(service.create({ name: 'Resgate' }, 'org-1')).rejects.toThrow(ConflictException);
       expect(repo.save).not.toHaveBeenCalled();
     });
   });
@@ -304,6 +304,16 @@ describe('TeamService', () => {
     repo.findOne.mockResolvedValue(null);
 
     await expect(service.findOne('x')).rejects.toThrow(NotFoundException);
+  });
+
+  it('findOne/update/setPermissions de equipe de outra organização respondem 404 sem gravar', async () => {
+    repo.findOne.mockResolvedValue(null);
+
+    await expect(service.findOne('t1', 'org-A')).rejects.toThrow(NotFoundException);
+    expect(repo.findOne).toHaveBeenCalledWith({ where: { id: 't1', organizationId: 'org-A' } });
+    await expect(service.update('t1', { name: 'X' }, 'u1', 'org-A')).rejects.toThrow(NotFoundException);
+    await expect(service.setPermissions('t1', {}, 'u1', 'org-A')).rejects.toThrow(NotFoundException);
+    expect(repo.update).not.toHaveBeenCalled();
   });
 
   it('update grava updatedBy', async () => {

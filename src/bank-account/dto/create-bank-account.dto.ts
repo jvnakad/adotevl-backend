@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUUID } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
 
 export class CreateBankAccountDto {
   @IsString()
@@ -42,8 +42,4 @@ export class CreateBankAccountDto {
   @IsString()
   document?: string;
 
-  /** Ignorado: a organização vem do token de quem cria. Mantido opcional por compatibilidade com o painel. */
-  @IsOptional()
-  @IsUUID()
-  organizationId?: string;
 }

@@ -27,7 +27,7 @@ export class PetController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @ApiOperation({ summary: 'Cadastrar pet', description: 'Acesso: Pets (Editar)' })
   create(@Body() dto: CreatePetDto, @Request() req) {
-    return this.petService.create({ ...dto, organizationId: req.user.organizationId }, req.user.id);
+    return this.petService.create(dto, req.user.organizationId, req.user.id);
   }
 
   @Get()
@@ -65,8 +65,8 @@ export class PetController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, AccessGuard)
   @ApiOperation({ summary: 'Buscar pet por ID', description: 'Acesso: Pets (Visualizar)' })
-  findOne(@Param('id') id: string) {
-    return this.petService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.petService.findOne(id, req.user.organizationId);
   }
 
   @Put(':id')
@@ -75,7 +75,7 @@ export class PetController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @ApiOperation({ summary: 'Atualizar pet', description: 'Acesso: Pets (Editar)' })
   update(@Param('id') id: string, @Body() dto: UpdatePetDto, @Request() req) {
-    return this.petService.update(id, dto, req.user.id);
+    return this.petService.update(id, dto, req.user.organizationId, req.user.id);
   }
 
   @Delete(':id')
@@ -84,7 +84,7 @@ export class PetController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @ApiOperation({ summary: 'Desativar pet (soft delete)', description: 'Somente equipe Admin' })
   remove(@Param('id') id: string, @Request() req) {
-    return this.petService.remove(id, req.user.id);
+    return this.petService.remove(id, req.user.organizationId, req.user.id);
   }
 
   @Post(':id/photos')
@@ -101,7 +101,7 @@ export class PetController {
   })
   @ApiOperation({ summary: 'Adicionar fotos ao pet', description: 'Acesso: Pets (Editar). Campo multipart "photos" (JPEG, PNG ou WEBP, até 5MB cada). Máximo de 10 fotos por pet. Retorna o pet com a lista "fotos" atualizada.' })
   addPhotos(@Param('id', ParseUUIDPipe) id: string, @UploadedFiles() files: Express.Multer.File[], @Request() req) {
-    return this.petService.addPhotos(id, files, req.user.id);
+    return this.petService.addPhotos(id, files, req.user.organizationId, req.user.id);
   }
 
   @Delete(':id/photos/:photoId')
@@ -109,7 +109,7 @@ export class PetController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard, AccessGuard)
   @ApiOperation({ summary: 'Remover foto do pet', description: 'Acesso: Pets (Editar)' })
-  removePhoto(@Param('id', ParseUUIDPipe) id: string, @Param('photoId', ParseUUIDPipe) photoId: string) {
-    return this.petService.removePhoto(id, photoId);
+  removePhoto(@Param('id', ParseUUIDPipe) id: string, @Param('photoId', ParseUUIDPipe) photoId: string, @Request() req) {
+    return this.petService.removePhoto(id, photoId, req.user.organizationId);
   }
 }

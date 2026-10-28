@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsDateString, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsDateString } from 'class-validator';
 
 export class CreateCampaignDto {
   @IsString()
@@ -23,8 +23,4 @@ export class CreateCampaignDto {
   @IsOptional()
   imagePath?: string;
 
-  /** Ignorado: a organização vem do token de quem cria. Mantido opcional por compatibilidade com o painel. */
-  @IsOptional()
-  @IsUUID()
-  organizationId?: string;
 }

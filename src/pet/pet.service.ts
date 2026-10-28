@@ -50,8 +50,9 @@ export class PetService implements OnModuleInit {
     if (affected) this.logger.log(`${affected} pet(s) com idade antiga convertido(s) para mês/ano de nascimento.`);
   }
 
-  async create(dto: CreatePetDto, createdBy: string = null) {
-    const pet = this.petRepository.create({ ...dto, createdBy, updatedBy: createdBy });
+  async create(dto: CreatePetDto, organizationId: string, createdBy: string = null) {
+    // A organização é sempre a do usuário autenticado (o DTO não a aceita)
+    const pet = this.petRepository.create({ ...dto, organizationId, createdBy, updatedBy: createdBy });
     const saved = await this.petRepository.save(pet);
     return this.withAge({ ...saved, fotos: [] });
   }
@@ -95,33 +96,34 @@ export class PetService implements OnModuleInit {
     };
   }
 
-  async findOne(id: string) {
-    const pet = await this.petRepository.findOne({ where: { id }, relations: { fotos: true } });
+  /** Pet da organização informada; de outra organização responde como inexistente (404). */
+  async findOne(id: string, organizationId: string) {
+    const pet = await this.petRepository.findOne({ where: { id, organizationId }, relations: { fotos: true } });
     if (!pet) throw new NotFoundException('Pet não encontrado.');
     return this.withAge(this.sortPhotos(pet));
   }
 
-  async update(id: string, dto: UpdatePetDto, updatedBy: string = null) {
+  async update(id: string, dto: UpdatePetDto, organizationId: string, updatedBy: string = null) {
+    await this.assertOwned(id, organizationId);
     // Fotos são gerenciadas pelos endpoints próprios; ignora caso o front reenvie o objeto completo
     const { fotos, ...data } = dto as Partial<CreatePetDto> & { fotos?: unknown };
-    await this.petRepository.update(id, { ...data, updatedBy });
-    return this.findOne(id);
+    await this.petRepository.update({ id, organizationId }, { ...data, updatedBy });
+    return this.findOne(id, organizationId);
   }
 
-  async remove(id: string, updatedBy: string = null) {
-    const pet = await this.petRepository.findOne({ where: { id } });
-    if (!pet) throw new NotFoundException('Pet não encontrado.');
-    await this.petRepository.update(id, { isActive: false, updatedBy });
+  async remove(id: string, organizationId: string, updatedBy: string = null) {
+    await this.assertOwned(id, organizationId);
+    await this.petRepository.update({ id, organizationId }, { isActive: false, updatedBy });
     return { message: 'Pet desativado com sucesso.' };
   }
 
-  async addPhotos(petId: string, files: Express.Multer.File[], createdBy: string = null) {
+  async addPhotos(petId: string, files: Express.Multer.File[], organizationId: string, createdBy: string = null) {
     if (!files?.length) throw new BadRequestException('Envie ao menos uma foto no campo "photos".');
 
     const invalid = files.find((file) => !ALLOWED_PHOTO_TYPES.includes(file.mimetype));
     if (invalid) throw new BadRequestException('Formato inválido. Envie apenas imagens JPEG, PNG ou WEBP.');
 
-    const pet = await this.petRepository.findOne({ where: { id: petId, isActive: true } });
+    const pet = await this.petRepository.findOne({ where: { id: petId, organizationId, isActive: true } });
     if (!pet) throw new NotFoundException('Pet não encontrado.');
 
     const current = await this.photoRepository.count({ where: { petId } });
@@ -148,15 +150,20 @@ export class PetService implements OnModuleInit {
       throw error;
     }
 
-    return this.findOne(petId);
+    return this.findOne(petId, organizationId);
   }
 
-  async removePhoto(petId: string, photoId: string) {
+  async removePhoto(petId: string, photoId: string, organizationId: string) {
+    await this.assertOwned(petId, organizationId);
     const photo = await this.photoRepository.findOne({ where: { id: photoId, petId } });
     if (!photo) throw new NotFoundException('Foto não encontrada.');
     await this.storageService.remove([photo.storagePath]);
     await this.photoRepository.delete(photo.id);
     return { message: 'Foto removida com sucesso.' };
+  }
+
+  private async assertOwned(id: string, organizationId: string) {
+    if (!(await this.petRepository.findOne({ where: { id, organizationId }, select: { id: true } }))) throw new NotFoundException('Pet não encontrado.');
   }
 
   // Busca por nome ou raça: array no where vira OR, mantendo os demais filtros em cada ramo

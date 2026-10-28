@@ -24,9 +24,9 @@ describe('PetService', () => {
   });
 
   it('create registra auditoria e devolve fotos vazias', async () => {
-    const result = await service.create({ name: 'Bob', species: 'Cachorro', sex: 'Macho', birthDate: '2024-10', organizationId: 'org-1' }, 'user-1');
+    const result = await service.create({ name: 'Bob', species: 'Cachorro', sex: 'Macho', birthDate: '2024-10' }, 'org-1', 'user-1');
 
-    expect(result).toEqual(expect.objectContaining({ name: 'Bob', createdBy: 'user-1', updatedBy: 'user-1', fotos: [], ageLabel: '2 anos' }));
+    expect(result).toEqual(expect.objectContaining({ name: 'Bob', organizationId: 'org-1', createdBy: 'user-1', updatedBy: 'user-1', fotos: [], ageLabel: '2 anos' }));
   });
 
   describe('findAll', () => {
@@ -104,36 +104,48 @@ describe('PetService', () => {
   it('findOne devolve a idade calculada', async () => {
     petRepo.findOne.mockResolvedValue({ id: 'p1', birthDate: '2025-09', fotos: [] });
 
-    expect((await service.findOne('p1')).ageLabel).toBe('1 ano e 1 mês');
+    expect((await service.findOne('p1', 'org-1')).ageLabel).toBe('1 ano e 1 mês');
   });
 
   it('findOne lança NotFoundException quando não existe', async () => {
     petRepo.findOne.mockResolvedValue(null);
 
-    await expect(service.findOne('x')).rejects.toThrow(NotFoundException);
+    await expect(service.findOne('x', 'org-1')).rejects.toThrow(NotFoundException);
+    expect(petRepo.findOne).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'x', organizationId: 'org-1' } }));
+  });
+
+  it('update/remove/fotos de pet de outra organização respondem 404 sem gravar', async () => {
+    petRepo.findOne.mockResolvedValue(null);
+
+    await expect(service.update('p1', { status: PetStatus.ADOTADO } as any, 'org-A', 'u1')).rejects.toThrow(NotFoundException);
+    await expect(service.remove('p1', 'org-A', 'u1')).rejects.toThrow(NotFoundException);
+    await expect(service.removePhoto('p1', 'f1', 'org-A')).rejects.toThrow(NotFoundException);
+    await expect(service.addPhotos('p1', [file()], 'org-A')).rejects.toThrow(NotFoundException);
+    expect(petRepo.update).not.toHaveBeenCalled();
+    expect(photoRepo.delete).not.toHaveBeenCalled();
   });
 
   it('update ignora o campo fotos enviado pelo front', async () => {
     petRepo.findOne.mockResolvedValue({ id: 'p1', fotos: [] });
 
-    await service.update('p1', { status: PetStatus.ADOTADO, fotos: [{ id: 'f1' }] } as any, 'user-2');
+    await service.update('p1', { status: PetStatus.ADOTADO, fotos: [{ id: 'f1' }] } as any, 'org-1', 'user-2');
 
-    expect(petRepo.update).toHaveBeenCalledWith('p1', { status: PetStatus.ADOTADO, updatedBy: 'user-2' });
+    expect(petRepo.update).toHaveBeenCalledWith({ id: 'p1', organizationId: 'org-1' }, { status: PetStatus.ADOTADO, updatedBy: 'user-2' });
   });
 
   describe('remove', () => {
     it('lança NotFoundException quando não existe', async () => {
       petRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.remove('x')).rejects.toThrow(NotFoundException);
+      await expect(service.remove('x', 'org-1')).rejects.toThrow(NotFoundException);
     });
 
     it('faz soft delete', async () => {
       petRepo.findOne.mockResolvedValue({ id: 'p1' });
 
-      await service.remove('p1', 'user-2');
+      await service.remove('p1', 'org-1', 'user-2');
 
-      expect(petRepo.update).toHaveBeenCalledWith('p1', { isActive: false, updatedBy: 'user-2' });
+      expect(petRepo.update).toHaveBeenCalledWith({ id: 'p1', organizationId: 'org-1' }, { isActive: false, updatedBy: 'user-2' });
     });
   });
 
@@ -144,28 +156,28 @@ describe('PetService', () => {
     });
 
     it('exige ao menos uma foto', async () => {
-      await expect(service.addPhotos('p1', [])).rejects.toThrow(BadRequestException);
+      await expect(service.addPhotos('p1', [], 'org-1')).rejects.toThrow(BadRequestException);
     });
 
     it('rejeita formato que não é imagem', async () => {
-      await expect(service.addPhotos('p1', [file('doc.pdf', 'application/pdf')])).rejects.toThrow('Formato inválido');
+      await expect(service.addPhotos('p1', [file('doc.pdf', 'application/pdf')], 'org-1')).rejects.toThrow('Formato inválido');
       expect(storage.upload).not.toHaveBeenCalled();
     });
 
     it('lança NotFoundException para pet inexistente', async () => {
       petRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.addPhotos('p1', [file()])).rejects.toThrow(NotFoundException);
+      await expect(service.addPhotos('p1', [file()], 'org-1')).rejects.toThrow(NotFoundException);
     });
 
     it(`respeita o limite de ${MAX_PET_PHOTOS} fotos`, async () => {
       photoRepo.count.mockResolvedValue(MAX_PET_PHOTOS - 1);
 
-      await expect(service.addPhotos('p1', [file(), file()])).rejects.toThrow(`restam 1`);
+      await expect(service.addPhotos('p1', [file(), file()], 'org-1')).rejects.toThrow(`restam 1`);
     });
 
     it('envia ao storage com extensão em minúsculo e salva as fotos', async () => {
-      await service.addPhotos('p1', [file('casa.JPG')], 'user-1');
+      await service.addPhotos('p1', [file('casa.JPG')], 'org-1', 'user-1');
 
       const [path, buffer, mimetype] = storage.upload.mock.calls[0];
       expect(path).toMatch(/^p1\/[0-9a-f-]{36}\.jpg$/);
@@ -177,7 +189,7 @@ describe('PetService', () => {
     it('remove do storage os arquivos já enviados quando algo falha', async () => {
       storage.upload.mockResolvedValueOnce('https://cdn/1').mockRejectedValueOnce(new Error('falhou'));
 
-      await expect(service.addPhotos('p1', [file('a.jpg'), file('b.jpg')])).rejects.toThrow('falhou');
+      await expect(service.addPhotos('p1', [file('a.jpg'), file('b.jpg')], 'org-1')).rejects.toThrow('falhou');
 
       expect(storage.remove).toHaveBeenCalledWith([expect.stringMatching(/^p1\//)]);
       expect(photoRepo.save).not.toHaveBeenCalled();
@@ -185,16 +197,18 @@ describe('PetService', () => {
   });
 
   describe('removePhoto', () => {
+    beforeEach(() => petRepo.findOne.mockResolvedValue({ id: 'p1' }));
+
     it('lança NotFoundException quando a foto não é do pet', async () => {
       photoRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.removePhoto('p1', 'f1')).rejects.toThrow('Foto não encontrada.');
+      await expect(service.removePhoto('p1', 'f1', 'org-1')).rejects.toThrow('Foto não encontrada.');
     });
 
     it('remove do storage e do banco', async () => {
       photoRepo.findOne.mockResolvedValue({ id: 'f1', storagePath: 'p1/f1.jpg' });
 
-      await service.removePhoto('p1', 'f1');
+      await service.removePhoto('p1', 'f1', 'org-1');
 
       expect(photoRepo.findOne).toHaveBeenCalledWith({ where: { id: 'f1', petId: 'p1' } });
       expect(storage.remove).toHaveBeenCalledWith(['p1/f1.jpg']);

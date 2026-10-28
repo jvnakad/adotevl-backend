@@ -211,6 +211,7 @@ export class AdoptionFormService implements OnModuleInit {
             updatedAt: form.updatedAt,
             reviewedAt: form.reviewedAt ?? null,
             petId: form.petId ?? null,
+            desiredPetId: form.desiredPetId ?? null,
             petName: form.pet?.name ?? null,
           })),
         };

@@ -718,7 +718,7 @@ describe('AdoptionFormService', () => {
     it('devolve as 5 colunas na ordem do kanban, com no máximo 50 itens por coluna', async () => {
       formRepo.findAndCount.mockImplementation(async ({ where }) =>
         where.status === 'APROVADO'
-          ? [[{ id: 'f1', fullName: 'Maria', status: 'APROVADO', petId: 'pet-1', pet: { name: 'Rex' }, cpf: '1', reviewNotes: 'x' }], 1]
+          ? [[{ id: 'f1', fullName: 'Maria', status: 'APROVADO', petId: 'pet-1', desiredPetId: 'pet-9', pet: { name: 'Rex' }, cpf: '1', reviewNotes: 'x' }], 1]
           : [[], 0],
       );
 
@@ -730,7 +730,7 @@ describe('AdoptionFormService', () => {
       );
       const approved = columns[1];
       expect(approved.total).toBe(1);
-      expect(approved.items[0]).toEqual(expect.objectContaining({ id: 'f1', fullName: 'Maria', petId: 'pet-1', petName: 'Rex' }));
+      expect(approved.items[0]).toEqual(expect.objectContaining({ id: 'f1', fullName: 'Maria', petId: 'pet-1', desiredPetId: 'pet-9', petName: 'Rex' }));
       expect(approved.items[0]).not.toHaveProperty('cpf');
     });
 

@@ -19,6 +19,7 @@ import { AdoptionHistoryService } from '../adoption-history/adoption-history.ser
 import { AdoptionHistoryType } from '../adoption-history/adoption-history.entity';
 import { AdoptionContract, ContractSignatureStatus } from '../adoption-contract/adoption-contract.entity';
 import { AutentiqueService } from '../autentique/autentique.service';
+import { PetAlreadyAdoptedException } from './pet-already-adopted.exception';
 
 export const MAX_ADOPTION_FORM_PHOTOS = 6;
 export const MAX_ADOPTION_PHOTO_SIZE = 5 * 1024 * 1024;
@@ -155,7 +156,30 @@ export class AdoptionFormService implements OnModuleInit {
   async findOne(id: string, organizationId: string) {
     const form = await this.getForm(id, organizationId, true);
     await this.signPhotoUrls([form]);
-    return { ...form, pet: this.petSummary(form.pet), desiredPet: this.petSummary(form.desiredPet) };
+    // Pet oficial da ficha: o vinculado, ou o desejado enquanto não houver vínculo
+    const pet = form.pet ?? form.desiredPet;
+    const others = pet
+      ? await this.formRepository.find({
+          select: { id: true, fullName: true },
+          where: ['petId', 'desiredPetId'].map((column) => ({
+            [column]: pet.id,
+            organizationId,
+            isActive: true,
+            id: Not(form.id),
+            status: Not(In([AdoptionFormStatus.REPROVADO, AdoptionFormStatus.CONCLUIDA])),
+          })),
+          order: { createdAt: 'ASC' },
+          take: 20,
+        })
+      : [];
+    return {
+      ...form,
+      pet: this.petSummary(form.pet),
+      desiredPet: this.petSummary(form.desiredPet),
+      // Base dos banners da ficha: outros interessados no mesmo pet e pet já doado a outra ficha
+      otherInterestedForms: others.map((other) => ({ id: other.id, adopterName: other.fullName })),
+      desiredPetAdopted: pet?.status === PetStatus.ADOTADO && form.status !== AdoptionFormStatus.CONCLUIDA,
+    };
   }
 
   // Kanban: todas as colunas sempre presentes, até 50 fichas resumidas por coluna.
@@ -234,8 +258,15 @@ export class AdoptionFormService implements OnModuleInit {
     const form = await this.getForm(id, organizationId);
     const from = form.status;
     const to = dto.status;
-    if (from === to) return this.updateReviewNotes(form, dto.reviewNotes, reviewedBy);
+    // Termo enviado ou assinado: o pet já está definido e o petId do corpo é ignorado
+    const requestedPetId = !CONTRACT_STATUSES.includes(from) && dto.petId && dto.petId !== form.petId ? dto.petId : null;
+    if (from === to) {
+      if (requestedPetId) await this.relinkPet(form, requestedPetId, reviewedBy);
+      return this.updateReviewNotes(form, dto.reviewNotes, reviewedBy);
+    }
     this.validateTransition(from, to, isAdmin);
+    const boundPet = await this.resolvePetToBind(form, to, requestedPetId);
+    const petId = boundPet?.id ?? form.petId;
 
     const userName = await this.historyService.resolveUserName(reviewedBy);
     const cancelledDocumentId = from === AdoptionFormStatus.AGUARDANDO_ASSINATURA ? await this.cancelPendingSignature(form.id) : null;
@@ -246,16 +277,18 @@ export class AdoptionFormService implements OnModuleInit {
         reviewedBy,
         reviewedAt: new Date(),
         updatedBy: reviewedBy,
+        ...(boundPet && { petId: boundPet.id }),
       });
 
-      // Efeitos no pet vinculado ao termo de adoção
-      if (form.petId) {
-        const pets = manager.getRepository(Pet);
-        if (CONTRACT_STATUSES.includes(from)) {
-          await pets.update({ id: form.petId, organizationId: form.organizationId }, { status: PetStatus.EM_PROCESSO, adoptionDate: null, updatedBy: reviewedBy });
-        } else if (PET_RESERVED_STATUSES.includes(from) && PET_RELEASE_TARGETS.includes(to) && !(await this.petHeldByOtherForm(manager.getRepository(AdoptionForm), form))) {
-          await pets.update({ id: form.petId, organizationId: form.organizationId }, { status: PetStatus.DISPONIVEL, updatedBy: reviewedBy });
-        }
+      // Efeitos no pet da ficha: aprovar reserva; voltar/reprovar libera; voltar do termo reserva de novo
+      const pets = manager.getRepository(Pet);
+      if (form.petId && CONTRACT_STATUSES.includes(from)) {
+        await pets.update({ id: form.petId, organizationId: form.organizationId }, { status: PetStatus.EM_PROCESSO, adoptionDate: null, updatedBy: reviewedBy });
+      } else if (form.petId && PET_RESERVED_STATUSES.includes(from) && PET_RELEASE_TARGETS.includes(to) && !(await this.petHeldByOtherForm(manager.getRepository(AdoptionForm), form))) {
+        await pets.update({ id: form.petId, organizationId: form.organizationId }, { status: PetStatus.DISPONIVEL, updatedBy: reviewedBy });
+      } else if (petId && to === AdoptionFormStatus.APROVADO) {
+        // Condicional: pet já EM_PROCESSO por outra ficha segue assim, sem bloquear
+        await pets.update({ id: petId, organizationId: form.organizationId, status: PetStatus.DISPONIVEL }, { status: PetStatus.EM_PROCESSO, updatedBy: reviewedBy });
       }
 
       if (cancelledDocumentId) {
@@ -271,7 +304,7 @@ export class AdoptionFormService implements OnModuleInit {
           description: `Status alterado de ${statusLabel(from)} para ${statusLabel(to)}`,
           metadata: {
             ...(dto.reviewNotes !== undefined && { reviewNotes: dto.reviewNotes }),
-            ...(form.petId && { petId: form.petId }),
+            ...(petId && { petId }),
             ...(cancelledDocumentId && { cancelledSignatureDocumentId: cancelledDocumentId }),
           },
           userId: reviewedBy,
@@ -281,6 +314,42 @@ export class AdoptionFormService implements OnModuleInit {
       );
     });
     return this.findOne(id, organizationId);
+  }
+
+  // Valida o pet a vincular. Sem pedido explícito, ao aprovar adota o pet desejado (se ainda não doado)
+  private async resolvePetToBind(form: AdoptionForm, to: AdoptionFormStatus, requestedPetId: string | null) {
+    const id = requestedPetId ?? (to === AdoptionFormStatus.APROVADO && !form.petId ? form.desiredPetId : null);
+    if (!id) return null;
+    const pet = await this.petRepository.findOne({ where: { id, organizationId: form.organizationId, isActive: true } });
+    if (!pet) {
+      if (requestedPetId) throw new NotFoundException('Pet não encontrado.');
+      return null;
+    }
+    if (pet.status === PetStatus.ADOTADO) {
+      if (requestedPetId) throw new PetAlreadyAdoptedException(pet.name);
+      return null;
+    }
+    return pet;
+  }
+
+  // Troca o pet de uma ficha que continua no mesmo status (ex.: Aprovado sem pet escolhe um depois)
+  private async relinkPet(form: AdoptionForm, petId: string, userId: string) {
+    const pet = await this.resolvePetToBind(form, form.status, petId);
+    const userName = await this.historyService.resolveUserName(userId);
+    await this.formRepository.manager.transaction(async (manager) => {
+      const pets = manager.getRepository(Pet);
+      await manager.getRepository(AdoptionForm).update(form.id, { petId: pet.id, updatedBy: userId });
+      if (form.status === AdoptionFormStatus.APROVADO) {
+        if (form.petId && !(await this.petHeldByOtherForm(manager.getRepository(AdoptionForm), form))) {
+          await pets.update({ id: form.petId, organizationId: form.organizationId, status: PetStatus.EM_PROCESSO }, { status: PetStatus.DISPONIVEL, updatedBy: userId });
+        }
+        await pets.update({ id: pet.id, organizationId: form.organizationId, status: PetStatus.DISPONIVEL }, { status: PetStatus.EM_PROCESSO, updatedBy: userId });
+      }
+      await this.historyService.record(
+        { form, type: AdoptionHistoryType.PET_VINCULADO, description: `Pet ${pet.name} vinculado à ficha`, metadata: { petId: pet.id }, userId, userName },
+        manager,
+      );
+    });
   }
 
   async remove(id: string, organizationId: string, updatedBy: string = null) {
@@ -425,7 +494,7 @@ export class AdoptionFormService implements OnModuleInit {
   private petSummary(pet: Pet) {
     if (!pet) return null;
     const fotos = [...(pet.fotos ?? [])].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-    return { id: pet.id, name: pet.name, species: pet.species, fotos: fotos.map((foto) => ({ url: foto.url })) };
+    return { id: pet.id, name: pet.name, species: pet.species, status: pet.status, fotos: fotos.map((foto) => ({ url: foto.url })) };
   }
 
   private async getForm(id: string, organizationId: string, withPet = false) {

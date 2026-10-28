@@ -22,7 +22,8 @@ export const SESSION_STATE_FROM = `
  * O $2 precisa ser UUID válido ou nulo: valide com isUuid antes (texto inválido vira 22P02 e 500).
  */
 export const SESSION_STATE_SQL = `
-  SELECT u."isActive" AS "isActive", u.password_changed_at AS "passwordChangedAt", t.system_key AS "systemKey",
+  SELECT u."isActive" AS "isActive", u.is_confirmed AS "isConfirmed", u.is_approved AS "isApproved",
+         u.password_changed_at AS "passwordChangedAt", t.system_key AS "systemKey",
          ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM refresh_tokens r
                                        WHERE r.family_id = $2::uuid AND r.user_id = u.id AND r.revoked_at IS NULL)) AS "familyAlive"
   ${SESSION_STATE_FROM}
@@ -43,7 +44,7 @@ export type SessionState = {
   systemKey: string | null;
   /** Só no SESSION_STATE_SQL com fid; ausente = não confere família */
   familyAlive?: boolean;
-  /** Só no REFRESH_SUBJECT_SQL: o access não os tem hoje */
+  /** Guard, socket e renovação: link de aprovação não vale sem e-mail confirmado */
   isConfirmed?: boolean;
   isApproved?: boolean;
 };

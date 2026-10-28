@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Between, Repository } from 'typeorm';
 import { FinancialEntry } from './financial-entry.entity';
 import { FinancialExpense } from './financial-expense.entity';
+import { BankAccount } from '../bank-account/bank-account.entity';
 import { CreateFinancialEntryDto } from './dto/create-financial-entry.dto';
 import { CreateFinancialExpenseDto } from './dto/create-financial-expense.dto';
 import { UpdateFinancialEntryDto } from './dto/update-financial-entry.dto';
@@ -25,12 +26,21 @@ export class FinancialService {
     private readonly expenseRepository: Repository<FinancialExpense>,
   ) {}
 
+  /** Conta bancária inexistente vira 404 em vez de violação de FK (500). */
+  private async assertBankAccount(bankAccountId?: string) {
+    if (!bankAccountId) return;
+    const found = await this.entryRepository.manager.findOne(BankAccount, { where: { id: bankAccountId }, select: { id: true } });
+    if (!found) throw new NotFoundException('Conta bancária não encontrada.');
+  }
+
   async createEntry(dto: CreateFinancialEntryDto, createdBy: string = null) {
+    await this.assertBankAccount(dto.bankAccountId);
     const entry = this.entryRepository.create({ ...dto, createdBy, updatedBy: createdBy });
     return this.entryRepository.save(entry);
   }
 
   async createExpense(dto: CreateFinancialExpenseDto, createdBy: string = null) {
+    await this.assertBankAccount(dto.bankAccountId);
     const expense = this.expenseRepository.create({ ...dto, createdBy, updatedBy: createdBy });
     return this.expenseRepository.save(expense);
   }
@@ -38,6 +48,7 @@ export class FinancialService {
   async updateEntry(id: string, dto: UpdateFinancialEntryDto, updatedBy: string = null) {
     const entry = await this.entryRepository.findOne({ where: { id } });
     if (!entry) throw new NotFoundException('Entrada financeira não encontrada.');
+    await this.assertBankAccount(dto.bankAccountId);
     await this.entryRepository.update(id, { ...dto, updatedBy });
     return this.entryRepository.findOne({ where: { id } });
   }
@@ -45,6 +56,7 @@ export class FinancialService {
   async updateExpense(id: string, dto: UpdateFinancialExpenseDto, updatedBy: string = null) {
     const expense = await this.expenseRepository.findOne({ where: { id } });
     if (!expense) throw new NotFoundException('Saída financeira não encontrada.');
+    await this.assertBankAccount(dto.bankAccountId);
     await this.expenseRepository.update(id, { ...dto, updatedBy });
     return this.expenseRepository.findOne({ where: { id } });
   }
@@ -65,12 +77,14 @@ export class FinancialService {
   async getBalance() {
     const entries = await this.entryRepository.find();
     const expenses = await this.expenseRepository.find();
-    const totalEntries = entries.reduce((sum, e) => sum + Number(e.amount), 0);
-    const totalExpenses = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+    // Soma em centavos inteiros: evita ruído de ponto flutuante (ex.: -729.4399999999996)
+    const cents = (items: { amount: unknown }[]) => items.reduce((sum, e) => sum + Math.round(Number(e.amount) * 100), 0);
+    const totalEntries = cents(entries);
+    const totalExpenses = cents(expenses);
     return {
-      totalEntries,
-      totalExpenses,
-      balance: totalEntries - totalExpenses,
+      totalEntries: totalEntries / 100,
+      totalExpenses: totalExpenses / 100,
+      balance: (totalEntries - totalExpenses) / 100,
     };
   }
 }

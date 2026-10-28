@@ -1,6 +1,6 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike, FindOptionsWhere } from 'typeorm';
+import { Repository, ILike, FindOptionsWhere, Not, In } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
 import { AdoptionForm, AdoptionFormStatus, ADOPTION_FORM_STATUS_LABELS, ADOPTION_FORM_STATUS_ORDER } from './adoption-form.entity';
@@ -202,6 +202,10 @@ export class AdoptionFormService implements OnModuleInit {
 
   async update(id: string, dto: UpdateAdoptionFormDto, organizationId: string, updatedBy: string = null) {
     const form = await this.getForm(id, organizationId);
+    // Termo enviado ou assinado: os dados do adotante já estão no documento e não podem mudar
+    if (form.status === AdoptionFormStatus.CONCLUIDA || form.status === AdoptionFormStatus.AGUARDANDO_ASSINATURA) {
+      throw new BadRequestException('Esta ficha já está com o termo de adoção enviado ou assinado e não pode mais ser editada. Volte para Aprovado para editar.');
+    }
     const before = { ...form };
     // Fotos têm endpoints próprios; ignora caso o front reenvie o objeto completo
     const { fotos, ...data } = dto as UpdateAdoptionFormDto & { fotos?: unknown };
@@ -249,7 +253,7 @@ export class AdoptionFormService implements OnModuleInit {
         const pets = manager.getRepository(Pet);
         if (CONTRACT_STATUSES.includes(from)) {
           await pets.update({ id: form.petId, organizationId: form.organizationId }, { status: PetStatus.EM_PROCESSO, adoptionDate: null, updatedBy: reviewedBy });
-        } else if (PET_RESERVED_STATUSES.includes(from) && PET_RELEASE_TARGETS.includes(to)) {
+        } else if (PET_RESERVED_STATUSES.includes(from) && PET_RELEASE_TARGETS.includes(to) && !(await this.petHeldByOtherForm(manager.getRepository(AdoptionForm), form))) {
           await pets.update({ id: form.petId, organizationId: form.organizationId }, { status: PetStatus.DISPONIVEL, updatedBy: reviewedBy });
         }
       }
@@ -288,7 +292,7 @@ export class AdoptionFormService implements OnModuleInit {
     }
     await this.formRepository.update(id, { isActive: false, updatedBy });
     // Pet reservado para esta ficha volta a ficar disponível (adoção concluída mantém o pet adotado)
-    if (form.petId && form.status !== AdoptionFormStatus.CONCLUIDA) {
+    if (form.petId && form.status !== AdoptionFormStatus.CONCLUIDA && !(await this.petHeldByOtherForm(this.formRepository, form))) {
       await this.petRepository.update({ id: form.petId, organizationId, status: PetStatus.EM_PROCESSO }, { status: PetStatus.DISPONIVEL, updatedBy });
     }
     await this.historyService.record({
@@ -338,6 +342,15 @@ export class AdoptionFormService implements OnModuleInit {
       userId: removedBy,
     });
     return { message: 'Foto removida com sucesso.' };
+  }
+
+  /** Outra ficha ativa e em andamento ainda segura o pet: reprovar/remover esta não pode liberá-lo. */
+  private async petHeldByOtherForm(forms: Repository<AdoptionForm>, form: AdoptionForm) {
+    if (!form.petId) return false;
+    const count = await forms.count({
+      where: { petId: form.petId, id: Not(form.id), isActive: true, status: Not(In([AdoptionFormStatus.REPROVADO, AdoptionFormStatus.PENDENTE])) },
+    });
+    return count > 0;
   }
 
   // PATCH com o mesmo status só edita as observações (sem efeitos de transição)

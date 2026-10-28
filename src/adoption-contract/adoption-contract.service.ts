@@ -1,4 +1,5 @@
-import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { NotificationService } from '../notification/notification.service';
+import { BadGatewayException, BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { AdoptionContract, ContractData, ContractSignatureStatus } from './adoption-contract.entity';
@@ -53,12 +54,16 @@ export class AdoptionContractService {
     private readonly storageService: StorageService,
     private readonly historyService: AdoptionHistoryService,
     private readonly autentiqueService: AutentiqueService,
+    private readonly notifications: NotificationService,
   ) {}
 
   // Cria o rascunho a partir do modelo na primeira abertura
   async findByForm(formId: string, organizationId: string, userId: string = null) {
     const form = await this.getForm(formId, organizationId);
-    this.assertCanView(form);
+    // Consulta (GET) de ficha sem termo: 409 com código estável, não erro de entrada
+    if (!CONTRACT_VIEW_STATUSES.includes(form.status)) {
+      throw new ConflictException({ statusCode: 409, code: 'FORM_NOT_APPROVED', message: 'O termo de adoção só existe para fichas aprovadas.' });
+    }
     const contract = await this.ensureContract(form, userId);
     return this.toResponse(contract, form);
   }
@@ -123,7 +128,49 @@ export class AdoptionContractService {
         if (newPet) await pets.update({ id: newPet.id, organizationId: form.organizationId }, { status: PetStatus.EM_PROCESSO, updatedBy: userId });
       }
     });
+    if (petChanged && newPet) await this.notifyPetInterest(form, newPet, userId).catch((error) => this.logger.warn(`Aviso de interesse no pet não enviado: ${error?.message}`));
     return this.findByForm(formId, organizationId, userId);
+  }
+
+  /**
+   * O mesmo pet pode estar no termo de mais de uma ficha (comportamento esperado); quando isso acontece, avisa quem cuida
+   * de cada ficha, com o link do card, que há outro adotante interessado.
+   */
+  private async notifyPetInterest(form: AdoptionForm, pet: Pet, actorId: string | null) {
+    const others = await this.formRepository
+      .createQueryBuilder('f')
+      .where('f.petId = :petId AND f.id <> :id AND f.isActive = true AND f.organizationId = :org', { petId: pet.id, id: form.id, org: form.organizationId })
+      .andWhere('f.status NOT IN (:...closed)', { closed: [AdoptionFormStatus.REPROVADO, AdoptionFormStatus.CONCLUIDA] })
+      .getMany();
+    if (!others.length) return;
+    const base = { organizationId: form.organizationId, type: 'ADOPTION_PET_INTEREST' };
+    const inputs = [] as Parameters<NotificationService['notifyMany']>[0];
+    if (actorId) {
+      inputs.push({
+        ...base,
+        userId: actorId,
+        title: `${pet.name} já está no termo de outra ficha`,
+        body: `Outro adotante (${others.map((other) => other.fullName).join(', ')}) também tem interesse em ${pet.name}.`,
+        link: `/adotantes?ficha=${others[0].id}`,
+        metadata: { petId: pet.id, formId: form.id, otherFormIds: others.map((other) => other.id) },
+      });
+    }
+    const owners = new Map<string, AdoptionForm>();
+    others.forEach((other) => {
+      const owner = other.updatedBy ?? other.reviewedBy;
+      if (owner && owner !== actorId) owners.set(owner, other);
+    });
+    owners.forEach((other, userId) =>
+      inputs.push({
+        ...base,
+        userId,
+        title: `Outro adotante tem interesse em ${pet.name}`,
+        body: `${form.fullName} também foi vinculado a ${pet.name}, que está no termo de ${other.fullName}.`,
+        link: `/adotantes?ficha=${form.id}`,
+        metadata: { petId: pet.id, formId: other.id, otherFormId: form.id },
+      }),
+    );
+    await this.notifications.notifyMany(inputs);
   }
 
   // Volta a cláusula ao texto do modelo e a reinclui no contrato

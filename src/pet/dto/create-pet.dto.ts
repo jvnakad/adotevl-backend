@@ -93,6 +93,8 @@ export class CreatePetDto {
   @IsOptional()
   status?: PetStatus;
 
+  /** Ignorado: a organização vem do token de quem cria. Mantido opcional por compatibilidade com o painel. */
+  @IsOptional()
   @IsUUID()
-  organizationId: string;
+  organizationId?: string;
 }

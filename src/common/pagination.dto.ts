@@ -10,8 +10,8 @@ export class PaginationDto {
   @ApiPropertyOptional({ default: 1, description: 'Número da página' })
   @IsOptional()
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'page deve ser um número inteiro.' })
+  @Min(1, { message: 'page deve ser no mínimo 1.' })
   @Max(MAX_PAGE, { message: `page deve ser no máximo ${MAX_PAGE}.` })
   page?: number = 1;
 
@@ -20,7 +20,7 @@ export class PaginationDto {
   @Type(() => Number)
   // Acima do máximo limita em silêncio, sem erro; 0, negativo e não inteiro continuam recusados pelos validadores
   @Transform(({ value }) => (typeof value === 'number' && value > MAX_PAGE_LIMIT ? MAX_PAGE_LIMIT : value))
-  @IsInt()
-  @Min(1)
+  @IsInt({ message: 'limit deve ser um número inteiro.' })
+  @Min(1, { message: 'limit deve ser no mínimo 1.' })
   limit?: number = 10;
 }

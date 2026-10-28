@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Param, Body, UseGuards, Request } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { OrganizationAddressService } from './organization-address.service';
 import { CreateOrganizationAddressDto } from './dto/create-organization-address.dto';
@@ -16,8 +16,8 @@ export class OrganizationAddressController {
   @Post()
   @AdminOnly()
   @ApiOperation({ summary: 'Criar endereço', description: 'Somente equipe Admin.' })
-  create(@Body() dto: CreateOrganizationAddressDto) {
-    return this.addressService.create(dto);
+  create(@Body() dto: CreateOrganizationAddressDto, @Request() req) {
+    return this.addressService.create({ ...dto, organizationId: req.user.organizationId });
   }
 
   @Get('organization/:organizationId')

@@ -30,7 +30,10 @@ export class AuthService {
     }
 
     if (!user.isConfirmed) {
-      throw new UnauthorizedException('Conta não confirmada. Verifique seu e-mail.');
+      // Com a senha certa, reenvia o e-mail de confirmação (cooldown de 60 s); com a errada, não envia nada
+      const passwordOk = await bcrypt.compare(dto.password, user.password);
+      const sent = passwordOk && (await this.userService.resendConfirmation(user.id).catch(() => false));
+      throw new UnauthorizedException(sent ? 'Conta não confirmada. Enviamos um novo e-mail de confirmação.' : 'Conta não confirmada. Verifique seu e-mail.');
     }
 
     if (!user.isApproved) {
@@ -43,8 +46,9 @@ export class AuthService {
     }
 
     // Volante não usa o painel. Só depois da senha certa, para não abrir um canal de enumeração (RN-26)
+    // Só quem acertou a senha chega aqui, então a orientação não revela nada a terceiros (diverge do texto genérico da ES/RN-26 por decisão do produto)
     if (await this.accessService.isFloatingVolunteer(user.id)) {
-      throw new UnauthorizedException('Credenciais inválidas.');
+      throw new UnauthorizedException('Voluntários volantes não usam o painel. Marque seus horários pela página de voluntariado no site da Adote.');
     }
 
     // Depois de todas as recusas: volante e senha errada nunca gravam refresh (CA-05)

@@ -1,6 +1,7 @@
 import { IsBoolean, IsEmail, IsNotEmpty, IsOptional, IsString, IsUUID, Matches, MaxLength, MinLength } from 'class-validator';
 import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsCalendarDate } from '../../common/validation/calendar-date';
 import { DATE_PATTERN, TIME_PATTERN } from '../schedule-time';
 import { IsMarketingName, trimText } from '../../marketing/dto/marketing-text';
 
@@ -27,6 +28,7 @@ export class ShiftTimesDto {
 export class PublicCreateShiftDto extends ShiftTimesDto {
   @ApiProperty({ description: 'Dia (AAAA-MM-DD)' })
   @Matches(DATE_PATTERN, DATE_MESSAGE)
+  @IsCalendarDate()
   date: string;
 
   @ApiPropertyOptional({ description: 'Faculdade do programa de horas complementares (ativa e da mesma organização). Vai junto com `course`, ou nenhum dos dois.' })
@@ -58,6 +60,7 @@ export class CreateShiftDto extends PublicCreateShiftDto {
 export class CreateScheduleLockDto {
   @ApiProperty({ description: 'Dia a trancar (AAAA-MM-DD)' })
   @Matches(DATE_PATTERN, DATE_MESSAGE)
+  @IsCalendarDate()
   date: string;
 
   @ApiProperty({ description: 'Mensagem exibida na LP e no sistema' })

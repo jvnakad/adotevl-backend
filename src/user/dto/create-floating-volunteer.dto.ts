@@ -1,3 +1,4 @@
+import { IsCalendarDate } from '../../common/validation/calendar-date';
 import { IsString, IsNotEmpty, IsOptional, IsDateString, Matches, Equals, IsBoolean } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsCpf, IsFullName, IsPersonEmail, PERSON_MESSAGES } from '../../common/validation/person';
@@ -23,6 +24,7 @@ export class CreateFloatingVolunteerDto {
 
   @ApiProperty({ description: 'Data de nascimento (YYYY-MM-DD). Mínimo 16 anos; menor de 18 exige responsável.' })
   @IsDateString({}, { message: 'Informe uma data de nascimento válida no formato YYYY-MM-DD.' })
+  @IsCalendarDate()
   birthDate: string;
 
   @ApiPropertyOptional({ description: 'Nome do responsável (obrigatório para menor de 18)' })

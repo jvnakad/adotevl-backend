@@ -12,6 +12,7 @@
     "start:dev": "nodemon",
     "seed:dev": "ts-node -r tsconfig-paths/register scripts/seed-dev.ts",
     "seed:stock": "ts-node -r tsconfig-paths/register scripts/seed-stock.ts",
+    "qa:reset": "ts-node -r tsconfig-paths/register scripts/qa-reset.ts",
     "seed:marketing": "ts-node -r tsconfig-paths/register scripts/seed-marketing.ts",
     "test": "jest",
     "test:cov": "jest --coverage",

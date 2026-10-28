@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Param, Body, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AccessGuard } from '../access/access.guard';
@@ -18,8 +18,8 @@ export class PartnerController {
   @Post()
   @RequireAccess(Screen.PARTNERS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Cadastrar parceiro', description: 'Acesso: Parceiros (Editar)' })
-  create(@Body() dto: CreatePartnerDto) {
-    return this.partnerService.create(dto);
+  create(@Body() dto: CreatePartnerDto, @Request() req) {
+    return this.partnerService.create({ ...dto, organizationId: req.user.organizationId });
   }
 
   @Get()

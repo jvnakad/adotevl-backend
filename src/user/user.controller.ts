@@ -1,12 +1,12 @@
 import { Controller, Post, Get, Patch, Delete, Param, Body, Query, Req, UseGuards, ParseUUIDPipe } from '@nestjs/common';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { PasswordResetThrottlerGuard } from '../auth/password-reset-throttler.guard';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AccessGuard } from '../access/access.guard';
 import { AdminOnly, RequireAccess } from '../access/access.decorator';
 import { AccessLevel, hasLevel, Screen } from '../access/access';
 import { AccessService } from '../access/access.service';
-import { UserService } from './user.service';
+import { UserService, hideSensitiveUserData } from './user.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { CreateFloatingVolunteerDto } from './dto/create-floating-volunteer.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -25,7 +25,7 @@ export class UserController {
   ) {}
 
   @Post()
-  @UseGuards(ThrottlerGuard)
+  @UseGuards(PasswordResetThrottlerGuard)
   @ApiOperation({
     summary: 'Cadastrar voluntário fixo',
     description: 'Rota pública. Exige o questionário (exceto 1º usuário da organização). A conta fica aguardando confirmação do e-mail e aprovação.',
@@ -38,7 +38,7 @@ export class UserController {
   }
 
   @Post('floating')
-  @UseGuards(ThrottlerGuard)
+  @UseGuards(PasswordResetThrottlerGuard)
   @ApiOperation({
     summary: 'Cadastrar voluntário volante',
     description: 'Rota pública (modal da LP e /signup). Sem senha: a API gera uma aleatória. Já entra aprovado na equipe Voluntário Volante e recebe e-mail de boas-vindas.',
@@ -53,9 +53,12 @@ export class UserController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @RequireAccess(Screen.VOLUNTEERS, AccessLevel.VIEW)
   @ApiOperation({ summary: 'Listar usuários', description: 'Acesso: Voluntários (Visualizar). Filtros: isApproved, teamId. Cada usuário vem com a equipe.' })
-  findAll(@Query() pagination: PaginationDto, @Req() req, @Query('isApproved') isApproved?: string, @Query('teamId') teamId?: string) {
+  async findAll(@Query() pagination: PaginationDto, @Req() req, @Query('isApproved') isApproved?: string, @Query('teamId') teamId?: string) {
     const approved = isApproved !== undefined ? isApproved === 'true' : undefined;
-    return this.userService.findAll(pagination, req.user.organizationId, { isApproved: approved, teamId: teamId || undefined });
+    const result = await this.userService.findAll(pagination, req.user.organizationId, { isApproved: approved, teamId: teamId || undefined });
+    const access = await this.accessService.forUser(req.user.id);
+    if (access?.isAdmin) return result;
+    return { ...result, data: result.data.map((user) => (user.id === req.user.id ? user : hideSensitiveUserData(user))) };
   }
 
   @Get(':id/application')
@@ -71,8 +74,12 @@ export class UserController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Buscar usuário por ID', description: 'Qualquer usuário logado, só da própria organização (outra organização responde 404).' })
-  findOne(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
-    return this.userService.findInOrganization(id, req.user.organizationId);
+  async findOne(@Param('id', ParseUUIDPipe) id: string, @Req() req) {
+    const user = await this.userService.findInOrganization(id, req.user.organizationId);
+    // CPF, telefone e nascimento: só o próprio usuário e a equipe Admin
+    if (user.id === req.user.id) return user;
+    const access = await this.accessService.forUser(req.user.id);
+    return access?.isAdmin ? user : hideSensitiveUserData(user);
   }
 
   @Patch(':id')

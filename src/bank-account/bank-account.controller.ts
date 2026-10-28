@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Param, Body, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AccessGuard } from '../access/access.guard';
@@ -18,15 +18,16 @@ export class BankAccountController {
   @Post()
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Cadastrar conta bancária', description: 'Acesso: Contas bancárias (Editar)' })
-  create(@Body() dto: CreateBankAccountDto) {
-    return this.bankAccountService.create(dto);
+  create(@Body() dto: CreateBankAccountDto, @Request() req) {
+    return this.bankAccountService.create({ ...dto, organizationId: req.user.organizationId });
   }
 
   @Get()
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.VIEW)
   @ApiOperation({ summary: 'Listar contas bancárias', description: 'Acesso: Contas bancárias (Visualizar)' })
-  findAll(@Query() pagination: PaginationDto, @Query('organizationId') organizationId?: string) {
-    return this.bankAccountService.findAll(pagination, organizationId);
+  findAll(@Query() pagination: PaginationDto, @Request() req) {
+    // A organização vem do token; o parâmetro da URL é ignorado
+    return this.bankAccountService.findAll(pagination, req.user.organizationId);
   }
 
   @Get(':id')

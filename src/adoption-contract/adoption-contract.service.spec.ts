@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { AdoptionContractService } from './adoption-contract.service';
 import { AdoptionFormStatus } from '../adoption-form/adoption-form.entity';
 import { PetStatus } from '../pet/pet.entity';
@@ -122,7 +122,7 @@ describe('AdoptionContractService', () => {
       getAccount: jest.fn(async () => ({ name: 'Júlia Dezordi Ruas', email: 'ong@teste.com' })),
       signDocument: jest.fn(async () => undefined),
     };
-    service = new AdoptionContractService(contractRepo as any, formRepo as any, petRepo as any, storage as any, history as any, autentique as any);
+    service = new AdoptionContractService(contractRepo as any, formRepo as any, petRepo as any, storage as any, history as any, autentique as any, { notifyMany: jest.fn(async () => undefined) } as any);
 
     formRepo.findOne.mockResolvedValue(baseForm());
     contractRepo.findOne.mockResolvedValue(storedContract());
@@ -135,7 +135,7 @@ describe('AdoptionContractService', () => {
     it.each([AdoptionFormStatus.PENDENTE, AdoptionFormStatus.REPROVADO])('bloqueia ficha %s', async (status) => {
       formRepo.findOne.mockResolvedValue(baseForm(status));
 
-      await expect(service.findByForm('form-1', 'org-1')).rejects.toThrow('O termo de adoção só pode ser gerado para fichas aprovadas.');
+      await expect(service.findByForm('form-1', 'org-1')).rejects.toThrow(ConflictException);
     });
 
     it('lança 404 para ficha de outra organização', async () => {

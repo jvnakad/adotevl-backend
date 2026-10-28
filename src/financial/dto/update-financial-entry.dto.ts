@@ -1,4 +1,5 @@
-import { IsString, IsNumber, IsOptional, IsUUID, IsDateString, IsEnum } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsUUID, IsDateString, IsEnum, IsPositive, Max } from 'class-validator';
+import { IsCalendarDate, MONEY_MAX } from '../../common/validation/calendar-date';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentMethod } from '../financial-entry.entity';
 
@@ -20,7 +21,9 @@ export class UpdateFinancialEntryDto {
 
   @ApiPropertyOptional({ description: 'Valor' })
   @IsOptional()
-  @IsNumber()
+  @IsNumber({ maxDecimalPlaces: 2 }, { message: 'O valor deve ser um número com no máximo 2 casas decimais.' })
+  @IsPositive({ message: 'O valor deve ser maior que zero.' })
+  @Max(MONEY_MAX, { message: 'O valor máximo é 99.999.999,99.' })
   amount?: number;
 
   @ApiPropertyOptional({ enum: PaymentMethod, description: 'Forma de recebimento: DEBITO, CREDITO, PIX, OUTROS' })
@@ -31,5 +34,6 @@ export class UpdateFinancialEntryDto {
   @ApiPropertyOptional({ description: 'Data da transação (formato: YYYY-MM-DD)' })
   @IsOptional()
   @IsDateString({}, { message: 'Informe uma data válida no formato YYYY-MM-DD.' })
+  @IsCalendarDate()
   transactionDate?: string;
 }

@@ -27,7 +27,7 @@ export class PetController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @ApiOperation({ summary: 'Cadastrar pet', description: 'Acesso: Pets (Editar)' })
   create(@Body() dto: CreatePetDto, @Request() req) {
-    return this.petService.create(dto, req.user.id);
+    return this.petService.create({ ...dto, organizationId: req.user.organizationId }, req.user.id);
   }
 
   @Get()

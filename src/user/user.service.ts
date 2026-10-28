@@ -176,8 +176,9 @@ export class UserService {
     user.isConfirmed = true;
     user.confirmationCode = null;
     // O save devolve as colunas select:false preenchidas (null): nenhuma delas volta na resposta (RN-35)
-    const { password: _hash, confirmationCode: _code, passwordChangedAt: _changed, passwordResetLockedUntil: _locked, ...confirmed } = await this.userRepository.save(user);
-    return confirmed;
+    // Rota pública: devolve só o necessário (sem CPF, telefone, nascimento nem dados da organização)
+    const saved = await this.userRepository.save(user);
+    return { message: 'Conta confirmada com sucesso.', isApproved: saved.isApproved };
   }
 
   /** Só usuários da organização de quem chama (RN-36). */
@@ -219,6 +220,24 @@ export class UserService {
   }
 
   /** Só o login lê o hash da senha (a coluna é select:false). */
+  private readonly confirmationResentAt = new Map<string, number>();
+
+  /**
+   * Reenvia o e-mail de confirmação (login de conta não confirmada). Cooldown de 60 s por usuário, em memória:
+   * é só atrito contra spam; devolve false quando ainda está no cooldown.
+   */
+  async resendConfirmation(userId: string): Promise<boolean> {
+    const last = this.confirmationResentAt.get(userId) ?? 0;
+    if (Date.now() - last < 60_000) return false;
+    const user = await this.userRepository.createQueryBuilder('user').addSelect('user.confirmationCode').where('user.id = :id', { id: userId }).getOne();
+    if (!user || user.isConfirmed) return false;
+    const confirmationCode = user.confirmationCode ?? randomUUID();
+    if (!user.confirmationCode) await this.userRepository.update(userId, { confirmationCode });
+    this.confirmationResentAt.set(userId, Date.now());
+    await this.mailService.sendConfirmationEmail(user.email, user.fullName, confirmationCode);
+    return true;
+  }
+
   async findByEmail(email: string) {
     return this.userRepository.createQueryBuilder('user').leftJoinAndSelect('user.profile', 'profile').addSelect('user.password').where('user.email = :email', { email }).getOne();
   }
@@ -255,6 +274,9 @@ export class UserService {
         emailChanged = true;
       }
     }
+
+    // Desativar pela edição passa pela mesma proteção do reject: o último Admin não pode ser desativado
+    if (data.isActive === false && current.isActive !== false) await this.membership.ensureNotLastAdmin(id);
 
     // Trocar o e-mail revoga as sessões: iat anterior é recusado pelo guard e pelo websocket, como na troca de senha
     const revoke = emailChanged ? { passwordChangedAt: new Date() } : {};
@@ -375,4 +397,14 @@ export class UserService {
     await this.mailService.sendPasswordResetEmail(user.email, user.fullName, newPassword);
     return { message: 'Senha redefinida e enviada por e-mail.' };
   }
+}
+
+/** Dados sensíveis (LGPD): só a equipe Admin vê os de outras pessoas. */
+const SENSITIVE_USER_FIELDS = ['cpf', 'phone', 'birthDate', 'guardianName', 'guardianPhone', 'guardianConsentAt'] as const;
+
+export function hideSensitiveUserData<T extends Record<string, any>>(user: T): T {
+  if (!user) return user;
+  const copy: Record<string, any> = { ...user };
+  for (const field of SENSITIVE_USER_FIELDS) delete copy[field];
+  return copy as T;
 }

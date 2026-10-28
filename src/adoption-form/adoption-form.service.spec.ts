@@ -638,6 +638,13 @@ describe('AdoptionFormService', () => {
     expect(recorded()).toEqual(expect.objectContaining({ type: AdoptionHistoryType.FICHA_REMOVIDA, userId: 'user-1' }));
   });
 
+  it.each(['CONCLUIDA', 'AGUARDANDO_ASSINATURA'])('não edita ficha %s (dados já estão no termo)', async (status) => {
+    formRepo.findOne.mockResolvedValue({ id: 'form-1', status, fotos: [] });
+
+    await expect(service.update('form-1', { occupation: 'Outra' } as any, 'org-1', 'user-1')).rejects.toThrow('não pode mais ser editada');
+    expect(formRepo.save).not.toHaveBeenCalled();
+  });
+
   it('remove libera o pet reservado para a ficha', async () => {
     formRepo.findOne.mockResolvedValue({ id: 'form-1', status: 'APROVADO', petId: 'pet-1', fotos: [] });
 

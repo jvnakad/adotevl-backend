@@ -323,7 +323,7 @@ describe('UserService', () => {
       const result = await service.confirmAccount('code');
 
       expect(userRepo.save).toHaveBeenCalledWith(expect.objectContaining({ isConfirmed: true, confirmationCode: null }));
-      expect(result).toEqual(expect.objectContaining({ id: 'u1', isConfirmed: true }));
+      expect(result).toEqual({ message: 'Conta confirmada com sucesso.', isApproved: undefined });
     });
 
     it('não devolve hash, código de confirmação nem carimbos na resposta (CA-64)', async () => {

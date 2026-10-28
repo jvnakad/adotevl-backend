@@ -359,20 +359,31 @@ describe('Sessão do painel: refresh token (e2e)', () => {
     });
   });
 
+  describe('bloqueio por conta (VS-06)', () => {
+    it('5 falhas na mesma conta bloqueiam o login mesmo trocando o IP', async () => {
+      const email = 'bloqueio-conta@sessao.teste.com';
+      for (let i = 0; i < 5; i++) expect((await t.login(email, 'x', `10.78.0.${i + 1}`)).status).toBe(401);
+
+      const blocked = await t.login(email, 'x', '10.78.0.99');
+      expect(blocked.status).toBe(429);
+      expect(blocked.body.message).toContain('Muitas tentativas de login para esta conta');
+    });
+  });
+
   describe('throttle por IP (CA-16)', () => {
     it('o 11º login do mesmo IP no minuto dá 429 com Retry-After', async () => {
       const ip = '10.77.1.1';
       const statuses: number[] = [];
-      for (let i = 0; i < 10; i++) statuses.push((await t.login('ninguem@sessao.teste.com', 'x', ip)).status);
-      const blocked = await t.login('ninguem@sessao.teste.com', 'x', ip);
+      for (let i = 0; i < 10; i++) statuses.push((await t.login(`ninguem${i}@sessao.teste.com`, 'x', ip)).status);
+      const blocked = await t.login('ninguem10@sessao.teste.com', 'x', ip);
 
       expect(statuses.every((s) => s === 401)).toBe(true);
       expect(blocked.status).toBe(429);
       expect(blocked.body).toEqual({ statusCode: 429, message: 'Muitas tentativas. Aguarde um minuto e tente de novo.' });
       expect(Number(blocked.headers['retry-after'])).toBeGreaterThan(0);
       expect(blocked.headers['x-ratelimit-limit']).toBeUndefined();
-      // Outro IP não é afetado
-      expect((await t.login('ninguem@sessao.teste.com', 'x', '10.77.1.2')).status).toBe(401);
+      // Outro IP não é afetado (e-mails distintos: o bloqueio por conta é coberto em outro teste)
+      expect((await t.login('ninguem11@sessao.teste.com', 'x', '10.77.1.2')).status).toBe(401);
     });
 
     it('a 31ª chamada a refresh e a 31ª a logout do mesmo IP dão 429', async () => {

@@ -89,3 +89,34 @@ describe('UpdatePetDto', () => {
     expect(errors.animal).toEqual(['Informe a espécie junto com a raça.']);
   });
 });
+
+describe('limites do cadastro (VS-04)', () => {
+  it.each([CreatePetDto, UpdatePetDto])('%p valida nome de 2 a 80 caracteres', async (cls) => {
+    expect((await errorsOf(cls, pet({ name: 'B' }))).name).toEqual(['O nome deve ter no mínimo 2 caracteres.']);
+    expect((await errorsOf(cls, pet({ name: 'x'.repeat(568) }))).name).toEqual(['O nome deve ter no máximo 80 caracteres.']);
+    expect(await errorsOf(cls, pet({ name: 'Bo' }))).toEqual({});
+    expect(await errorsOf(cls, pet({ name: 'x'.repeat(80) }))).toEqual({});
+  });
+
+  it('descrição acima de 2000 caracteres é recusada', async () => {
+    expect((await errorsOf(CreatePetDto, pet({ about: 'x'.repeat(5000) }))).about).toEqual(['A descrição deve ter no máximo 2000 caracteres.']);
+    expect(await errorsOf(CreatePetDto, pet({ about: 'x'.repeat(2000) }))).toEqual({});
+  });
+
+  it.each([-5, 0])('peso %p é recusado', async (weight) => {
+    expect((await errorsOf(CreatePetDto, pet({ weight }))).weight).toEqual(['O peso deve ser maior que zero.']);
+  });
+
+  it('peso acima de 200 kg ou com mais de 2 casas é recusado', async () => {
+    expect((await errorsOf(CreatePetDto, pet({ weight: 201 }))).weight).toEqual(['O peso deve ser de no máximo 200 kg.']);
+    expect((await errorsOf(CreatePetDto, pet({ weight: 5.123 }))).weight).toEqual(['O peso deve ser um número com no máximo 2 casas decimais.']);
+    expect(await errorsOf(CreatePetDto, pet({ weight: 12.5 }))).toEqual({});
+  });
+
+  it('data de resgate futura ou inexistente é recusada; hoje e passado passam', async () => {
+    expect((await errorsOf(CreatePetDto, pet({ rescueDate: '2099-01-01' }))).rescueDate).toEqual(['Data de resgate não pode ser no futuro.']);
+    expect((await errorsOf(CreatePetDto, pet({ rescueDate: '2026-02-30' }))).rescueDate).toEqual(['Data de resgate inexistente no calendário.']);
+    expect(await errorsOf(CreatePetDto, pet({ rescueDate: '2026-10-14' }))).toEqual({});
+    expect(await errorsOf(CreatePetDto, pet({ rescueDate: '2025-01-31' }))).toEqual({});
+  });
+});

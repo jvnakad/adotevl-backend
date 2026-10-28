@@ -8,7 +8,7 @@
  * Chaveia pelo e-mail informado, exista a conta ou não, para não revelar quais e-mails existem.
  * Efeito colateral aceito: quem erra a senha de propósito pode travar a conta de outra pessoa por LOCK_MS.
  */
-export const LOGIN_MAX_FAILURES = 5;
+export const LOGIN_MAX_FAILURES = 8;
 export const LOGIN_FAILURE_WINDOW_MS = 15 * 60_000;
 export const LOGIN_LOCK_MS = 15 * 60_000;
 const MAX_TRACKED = 10_000;

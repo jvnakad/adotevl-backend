@@ -35,10 +35,10 @@ describe('AuthService', () => {
   describe('login', () => {
     const credentials = { email: 'ana@teste.com', password: 'senha123' };
 
-    it('5 falhas na mesma conta bloqueiam com 429 PT-BR, mesmo com a senha certa', async () => {
+    it('8 falhas na mesma conta bloqueiam com 429 PT-BR, mesmo com a senha certa', async () => {
       userService.findByEmail.mockResolvedValue(activeUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(false);
-      for (let i = 0; i < 5; i++) await expect(service.login(credentials)).rejects.toThrow(UnauthorizedException);
+      for (let i = 0; i < 8; i++) await expect(service.login(credentials)).rejects.toThrow(UnauthorizedException);
 
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       await expect(service.login(credentials)).rejects.toMatchObject({ status: 429, response: { message: expect.stringContaining('Muitas tentativas') } });
@@ -47,7 +47,7 @@ describe('AuthService', () => {
 
     it('e-mail inexistente também conta falha (sem revelar se a conta existe)', async () => {
       userService.findByEmail.mockResolvedValue(null);
-      for (let i = 0; i < 5; i++) await expect(service.login(credentials)).rejects.toThrow(UnauthorizedException);
+      for (let i = 0; i < 8; i++) await expect(service.login(credentials)).rejects.toThrow(UnauthorizedException);
 
       await expect(service.login(credentials)).rejects.toMatchObject({ status: 429 });
     });

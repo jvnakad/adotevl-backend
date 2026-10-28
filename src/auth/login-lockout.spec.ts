@@ -3,7 +3,7 @@ import { LoginLockout, LOGIN_LOCK_MS, LOGIN_MAX_FAILURES } from './login-lockout
 describe('LoginLockout', () => {
   const t0 = 1_000_000;
 
-  it('bloqueia a conta após 5 falhas, mesmo variando maiúsculas no e-mail', () => {
+  it('bloqueia a conta após 8 falhas, mesmo variando maiúsculas no e-mail', () => {
     const lock = new LoginLockout();
     for (let i = 0; i < LOGIN_MAX_FAILURES - 1; i++) lock.recordFailure(i % 2 ? 'ANA@x.com' : 'ana@x.com', t0);
     expect(lock.retryAfterSeconds('ana@x.com', t0)).toBe(0);

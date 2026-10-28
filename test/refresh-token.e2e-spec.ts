@@ -360,9 +360,9 @@ describe('Sessão do painel: refresh token (e2e)', () => {
   });
 
   describe('bloqueio por conta (VS-06)', () => {
-    it('5 falhas na mesma conta bloqueiam o login mesmo trocando o IP', async () => {
+    it('8 falhas na mesma conta bloqueiam o login mesmo trocando o IP', async () => {
       const email = 'bloqueio-conta@sessao.teste.com';
-      for (let i = 0; i < 5; i++) expect((await t.login(email, 'x', `10.78.0.${i + 1}`)).status).toBe(401);
+      for (let i = 0; i < 8; i++) expect((await t.login(email, 'x', `10.78.0.${i + 1}`)).status).toBe(401);
 
       const blocked = await t.login(email, 'x', '10.78.0.99');
       expect(blocked.status).toBe(429);

@@ -49,6 +49,9 @@ import { VolunteerShift } from '../src/volunteer-schedule/volunteer-shift.entity
 import { ScheduleLock } from '../src/volunteer-schedule/schedule-lock.entity';
 import { ScheduleAccessCode } from '../src/volunteer-schedule/schedule-access-code.entity';
 import { PasswordResetCode } from '../src/auth/password-reset-code.entity';
+import { RefreshToken } from '../src/auth/refresh-token.entity';
+import { AppMaintenance } from '../src/common/app-maintenance.entity';
+import { bootDataSource, retryUnlessHardeningFailed } from '../src/database/boot-hardening';
 import { EmailChangeRequest } from '../src/user/email-change-request.entity';
 import { EmailChangeEvent } from '../src/user/email-change-event.entity';
 import { VolunteerScheduleModule } from '../src/volunteer-schedule/volunteer-schedule.module';
@@ -214,17 +217,22 @@ class MockAutentiqueModule {}
   imports: [
     // Nunca lê .env: ele pode apontar para o banco de produção. Tudo vem do processo (ver assertLocalTestDatabase)
     ConfigModule.forRoot({ isGlobal: true, ignoreEnvFile: true }),
-    TypeOrmModule.forRoot({
+    TypeOrmModule.forRootAsync({
+      useFactory: () => ({
       type: 'postgres',
       url: process.env.DATABASE_URL,
       entities: [
-        Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
+        AppMaintenance, Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer,
         Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto,
-        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, PasswordResetCode, EmailChangeRequest, EmailChangeEvent, ScheduleInstitution, ProductType, Product, StockHistoryEvent,
+        AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, PasswordResetCode, RefreshToken, EmailChangeRequest, EmailChangeEvent, ScheduleInstitution, ProductType, Product, StockHistoryEvent,
         MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification,
       ],
-      synchronize: true,
+      synchronize: false,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
+      // Exposição de refresh_tokens não tenta de novo
+      toRetry: retryUnlessHardeningFailed,
+      }),
+      dataSourceFactory: async (options) => bootDataSource(options),
     }),
     OrganizationModule,
     ProfileModule,

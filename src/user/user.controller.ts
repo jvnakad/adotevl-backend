@@ -14,6 +14,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { UpdateTutorialDto } from './dto/update-tutorial.dto';
 import { ApproveUserDto } from './dto/approve-user.dto';
 import { PaginationDto } from '../common/pagination.dto';
+import { userAgentOf } from '../auth/user-agent';
 
 @ApiTags('Usuários')
 @Controller('users')
@@ -137,10 +138,10 @@ export class UserController {
   @UseGuards(JwtAuthGuard)
   @ApiOperation({
     summary: 'Alterar própria senha',
-    description: 'Qualquer usuário logado. Derruba as outras sessões e devolve `access_token` novo para a sessão atual.',
+    description: 'Qualquer usuário logado. Derruba as outras sessões e devolve o par novo (`access_token` e `refresh_token`, família nova) para a sessão atual.',
   })
   changePassword(@Body() dto: ChangePasswordDto, @Req() req) {
-    return this.userService.changePassword(req.user.id, dto);
+    return this.userService.changePassword(req.user.id, dto, userAgentOf(req));
   }
 
   @Patch('me/tutorial')

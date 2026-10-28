@@ -26,6 +26,8 @@ import { TeamService } from '../team/team.service';
 import { TeamSystemKey } from '../team/team.entity';
 import { AccessService } from '../access/access.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { RefreshTokenService } from '../auth/refresh-token.service';
+import { APPROVAL_LINK_TTL, panelTokenPayload, panelTokenSubjectOf } from '../auth/panel-token';
 import { guardianFields } from './volunteer-age';
 import { normalizeCpf, normalizeEmail, normalizePersonName } from '../common/validation/person';
 import { VolunteerApplication } from '../volunteer-application/volunteer-application.entity';
@@ -62,6 +64,7 @@ export class UserService {
     private readonly applicationRepository: Repository<VolunteerApplication>,
     private readonly access: AccessService,
     private readonly realtime: RealtimeService,
+    private readonly refreshTokens: RefreshTokenService,
   ) {}
 
   async create(dto: CreateUserDto, createdBy: string = null) {
@@ -291,8 +294,11 @@ export class UserService {
     await this.membership.assign(user, teamId, updatedBy);
     await this.userRepository.update(id, { isApproved: true, updatedBy });
     const updated = await this.userRepository.findOne({ where: { id } });
-    const payload = { sub: updated.id, email: updated.email, profileId: updated.profileId, profileName: updated.profile?.name, organizationId: updated.organizationId };
-    const token = this.jwtService.sign(payload);
+    // Link do e-mail: 8 h explícito, sem fid e sem refresh (o padrão do módulo é o access curto, RN-20, SEC-17)
+    const token = this.jwtService.sign(
+      panelTokenPayload(panelTokenSubjectOf(updated)),
+      { expiresIn: APPROVAL_LINK_TTL },
+    );
     await this.mailService.sendApprovalEmail(updated.email, updated.fullName, token);
     return updated;
   }
@@ -313,8 +319,8 @@ export class UserService {
     return user;
   }
 
-  /** Troca pelo perfil: derruba as outras sessões (password_changed_at) e devolve um token novo para a atual (RN-29). */
-  async changePassword(id: string, dto: ChangePasswordDto) {
+  /** Troca pelo perfil: derruba as outras sessões (password_changed_at) e devolve um par novo (família nova) para a atual (RN-06, RN-29). */
+  async changePassword(id: string, dto: ChangePasswordDto, userAgent?: string) {
     const user = await this.userRepository
       .createQueryBuilder('user')
       .leftJoinAndSelect('user.profile', 'profile')
@@ -328,10 +334,10 @@ export class UserService {
     await this.userRepository.update(id, { password: hashed, passwordChangedAt: new Date() });
     await closePendingEmailChange(this.userRepository.manager, id, 'troca_de_senha');
     await this.realtime.disconnectUser(id);
-    // Assinado depois da gravação: o iat fica no mesmo segundo da troca ou depois, e o guard só recusa iat menor (RN-30)
-    const access_token = this.jwtService.sign({ sub: user.id, email: user.email, profileId: user.profileId, profileName: user.profile?.name, organizationId: user.organizationId });
+    // Emitido depois da gravação: a família nasce no mesmo ms da troca ou depois, e o iat do access fica no mesmo segundo ou depois (RN-06, RN-30)
+    const { access_token, refresh_token } = await this.refreshTokens.issue(panelTokenSubjectOf(user), userAgent);
     await this.mailService.sendPasswordChangedEmail(user.email, user.fullName);
-    return { message: 'Senha alterada com sucesso.', access_token };
+    return { message: 'Senha alterada com sucesso.', access_token, refresh_token };
   }
 
   async updateTutorial(id: string, dto: UpdateTutorialDto) {

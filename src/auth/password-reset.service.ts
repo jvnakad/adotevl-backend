@@ -10,6 +10,7 @@ import { MailService } from '../mail/mail.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { closePendingEmailChange } from '../user/email-change-pending';
 import { jwtSecret } from './jwt-secret';
+import { affectedOf, rowsOf } from '../common/query-result';
 import {
   PASSWORD_RESET_CODE_TTL_MINUTES,
   PASSWORD_RESET_COOLDOWN_SECONDS,
@@ -36,10 +37,6 @@ const DUMMY_HASH = '$2b$10$UgLJdAttDLXnaS282KGFSudEwx9Bot5fe/elrQKLOyyynRG7lp6lG
 
 /** Segredo próprio do token: ele nunca vale como sessão do painel nem da agenda (RN-15). */
 const resetSecret = () => `${jwtSecret()}:password-reset`;
-
-/** O driver pg devolve `[linhas, afetadas]` para UPDATE/DELETE e só as linhas para SELECT/INSERT. */
-const rowsOf = <T>(result: unknown): T[] => (Array.isArray((result as unknown[])[0]) ? ((result as unknown[])[0] as T[]) : (result as T[]));
-const affectedOf = (result: unknown): number => ((result as unknown[])[1] as number) ?? 0;
 
 type BlockReason = 'cooldown' | 'hora' | 'dia' | 'bloqueio';
 

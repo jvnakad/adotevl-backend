@@ -21,6 +21,7 @@ import {
   EMAIL_CHANGE_RETENTION_DAYS,
 } from './email-change-request.entity';
 import { closePendingEmailChange, closeRecoveryCodes } from './email-change-pending';
+import { affectedOf, rowsOf } from '../common/query-result';
 
 export const EMAIL_CHANGE_MESSAGES = {
   sameEmail: 'Este já é o seu e-mail atual.',
@@ -40,10 +41,6 @@ export const EMAIL_CHANGE_MESSAGES = {
 } as const;
 
 const attemptsLeftMessage = (left: number) => `Código incorreto. Você ainda tem ${left} ${left === 1 ? 'tentativa' : 'tentativas'}.`;
-
-/** O driver pg devolve `[linhas, afetadas]` para UPDATE/DELETE e só as linhas para SELECT/INSERT. */
-const rowsOf = <T>(result: unknown): T[] => (Array.isArray((result as unknown[])[0]) ? ((result as unknown[])[0] as T[]) : (result as T[]));
-const affectedOf = (result: unknown): number => ((result as unknown[])[1] as number) ?? 0;
 
 const fail = (status: HttpStatus, code: string, message: string, extra: Record<string, unknown> = {}) => new HttpException({ statusCode: status, code, message, ...extra }, status);
 

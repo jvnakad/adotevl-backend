@@ -3,21 +3,22 @@ import {
   UnauthorizedException,
   NotFoundException,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { UserService } from '../user/user.service';
 import { LoginDto } from './dto/login.dto';
 import { AccessService } from '../access/access.service';
+import { RefreshTokenService } from './refresh-token.service';
+import { panelTokenSubjectOf } from './panel-token';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly userService: UserService,
-    private readonly jwtService: JwtService,
     private readonly accessService: AccessService,
+    private readonly refreshTokens: RefreshTokenService,
   ) {}
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, userAgent?: string) {
     const user = await this.userService.findByEmail(dto.email);
 
     if (!user) {
@@ -46,11 +47,12 @@ export class AuthService {
       throw new UnauthorizedException('Credenciais inválidas.');
     }
 
-    const payload = { sub: user.id, email: user.email, profileId: user.profileId, profileName: user.profile?.name, organizationId: user.organizationId };
-    const token = this.jwtService.sign(payload);
+    // Depois de todas as recusas: volante e senha errada nunca gravam refresh (CA-05)
+    const { access_token, refresh_token } = await this.refreshTokens.issue(panelTokenSubjectOf(user), userAgent);
 
     return {
-      access_token: token,
+      access_token,
+      refresh_token,
       user: {
         id: user.id,
         fullName: user.fullName,

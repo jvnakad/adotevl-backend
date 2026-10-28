@@ -58,11 +58,6 @@ export class CreateUserDto {
   @IsString()
   website?: string;
 
-  // Legado: ignorado (o acesso vem da equipe definida na aprovação)
-  @IsString()
-  @IsOptional()
-  profileId?: string;
-
   @IsString()
   @IsNotEmpty({ message: 'A organização é obrigatória.' })
   organizationId: string;

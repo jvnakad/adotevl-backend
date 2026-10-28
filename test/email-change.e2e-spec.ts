@@ -52,7 +52,8 @@ describe('Troca do próprio e-mail (e2e)', () => {
   const resend = (token: string) => call('post', '/resend', token);
   const confirm = (token: string, code: string, ip?: string) => call('post', '/confirm', token, { code }, ip);
   const cancel = (token: string) => call('delete', '', token);
-  const login = (email: string, password = 'senha123') => request(server()).post('/auth/login').send({ email, password });
+  // IP novo a cada login: o login tem limite de 10 por minuto por IP
+  const login = (email: string, password = 'senha123') => request(server()).post('/auth/login').set('X-Forwarded-For', nextIp()).send({ email, password });
   const tokenOf = async (email: string, password = 'senha123') => (await login(email, password)).body.access_token as string;
   const me = (token: string) => request(server()).get('/auth/me').set(bearer(token));
   const wrongCodeFor = (code: string) => (code === '000000' ? '000001' : '000000');

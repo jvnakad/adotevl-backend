@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { TeamService } from './team.service';
 import { TeamMembershipService } from './team-membership.service';
+import { affectedOf } from '../common/query-result';
 import { AccessLevel, Screen, ScreenPermissions } from '../access/access';
 
 // Acesso que cada perfil legado tinha antes das equipes (ninguém perde acesso na migração)
@@ -40,10 +41,14 @@ interface LegacyUser {
 }
 
 /**
- * Perfis (ADMIN/FINANCIAL/VOLUNTEER) → equipes. Idempotente, roda a cada boot:
- * - usuário aprovado sem equipe entra na equipe do seu perfil (Admin, Financeiro ou Voluntário Fixo), com o acesso antigo;
- * - equipe Admin sem membros recebe todos os usuários de perfil ADMIN (ninguém fica trancado fora);
- * - por último garante as 4 equipes padrão: as que ainda faltam nascem sem acesso.
+ * Perfis (ADMIN/FINANCIAL/VOLUNTEER) → equipes, só na migração inicial de cada organização (RN-33, SEC-16, P-02).
+ * A decisão vem da marca `organizations.access_migrated_at` e da contagem de equipes, lidas ANTES de `ensureAdminTeam`:
+ * - marca preenchida: nada é atribuído por perfil;
+ * - marca nula e a organização já tem alguma equipe (ativa ou inativa): ela já passou pela migração em boots anteriores ou nasceu pelo
+ *   cadastro do primeiro usuário. Grava a marca sem atribuir ninguém (nem o laço por perfil nem o bloco "Admin vazia"), D-27;
+ * - marca nula e nenhuma equipe: migração inicial de verdade. Roda o laço e o bloco, loga cada atribuição e grava a marca no fim;
+ * - marca ilegível (erro): não atribui e loga warn.
+ * Em todos os casos continuam rodando: equipe Admin, acesso antigo das equipes anteriores às permissões e as 4 equipes padrão.
  */
 @Injectable()
 export class AccessMigrationService implements OnModuleInit {
@@ -60,7 +65,33 @@ export class AccessMigrationService implements OnModuleInit {
     for (const { id } of organizations) await this.migrateOrganization(id);
   }
 
+  /** 'initial' = atribui por perfil e marca no fim; 'mark' = só marca; 'done' = nada por perfil; 'unknown' = não conseguiu ler a marca. */
+  private async readMode(organizationId: string): Promise<'initial' | 'mark' | 'done' | 'unknown'> {
+    try {
+      const [org] = await this.dataSource.query('SELECT access_migrated_at AS "migratedAt" FROM organizations WHERE id = $1', [organizationId]);
+      if (!org) return 'unknown';
+      if (org.migratedAt) return 'done';
+      const [{ hasTeams }] = await this.dataSource.query('SELECT EXISTS (SELECT 1 FROM teams WHERE organization_id = $1) AS "hasTeams"', [organizationId]);
+      return hasTeams ? 'mark' : 'initial';
+    } catch (error) {
+      this.logger.warn(JSON.stringify({ event: 'access_migration.mark_unreadable', organizationId, reason: (error as Error).message }));
+      return 'unknown';
+    }
+  }
+
+  private async markMigrated(organizationId: string) {
+    const result = await this.dataSource.query('UPDATE organizations SET access_migrated_at = now() WHERE id = $1 AND access_migrated_at IS NULL', [organizationId]);
+    return affectedOf(result) > 0;
+  }
+
   private async migrateOrganization(organizationId: string) {
+    // Antes do ensureAdminTeam: ele cria a equipe Admin e mudaria a contagem de equipes
+    const mode = await this.readMode(organizationId);
+    if (mode === 'mark' && (await this.markMigrated(organizationId))) {
+      this.logger.log(JSON.stringify({ event: 'access_migration.marked_without_assignment', organizationId }));
+    }
+    const assign = mode === 'initial';
+
     const adminTeam = await this.teams.ensureAdminTeam(organizationId);
     const users: LegacyUser[] = await this.dataSource.query(
       `SELECT u.id, u.full_name AS "fullName", u.cpf, u.birth_date AS "birthDate", u.organization_id AS "organizationId",
@@ -73,25 +104,35 @@ export class AccessMigrationService implements OnModuleInit {
     );
 
     let moved = 0;
-    for (const user of users.filter((u) => !u.teamId)) {
-      const teamId = user.profileName === 'ADMIN' ? adminTeam.id : (await this.legacyTeam(organizationId, user.profileName))?.id;
-      if (!teamId) continue;
-      await this.membership.assign(user, teamId, null);
-      user.teamId = teamId;
-      moved++;
+    if (assign) {
+      for (const user of users.filter((u) => !u.teamId)) {
+        const teamId = user.profileName === 'ADMIN' ? adminTeam.id : (await this.legacyTeam(organizationId, user.profileName))?.id;
+        if (!teamId) continue;
+        await this.membership.assign(user, teamId, null);
+        user.teamId = teamId;
+        moved++;
+        this.logAssignment(user.id, organizationId, teamId);
+      }
     }
 
     await this.grantLegacyAccessToOldTeams(organizationId, users);
 
-    if (!users.some((u) => u.teamId === adminTeam.id)) {
+    if (assign && !users.some((u) => u.teamId === adminTeam.id)) {
       for (const user of users.filter((u) => u.profileName === 'ADMIN')) {
         await this.membership.assign(user, adminTeam.id, null);
         moved++;
+        this.logAssignment(user.id, organizationId, adminTeam.id);
       }
     }
     // Depois da migração: as padrão que faltarem nascem sem acesso (as do perfil antigo já levaram o acesso)
     await this.teams.ensureDefaultTeams(organizationId);
+    if (assign) await this.markMigrated(organizationId);
     if (moved) this.logger.log(`Organização ${organizationId}: ${moved} usuário(s) colocado(s) em equipes pelo perfil antigo.`);
+  }
+
+  /** Só ids: toda atribuição por perfil deixa rastro (SEC-16, M4). */
+  private logAssignment(userId: string, organizationId: string, teamId: string) {
+    this.logger.warn(JSON.stringify({ event: 'access_migration.assigned', userId, organizationId, teamId }));
   }
 
   /** Equipes anteriores às permissões recebem o acesso antigo dos perfis dos membros (somado). */

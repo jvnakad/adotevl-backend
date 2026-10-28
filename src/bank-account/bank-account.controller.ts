@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Param, Body, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AccessGuard } from '../access/access.guard';
@@ -18,35 +18,36 @@ export class BankAccountController {
   @Post()
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Cadastrar conta bancária', description: 'Acesso: Contas bancárias (Editar)' })
-  create(@Body() dto: CreateBankAccountDto) {
-    return this.bankAccountService.create(dto);
+  create(@Body() dto: CreateBankAccountDto, @Request() req) {
+    return this.bankAccountService.create(dto, req.user.organizationId);
   }
 
   @Get()
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.VIEW)
   @ApiOperation({ summary: 'Listar contas bancárias', description: 'Acesso: Contas bancárias (Visualizar)' })
-  findAll(@Query() pagination: PaginationDto, @Query('organizationId') organizationId?: string) {
-    return this.bankAccountService.findAll(pagination, organizationId);
+  findAll(@Query() pagination: PaginationDto, @Request() req) {
+    // A organização vem do token; o parâmetro da URL é ignorado
+    return this.bankAccountService.findAll(pagination, req.user.organizationId);
   }
 
   @Get(':id')
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.VIEW)
   @ApiOperation({ summary: 'Buscar conta bancária por ID', description: 'Acesso: Contas bancárias (Visualizar)' })
-  findOne(@Param('id') id: string) {
-    return this.bankAccountService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.bankAccountService.findOne(id, req.user.organizationId);
   }
 
   @Put(':id')
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Atualizar conta bancária', description: 'Acesso: Contas bancárias (Editar)' })
-  update(@Param('id') id: string, @Body() dto: Partial<CreateBankAccountDto>) {
-    return this.bankAccountService.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: Partial<CreateBankAccountDto>, @Request() req) {
+    return this.bankAccountService.update(id, dto, req.user.organizationId);
   }
 
   @Delete(':id')
   @RequireAccess(Screen.BANK_ACCOUNTS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Desativar conta bancária', description: 'Acesso: Contas bancárias (Editar)' })
-  remove(@Param('id') id: string) {
-    return this.bankAccountService.remove(id);
+  remove(@Param('id') id: string, @Request() req) {
+    return this.bankAccountService.remove(id, req.user.organizationId);
   }
 }

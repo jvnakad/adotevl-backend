@@ -1,6 +1,7 @@
-import { BadGatewayException, BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
+import { PetAlreadyAdoptedException, PetInOtherContractException } from '../adoption-form/pet-already-adopted.exception';
 import { AdoptionContract, ContractData, ContractSignatureStatus } from './adoption-contract.entity';
 import { AdoptionForm, AdoptionFormStatus } from '../adoption-form/adoption-form.entity';
 import { Pet, PetStatus } from '../pet/pet.entity';
@@ -58,7 +59,10 @@ export class AdoptionContractService {
   // Cria o rascunho a partir do modelo na primeira abertura
   async findByForm(formId: string, organizationId: string, userId: string = null) {
     const form = await this.getForm(formId, organizationId);
-    this.assertCanView(form);
+    // Consulta (GET) de ficha sem termo: 409 com código estável, não erro de entrada
+    if (!CONTRACT_VIEW_STATUSES.includes(form.status)) {
+      throw new ConflictException({ statusCode: 409, code: 'FORM_NOT_APPROVED', message: 'O termo de adoção só existe para fichas aprovadas.' });
+    }
     const contract = await this.ensureContract(form, userId);
     return this.toResponse(contract, form);
   }
@@ -90,39 +94,7 @@ export class AdoptionContractService {
       events.push(...this.diffClauses(contract.clauses, clauses));
     }
 
-    // Troca de pet: o novo fica EM_PROCESSO e o anterior volta a DISPONIVEL
-    const currentPetId = contract.petId ?? null;
-    const nextPetId = dto.petId === undefined ? currentPetId : dto.petId ?? null;
-    let newPet: Pet = null;
-    let previousPet: Pet = null;
-    const petChanged = nextPetId !== currentPetId;
-    if (petChanged) {
-      if (nextPetId) newPet = await this.getLinkablePet(nextPetId, organizationId);
-      if (currentPetId) previousPet = await this.petRepository.findOne({ where: { id: currentPetId } });
-      if (newPet) data = prefillAnimalFromPet(data, newPet);
-      events.push({
-        type: AdoptionHistoryType.PET_VINCULADO,
-        description: newPet
-          ? `Pet ${newPet.name} vinculado ao termo de adoção`
-          : previousPet
-            ? `Pet ${previousPet.name} desvinculado do termo de adoção`
-            : 'Pet desvinculado do termo de adoção',
-        metadata: {
-          before: previousPet ? { id: previousPet.id, name: previousPet.name } : null,
-          after: newPet ? { id: newPet.id, name: newPet.name } : null,
-        },
-      });
-    }
-
-    await this.save(form, userId, events, async (manager) => {
-      await manager.getRepository(AdoptionContract).update(contract.id, { data, clauses, petId: nextPetId, updatedBy: userId });
-      if (petChanged) {
-        await manager.getRepository(AdoptionForm).update(form.id, { petId: nextPetId, updatedBy: userId });
-        const pets = manager.getRepository(Pet);
-        if (previousPet?.status === PetStatus.EM_PROCESSO) await pets.update({ id: previousPet.id, organizationId: form.organizationId }, { status: PetStatus.DISPONIVEL, updatedBy: userId });
-        if (newPet) await pets.update({ id: newPet.id, organizationId: form.organizationId }, { status: PetStatus.EM_PROCESSO, updatedBy: userId });
-      }
-    });
+    await this.save(form, userId, events, (manager) => manager.getRepository(AdoptionContract).update(contract.id, { data, clauses, updatedBy: userId }));
     return this.findByForm(formId, organizationId, userId);
   }
 
@@ -151,7 +123,8 @@ export class AdoptionContractService {
     const form = await this.getForm(formId, organizationId);
     this.assertEditable(form);
     const contract = await this.ensureContract(form, userId);
-    if (!contract.petId) throw new BadRequestException('Vincule um pet antes de gerar o termo de adoção.');
+    // O pet vem da ficha (vinculado ao mover o card ou na edição do pet); o termo só o usa
+    if (!form.petId) throw new BadRequestException('Vincule um pet antes de gerar o termo de adoção.');
     if (!contract.data?.adopter?.name?.trim() || !contract.data?.adopter?.cpf?.trim()) {
       throw new BadRequestException('Preencha o nome e o CPF do adotante antes de gerar o termo de adoção.');
     }
@@ -163,7 +136,10 @@ export class AdoptionContractService {
       throw new BadRequestException('O e-mail do adotante não pode ser o da conta do Autentique da associação.');
     }
 
-    const pet = await this.petRepository.findOne({ where: { id: contract.petId }, relations: { fotos: true } });
+    const pet = await this.petRepository.findOne({ where: { id: form.petId }, relations: { fotos: true } });
+    if (pet?.status === PetStatus.ADOTADO) throw new PetAlreadyAdoptedException(pet.name);
+    // Falha rápida, antes do PDF e do Autentique; a checagem definitiva é refeita na transação, com o pet travado
+    await this.assertNoLiveContractElsewhere(this.contractRepository, form, pet?.name);
     const firstPhoto = [...(pet?.fotos ?? [])].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
     const petPhoto = firstPhoto?.url ? await loadImageAsDataUrl(firstPhoto.url) : null;
     const { clauses } = numberClauses(contract.clauses);
@@ -225,6 +201,9 @@ export class AdoptionContractService {
           },
         ],
         async (manager) => {
+          // Trava o pet: dois generate simultâneos do mesmo pet se serializam aqui e o segundo vê o termo do primeiro
+          await manager.getRepository(Pet).findOne({ where: { id: form.petId }, select: { id: true }, lock: { mode: 'pessimistic_write' } });
+          await this.assertNoLiveContractElsewhere(manager.getRepository(AdoptionContract), form, pet?.name);
           await manager.getRepository(AdoptionContract).update(contract.id, {
             version,
             pdfStoragePath: storagePath,
@@ -263,6 +242,24 @@ export class AdoptionContractService {
       throw error;
     }
     return this.findByForm(formId, organizationId, userId);
+  }
+
+  // Termo vivo = enviado/assinado (não cancelado nem recusado) de outra ficha ativa não reprovada com o mesmo pet
+  private async assertNoLiveContractElsewhere(contracts: Repository<AdoptionContract>, form: AdoptionForm, petName?: string) {
+    const other = await contracts
+      .createQueryBuilder('c')
+      .innerJoin(AdoptionForm, 'f', 'f.id = c.adoptionFormId')
+      .select('f.fullName', 'name')
+      .where('f.petId = :petId AND f.id <> :id AND f.organizationId = :org AND f.isActive = true AND f.status <> :rejected', {
+        petId: form.petId,
+        id: form.id,
+        org: form.organizationId,
+        rejected: AdoptionFormStatus.REPROVADO,
+      })
+      .andWhere('c.signatureStatus IN (:...live)', { live: [ContractSignatureStatus.PENDENTE, ContractSignatureStatus.ASSINADO] })
+      .limit(1)
+      .getRawOne<{ name: string }>();
+    if (other) throw new PetInOtherContractException(petName ?? 'selecionado', other.name);
   }
 
   // Botão "Atualizar status" do front (alternativa ao webhook)
@@ -328,7 +325,7 @@ export class AdoptionContractService {
                   description: 'Adoção concluída',
                   fromStatus: form.status,
                   toStatus: AdoptionFormStatus.CONCLUIDA,
-                  metadata: { petId: contract.petId ?? null },
+                  metadata: { petId: form.petId ?? contract.petId ?? null },
                 },
               ]
             : []),
@@ -341,8 +338,9 @@ export class AdoptionContractService {
           });
           if (!waiting) return;
           await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.CONCLUIDA });
-          if (contract.petId) {
-            await manager.getRepository(Pet).update({ id: contract.petId, organizationId: form.organizationId }, { status: PetStatus.ADOTADO, adoptionDate: new Date() });
+          const adoptedPetId = form.petId ?? contract.petId;
+          if (adoptedPetId) {
+            await manager.getRepository(Pet).update({ id: adoptedPetId, organizationId: form.organizationId }, { status: PetStatus.ADOTADO, adoptionDate: new Date() });
           }
         },
         AUTENTIQUE_USER_NAME,
@@ -486,18 +484,9 @@ export class AdoptionContractService {
     return events;
   }
 
-  private async getLinkablePet(petId: string, organizationId: string) {
-    const pet = await this.petRepository.findOne({ where: { id: petId, organizationId, isActive: true } });
-    if (!pet) throw new NotFoundException('Pet não encontrado.');
-    if (pet.status && !LINKABLE_PET_STATUSES.includes(pet.status)) {
-      throw new BadRequestException('O pet selecionado não está disponível para adoção.');
-    }
-    return pet;
-  }
-
   private async ensureContract(form: AdoptionForm, userId: string) {
     const existing = await this.contractRepository.findOne({ where: { adoptionFormId: form.id } });
-    if (existing) return existing;
+    if (existing) return form.status === AdoptionFormStatus.APROVADO ? this.syncPet(existing, form) : existing;
     // Sem pet vinculado, os dados do animal vêm do pet escolhido no formulário (ainda sem reservar)
     const pet = form.petId ? await this.petRepository.findOne({ where: { id: form.petId } }) : await this.getSuggestedPet(form);
     const contract = this.contractRepository.create({
@@ -511,6 +500,17 @@ export class AdoptionContractService {
       updatedBy: userId,
     });
     return this.contractRepository.save(contract);
+  }
+
+  // O pet do termo é o da ficha: se mudou (card ou edição do pet), o rascunho acompanha e refaz os dados do animal
+  private async syncPet(contract: AdoptionContract, form: AdoptionForm) {
+    const petId = form.petId ?? null;
+    if ((contract.petId ?? null) === petId) return contract;
+    const pet = petId ? await this.petRepository.findOne({ where: { id: petId } }) : null;
+    contract.petId = petId;
+    if (pet) contract.data = prefillAnimalFromPet(contract.data, pet);
+    await this.contractRepository.update(contract.id, { petId, data: contract.data });
+    return contract;
   }
 
   // Pet escolhido pelo adotante no formulário, se ainda puder ser vinculado ao termo
@@ -568,8 +568,6 @@ export class AdoptionContractService {
         url: signed[event.metadata.storagePath] ?? null,
         userName: event.userName,
       })),
-      // O front pré-seleciona este pet no rascunho; ao salvar, ele é vinculado e reservado
-      suggestedPetId: contract.petId ? null : (await this.getSuggestedPet(form))?.id ?? null,
       signature: contract.signatureStatus
         ? {
             status: contract.signatureStatus,

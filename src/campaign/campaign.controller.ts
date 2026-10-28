@@ -19,27 +19,28 @@ export class CampaignController {
   @RequireAccess(Screen.CAMPAIGNS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Criar campanha', description: 'Acesso: Campanhas (Editar)' })
   create(@Body() dto: CreateCampaignDto, @Request() req) {
-    return this.campaignService.create(dto, req.user.id);
+    return this.campaignService.create(dto, req.user.organizationId, req.user.id);
   }
 
   @Get()
   @RequireAccess(Screen.CAMPAIGNS, AccessLevel.VIEW)
   @ApiOperation({ summary: 'Listar campanhas', description: 'Acesso: Campanhas (Visualizar)' })
-  findAll(@Query() pagination: PaginationDto, @Query('organizationId') organizationId?: string) {
-    return this.campaignService.findAll(pagination, organizationId);
+  findAll(@Query() pagination: PaginationDto, @Request() req) {
+    // A organização vem do token; o parâmetro da URL é ignorado
+    return this.campaignService.findAll(pagination, req.user.organizationId);
   }
 
   @Get(':id')
   @RequireAccess(Screen.CAMPAIGNS, AccessLevel.VIEW)
   @ApiOperation({ summary: 'Buscar campanha por ID', description: 'Acesso: Campanhas (Visualizar)' })
-  findOne(@Param('id') id: string) {
-    return this.campaignService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.campaignService.findOne(id, req.user.organizationId);
   }
 
   @Put(':id')
   @RequireAccess(Screen.CAMPAIGNS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Atualizar campanha', description: 'Acesso: Campanhas (Editar)' })
   update(@Param('id') id: string, @Body() dto: Partial<CreateCampaignDto>, @Request() req) {
-    return this.campaignService.update(id, dto, req.user.id);
+    return this.campaignService.update(id, dto, req.user.organizationId, req.user.id);
   }
 }

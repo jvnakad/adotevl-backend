@@ -1,4 +1,5 @@
 import {
+  Index,
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -255,19 +256,21 @@ export class AdoptionForm {
   @Column({ name: 'reviewed_at', type: 'timestamptz', nullable: true })
   reviewedAt: Date;
 
-  // Pet escolhido pelo adotante no formulário público (sugestão; quem reserva o pet é o termo de adoção)
+  // Pet escolhido pelo adotante no formulário público; ao aprovar a ficha vira o pet vinculado (petId) e é reservado
   @ManyToOne(() => Pet, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'desired_pet_id' })
   desiredPet: Pet;
 
+  @Index()
   @Column({ name: 'desired_pet_id', nullable: true })
   desiredPetId: string;
 
-  // Pet escolhido no contrato; SET NULL para a exclusão de um pet não apagar a ficha
+  // Pet oficial da ficha (aprovação, movimentação do card ou edição do pet); SET NULL para a exclusão de um pet não apagar a ficha
   @ManyToOne(() => Pet, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'pet_id' })
   pet: Pet;
 
+  @Index()
   @Column({ name: 'pet_id', nullable: true })
   petId: string;
 

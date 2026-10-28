@@ -20,7 +20,7 @@ export class TeamController {
   @RequireAccess(Screen.TEAMS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Criar equipe', description: 'Acesso: Equipes (Editar). Começa sem acesso a nenhuma tela.' })
   create(@Body() dto: CreateTeamDto, @Request() req) {
-    return this.teamService.create({ ...dto, organizationId: req.user.organizationId }, req.user.id);
+    return this.teamService.create(dto, req.user.organizationId, req.user.id);
   }
 
   @Get()
@@ -33,21 +33,21 @@ export class TeamController {
   @Get(':id')
   @RequireAccess(Screen.TEAMS, AccessLevel.VIEW)
   @ApiOperation({ summary: 'Buscar equipe por ID', description: 'Acesso: Equipes (Visualizar). Inclui a matriz de permissões.' })
-  findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.teamService.findOne(id);
+  findOne(@Param('id', ParseUUIDPipe) id: string, @Request() req) {
+    return this.teamService.findOne(id, req.user.organizationId);
   }
 
   @Put(':id')
   @RequireAccess(Screen.TEAMS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Atualizar equipe', description: 'Acesso: Equipes (Editar). A equipe Admin não pode ser alterada.' })
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CreateTeamDto, @Request() req) {
-    return this.teamService.update(id, { name: dto.name }, req.user.id);
+    return this.teamService.update(id, { name: dto.name }, req.user.id, req.user.organizationId);
   }
 
   @Put(':id/permissions')
   @AdminOnly()
   @ApiOperation({ summary: 'Definir permissões da equipe', description: 'Somente equipe Admin. Sub-tela exige ao menos Visualizar na tela mãe.' })
   setPermissions(@Param('id', ParseUUIDPipe) id: string, @Body() dto: SetTeamPermissionsDto, @Request() req) {
-    return this.teamService.setPermissions(id, dto.permissions, req.user.id);
+    return this.teamService.setPermissions(id, dto.permissions, req.user.id, req.user.organizationId);
   }
 }

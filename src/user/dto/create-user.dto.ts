@@ -1,7 +1,8 @@
-import { IsString, IsNotEmpty, IsOptional, IsDateString, Matches, MinLength, Equals, IsBoolean, ValidateNested } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsDateString, Matches, MinLength, MaxLength, Equals, IsBoolean, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { VolunteerApplicationDto } from '../../volunteer-application/dto/volunteer-application.dto';
+import { IsCalendarDate } from '../../common/validation/calendar-date';
 import { IsCpf, IsFullName, IsPersonEmail, PERSON_MESSAGES } from '../../common/validation/person';
 
 export class CreateUserDto {
@@ -17,6 +18,7 @@ export class CreateUserDto {
   @IsString()
   @IsNotEmpty({ message: 'A senha é obrigatória.' })
   @MinLength(8, { message: 'A senha deve ter no mínimo 8 caracteres.' })
+  @MaxLength(128, { message: 'A senha deve ter no máximo 128 caracteres.' })
   password: string;
 
   @ApiPropertyOptional({ description: 'Celular (somente números, com DDD)' })
@@ -27,6 +29,7 @@ export class CreateUserDto {
 
   @ApiProperty({ description: 'Data de nascimento (YYYY-MM-DD). Mínimo 16 anos; menor de 18 exige responsável.' })
   @IsDateString({}, { message: 'Informe uma data de nascimento válida no formato YYYY-MM-DD.' })
+  @IsCalendarDate()
   birthDate: string;
 
   @ApiPropertyOptional({ description: 'Nome do responsável (obrigatório para menor de 18)' })

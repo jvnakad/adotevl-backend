@@ -29,11 +29,11 @@ export class TeamService {
     private readonly permissionRepository: Repository<TeamPermission>,
   ) {}
 
-  async create(dto: CreateTeamDto, createdBy: string = null) {
-    const existing = await this.teamRepository.findOne({ where: { name: dto.name, organizationId: dto.organizationId } });
+  async create(dto: CreateTeamDto, organizationId: string, createdBy: string = null) {
+    const existing = await this.teamRepository.findOne({ where: { name: dto.name, organizationId } });
     if (existing) throw new ConflictException('Já existe uma equipe com este nome nesta organização.');
     // Equipe nova já nasce no sistema de permissões: começa sem acesso a nenhuma tela
-    const team = this.teamRepository.create({ ...dto, accessConfiguredAt: new Date(), createdBy, updatedBy: createdBy });
+    const team = this.teamRepository.create({ ...dto, organizationId, accessConfiguredAt: new Date(), createdBy, updatedBy: createdBy });
     return this.teamRepository.save(team);
   }
 
@@ -42,26 +42,30 @@ export class TeamService {
     return paginate(this.teamRepository, pagination, where, undefined, { isAdmin: 'DESC', name: 'ASC' });
   }
 
-  /** Equipe com a matriz completa de permissões (tela sem linha = Sem acesso). */
-  async findOne(id: string) {
-    const team = await this.teamRepository.findOne({ where: { id } });
+  /**
+   * Equipe com a matriz completa de permissões (tela sem linha = Sem acesso).
+   * Com organizationId (rotas autenticadas) equipe de outra organização responde 404;
+   * sem ele só chamadas internas (migração de acesso).
+   */
+  async findOne(id: string, organizationId?: string) {
+    const team = await this.teamRepository.findOne({ where: organizationId ? { id, organizationId } : { id } });
     if (!team) throw new NotFoundException('Equipe não encontrada.');
     return { ...team, permissions: await this.permissionsOf(team) };
   }
 
-  async update(id: string, dto: Partial<CreateTeamDto>, updatedBy: string = null) {
-    const team = await this.findOne(id);
+  async update(id: string, dto: Partial<CreateTeamDto>, updatedBy: string = null, organizationId?: string) {
+    const team = await this.findOne(id, organizationId);
     if (team.isAdmin) throw new BadRequestException(ADMIN_LOCKED);
     if (team.systemKey && dto.name !== undefined && dto.name !== team.name) {
       throw new BadRequestException('Equipe padrão do sistema não pode ser renomeada.');
     }
     await this.teamRepository.update(id, { ...dto, updatedBy });
-    return this.findOne(id);
+    return this.findOne(id, organizationId);
   }
 
   /** Substitui a matriz da equipe. Só a equipe Admin chama (rota @AdminOnly). */
-  async setPermissions(id: string, permissions: ScreenPermissions, updatedBy: string = null) {
-    const team = await this.findOne(id);
+  async setPermissions(id: string, permissions: ScreenPermissions, updatedBy: string = null, organizationId?: string) {
+    const team = await this.findOne(id, organizationId);
     if (team.isAdmin) throw new BadRequestException(ADMIN_LOCKED);
 
     for (const screen of SCREENS) {
@@ -86,7 +90,7 @@ export class TeamService {
     }));
     if (rows.length) await this.permissionRepository.save(rows);
     await this.teamRepository.update(id, { accessConfiguredAt: new Date(), updatedBy });
-    return this.findOne(id);
+    return this.findOne(id, organizationId);
   }
 
   /** Garante a equipe de sistema Admin da organização (uma equipe já chamada "Admin" é promovida). */

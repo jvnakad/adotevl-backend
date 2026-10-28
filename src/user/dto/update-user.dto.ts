@@ -1,5 +1,6 @@
-import { IsString, IsOptional, IsDateString, Matches } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsBoolean, Matches } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsCalendarDate } from '../../common/validation/calendar-date';
 import { IsCpf, IsFullName, IsPersonEmail } from '../../common/validation/person';
 
 export class UpdateUserDto {
@@ -24,9 +25,11 @@ export class UpdateUserDto {
   @ApiPropertyOptional({ description: 'Data de nascimento (formato: YYYY-MM-DD)' })
   @IsOptional()
   @IsDateString({}, { message: 'Informe uma data válida no formato YYYY-MM-DD.' })
+  @IsCalendarDate()
   birthDate?: string;
 
   @ApiPropertyOptional({ description: 'Ativo/inativo' })
   @IsOptional()
+  @IsBoolean({ message: 'O campo ativo deve ser verdadeiro ou falso.' })
   isActive?: boolean;
 }

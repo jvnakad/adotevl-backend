@@ -161,7 +161,7 @@ export class AccessMigrationService implements OnModuleInit {
     if (!legacy) return null;
     const [existing] = await this.dataSource.query('SELECT id FROM teams WHERE organization_id = $1 AND name = $2 LIMIT 1', [organizationId, legacy.name]);
     if (existing) return existing as { id: string };
-    const team = await this.teams.create({ name: legacy.name, organizationId });
+    const team = await this.teams.create({ name: legacy.name }, organizationId);
     await this.teams.setPermissions(team.id, legacy.permissions);
     return team;
   }

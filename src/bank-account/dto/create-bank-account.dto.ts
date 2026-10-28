@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUUID } from 'class-validator';
+import { IsString, IsOptional } from 'class-validator';
 
 export class CreateBankAccountDto {
   @IsString()
@@ -42,6 +42,4 @@ export class CreateBankAccountDto {
   @IsString()
   document?: string;
 
-  @IsUUID()
-  organizationId: string;
 }

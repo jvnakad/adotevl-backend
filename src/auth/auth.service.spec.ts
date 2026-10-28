@@ -5,7 +5,7 @@ import { AuthService } from './auth.service';
 jest.mock('bcryptjs', () => ({ compare: jest.fn() }));
 
 describe('AuthService', () => {
-  let userService: { findByEmail: jest.Mock; findOne: jest.Mock };
+  let userService: { findByEmail: jest.Mock; findOne: jest.Mock; resendConfirmation: jest.Mock };
   let accessService: { forUser: jest.Mock; isFloatingVolunteer: jest.Mock };
   let refreshTokens: { issue: jest.Mock };
   let service: AuthService;
@@ -26,7 +26,7 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    userService = { findByEmail: jest.fn(), findOne: jest.fn() };
+    userService = { findByEmail: jest.fn(), findOne: jest.fn(), resendConfirmation: jest.fn(async () => true) };
     refreshTokens = { issue: jest.fn(async () => ({ access_token: 'jwt-token', refresh_token: 'refresh-value' })) };
     accessService = { forUser: jest.fn(async () => null), isFloatingVolunteer: jest.fn(async () => false) };
     service = new AuthService(userService as any, accessService as any, refreshTokens as any);
@@ -35,10 +35,50 @@ describe('AuthService', () => {
   describe('login', () => {
     const credentials = { email: 'ana@teste.com', password: 'senha123' };
 
+    it('8 falhas na mesma conta bloqueiam com 429 PT-BR, mesmo com a senha certa', async () => {
+      userService.findByEmail.mockResolvedValue(activeUser);
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+      for (let i = 0; i < 8; i++) await expect(service.login(credentials)).rejects.toThrow(UnauthorizedException);
+
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      await expect(service.login(credentials)).rejects.toMatchObject({ status: 429, response: { message: expect.stringContaining('Muitas tentativas') } });
+      expect(refreshTokens.issue).not.toHaveBeenCalled();
+    });
+
+    it('e-mail inexistente também conta falha (sem revelar se a conta existe)', async () => {
+      userService.findByEmail.mockResolvedValue(null);
+      for (let i = 0; i < 8; i++) await expect(service.login(credentials)).rejects.toThrow(UnauthorizedException);
+
+      await expect(service.login(credentials)).rejects.toMatchObject({ status: 429 });
+    });
+
+    it('conta não confirmada com a senha certa reenvia o e-mail de confirmação', async () => {
+      userService.findByEmail.mockResolvedValue({ ...activeUser, isConfirmed: false });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+
+      await expect(service.login(credentials)).rejects.toThrow(new UnauthorizedException('Conta não confirmada. Enviamos um novo e-mail de confirmação.'));
+      expect(userService.resendConfirmation).toHaveBeenCalledWith('u1');
+    });
+
+    it('conta não confirmada com a senha errada não reenvia nada', async () => {
+      userService.findByEmail.mockResolvedValue({ ...activeUser, isConfirmed: false });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(false);
+
+      await expect(service.login(credentials)).rejects.toThrow(new UnauthorizedException('Conta não confirmada. Verifique seu e-mail.'));
+      expect(userService.resendConfirmation).not.toHaveBeenCalled();
+    });
+
+    it('conta não confirmada em cooldown devolve a mensagem sem novo envio', async () => {
+      userService.findByEmail.mockResolvedValue({ ...activeUser, isConfirmed: false });
+      (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+      userService.resendConfirmation.mockResolvedValue(false);
+
+      await expect(service.login(credentials)).rejects.toThrow(new UnauthorizedException('Conta não confirmada. Verifique seu e-mail.'));
+    });
+
     it.each([
       ['usuário inexistente', null, 'Credenciais inválidas.'],
       ['usuário inativo', { ...activeUser, isActive: false }, 'Usuário inativo.'],
-      ['conta não confirmada', { ...activeUser, isConfirmed: false }, 'Conta não confirmada. Verifique seu e-mail.'],
       ['conta não aprovada', { ...activeUser, isApproved: false }, 'Conta aguardando aprovação do administrador.'],
     ])('rejeita %s', async (_label, user, message) => {
       userService.findByEmail.mockResolvedValue(user);
@@ -55,7 +95,7 @@ describe('AuthService', () => {
       expect(refreshTokens.issue).not.toHaveBeenCalled();
     });
 
-    it('volante com a senha certa recebe a mesma mensagem de senha errada e nenhum token (CA-39, CA-41)', async () => {
+    it('volante com a senha certa recebe a mesma mensagem da senha errada e nenhum token (CA-39, CA-41)', async () => {
       userService.findByEmail.mockResolvedValue(activeUser);
       (bcrypt.compare as jest.Mock).mockResolvedValue(true);
       accessService.isFloatingVolunteer.mockResolvedValue(true);

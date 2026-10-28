@@ -8,10 +8,6 @@ export class CreatePartnerDto {
 
   @IsOptional()
   @IsString()
-  organizationId?: string;
-
-  @IsOptional()
-  @IsString()
   document?: string;
 
   @IsOptional()

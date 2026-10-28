@@ -347,7 +347,7 @@ async function main() {
 
   const boardTeamName = 'Diretoria';
   let boardTeam = (await dataSource.query(`SELECT id FROM teams WHERE organization_id = $1 AND name = $2`, [orgId, boardTeamName]))[0];
-  if (!boardTeam) boardTeam = await teams.create({ name: boardTeamName, organizationId: orgId } as never, admin.id);
+  if (!boardTeam) boardTeam = await teams.create({ name: boardTeamName } as never, orgId, admin.id);
   await teams.setPermissions(boardTeam.id, { [Screen.MARKETING]: AccessLevel.VIEW }, admin.id);
   const viewer = await ensureUser(...VIEWER);
   await membership.assign(asMember(viewer), boardTeam.id, admin.id);

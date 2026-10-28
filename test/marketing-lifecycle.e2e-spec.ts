@@ -172,7 +172,7 @@ describe('Marketing (e2e)', () => {
 
     it('a matriz não deixa conceder a Configuração a outra equipe', async () => {
       const teams = app.get(TeamService);
-      const team = await teams.create({ name: 'Equipe config', organizationId: orgA });
+      const team = await teams.create({ name: 'Equipe config' }, orgA);
       await expect(teams.setPermissions(team.id, { [Screen.MARKETING]: AccessLevel.EDIT, [Screen.MARKETING_SETTINGS]: AccessLevel.VIEW })).rejects.toThrow('exclusiva da equipe Admin');
     });
   });

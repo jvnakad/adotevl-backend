@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 
 export const MIN_VOLUNTEER_AGE = 16;
 export const ADULT_AGE = 18;
+export const MAX_VOLUNTEER_AGE = 100;
 
 const todayInBrazil = (now = new Date()) =>
   new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
@@ -22,6 +23,7 @@ type GuardianInput = { birthDate: string; guardianName?: string; guardianPhone?:
  */
 export function guardianFields({ birthDate, guardianName, guardianPhone, guardianConsent }: GuardianInput) {
   const age = ageInYears(birthDate);
+  if (age > MAX_VOLUNTEER_AGE) throw new BadRequestException('Informe uma data de nascimento válida.');
   if (age < MIN_VOLUNTEER_AGE) throw new BadRequestException(`É necessário ter pelo menos ${MIN_VOLUNTEER_AGE} anos.`);
   if (age >= ADULT_AGE) return { guardianName: null, guardianPhone: null, guardianConsentAt: null };
   if (!guardianName?.trim() || !guardianPhone || guardianConsent !== true) {

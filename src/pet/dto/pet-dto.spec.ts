@@ -14,7 +14,7 @@ const pet = (overrides: Record<string, unknown> = {}) => ({
 });
 
 const errorsOf = async (cls: typeof CreatePetDto | typeof UpdatePetDto, body: Record<string, unknown>) => {
-  const errors = await validate(plainToInstance(cls, body));
+  const errors = await validate(plainToInstance(cls as typeof CreatePetDto, body));
   return Object.fromEntries(errors.map((e) => [e.property, Object.values(e.constraints ?? {})]));
 };
 

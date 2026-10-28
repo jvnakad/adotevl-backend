@@ -1,9 +1,11 @@
 import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { FindOptionsOrder, ILike, Repository } from 'typeorm';
+import { FindOptionsOrder, ILike, In, Not, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { extname } from 'path';
-import { Pet } from './pet.entity';
+import { Pet, PetStatus } from './pet.entity';
+import { AdoptionForm, AdoptionFormStatus } from '../adoption-form/adoption-form.entity';
+import { PetAlreadyAdoptedException } from '../adoption-form/pet-already-adopted.exception';
 import { PetPhoto } from './pet-photo.entity';
 import { CreatePetDto } from './dto/create-pet.dto';
 import { UpdatePetDto } from './dto/update-pet.dto';
@@ -43,6 +45,8 @@ export class PetService implements OnModuleInit {
     @InjectRepository(PetPhoto)
     private readonly photoRepository: Repository<PetPhoto>,
     private readonly storageService: StorageService,
+    @InjectRepository(AdoptionForm)
+    private readonly formRepository: Repository<AdoptionForm>,
   ) {}
 
   async onModuleInit() {
@@ -62,6 +66,7 @@ export class PetService implements OnModuleInit {
     filters: PetFilters = {},
     // Padrão do painel: cadastrados mais recentes primeiro
     order: FindOptionsOrder<Pet> = { createdAt: 'DESC' },
+    withAdopter = true,
   ) {
     const where: any = { isActive: true };
     if (filters.organizationId) where.organizationId = filters.organizationId;
@@ -71,13 +76,14 @@ export class PetService implements OnModuleInit {
     if (filters.castration !== undefined) where.castration = filters.castration === 'true';
     if (filters.status) where.status = filters.status;
     const result = await paginate(this.petRepository, pagination, this.searchWhere(where, filters.search), { fotos: true }, order);
-    return { ...result, data: result.data.map((pet) => this.withAge(this.sortPhotos(pet))) };
+    const adopters = withAdopter ? await this.adoptersOf(result.data) : new Map<string, { formId: string; name: string }>();
+    return { ...result, data: result.data.map((pet) => ({ ...this.withAge(this.sortPhotos(pet)), ...(adopters.has(pet.id) && { adopter: adopters.get(pet.id) }) })) };
   }
 
   // Versão para o site público: só os campos exibidos, sem dados internos nem storagePath
   async findAllPublic(pagination: PaginationDto, filters: PetFilters = {}) {
     // Ordem por nome: a lista alimenta o select de animais do formulário de adoção
-    const result = await this.findAll(pagination, filters, { name: 'ASC' });
+    const result = await this.findAll(pagination, filters, { name: 'ASC' }, false);
     return {
       ...result,
       data: result.data.map((pet) => ({
@@ -100,15 +106,57 @@ export class PetService implements OnModuleInit {
   async findOne(id: string, organizationId: string) {
     const pet = await this.petRepository.findOne({ where: { id, organizationId }, relations: { fotos: true } });
     if (!pet) throw new NotFoundException('Pet não encontrado.');
-    return this.withAge(this.sortPhotos(pet));
+    const adopter = (await this.adoptersOf([pet])).get(pet.id);
+    return { ...this.withAge(this.sortPhotos(pet)), ...(adopter && { adopter }) };
   }
 
   async update(id: string, dto: UpdatePetDto, organizationId: string, updatedBy: string = null) {
-    await this.assertOwned(id, organizationId);
+    const pet = await this.petRepository.findOne({ where: { id, organizationId }, select: { id: true, name: true, status: true } });
+    if (!pet) throw new NotFoundException('Pet não encontrado.');
     // Fotos são gerenciadas pelos endpoints próprios; ignora caso o front reenvie o objeto completo
-    const { fotos, ...data } = dto as Partial<CreatePetDto> & { fotos?: unknown };
-    await this.petRepository.update({ id, organizationId }, { ...data, updatedBy });
+    const { fotos, adoptionFormId, ...data } = dto as Partial<CreatePetDto> & { fotos?: unknown; adoptionFormId?: string };
+    if (!adoptionFormId) {
+      await this.petRepository.update({ id, organizationId }, { ...data, updatedBy });
+      return this.findOne(id, organizationId);
+    }
+
+    // Vínculo com a ficha: grava os dois lados (status do pet + petId da ficha) na mesma transação
+    const status = data.status ?? pet.status;
+    if (status !== PetStatus.EM_PROCESSO && status !== PetStatus.ADOTADO) {
+      throw new BadRequestException('Para vincular uma ficha de adoção, o pet precisa estar Em processo ou Adotado.');
+    }
+    const form = await this.formRepository.findOne({ where: { id: adoptionFormId, organizationId, isActive: true }, select: { id: true, petId: true } });
+    if (!form) throw new NotFoundException('Ficha de adoção não encontrada.');
+    if (pet.status === PetStatus.ADOTADO) {
+      const adopter = (await this.adoptersOf([pet as Pet])).get(id);
+      if (adopter && adopter.formId !== adoptionFormId) throw new PetAlreadyAdoptedException(pet.name);
+    }
+    await this.petRepository.manager.transaction(async (manager) => {
+      await manager.getRepository(Pet).update({ id, organizationId }, { ...data, updatedBy });
+      await manager.getRepository(AdoptionForm).update(form.id, { petId: id, updatedBy });
+      // Pet anterior da ficha volta a ficar disponível, se nenhuma outra ficha ativa o segura
+      if (form.petId && form.petId !== id) {
+        const held = await manager
+          .getRepository(AdoptionForm)
+          .count({ where: { petId: form.petId, id: Not(form.id), isActive: true, status: Not(In([AdoptionFormStatus.REPROVADO, AdoptionFormStatus.PENDENTE])) } });
+        if (!held) await manager.getRepository(Pet).update({ id: form.petId, organizationId, status: PetStatus.EM_PROCESSO }, { status: PetStatus.DISPONIVEL, updatedBy });
+      }
+    });
     return this.findOne(id, organizationId);
+  }
+
+  // Ficha concluída que adotou cada pet ADOTADO, em uma consulta para a lista toda (sem N+1)
+  private async adoptersOf(pets: Pet[]) {
+    const adopted = pets.filter((pet) => pet.status === PetStatus.ADOTADO).map((pet) => pet.id);
+    const result = new Map<string, { formId: string; name: string }>();
+    if (!adopted.length) return result;
+    const forms = await this.formRepository.find({
+      select: { id: true, petId: true, fullName: true },
+      where: { petId: In(adopted), status: AdoptionFormStatus.CONCLUIDA, isActive: true },
+      order: { updatedAt: 'DESC' },
+    });
+    forms.forEach((form) => result.has(form.petId) || result.set(form.petId, { formId: form.id, name: form.fullName }));
+    return result;
   }
 
   async remove(id: string, organizationId: string, updatedBy: string = null) {

@@ -2,6 +2,7 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { ILike } from 'typeorm';
 import { PetService, MAX_PET_PHOTOS } from './pet.service';
 import { PetStatus } from './pet.entity';
+import { FindOperator } from 'typeorm';
 import { createMockRepository, MockRepository, pagination } from '../testing/mock-repository';
 
 const file = (name = 'foto.JPG', mimetype = 'image/jpeg') =>
@@ -10,6 +11,9 @@ const file = (name = 'foto.JPG', mimetype = 'image/jpeg') =>
 describe('PetService', () => {
   let petRepo: MockRepository;
   let photoRepo: MockRepository;
+  let formRepo: MockRepository;
+  let txPet: MockRepository;
+  let txForm: MockRepository;
   let storage: { upload: jest.Mock; remove: jest.Mock };
   let service: PetService;
 
@@ -19,8 +23,14 @@ describe('PetService', () => {
   beforeEach(() => {
     petRepo = createMockRepository();
     photoRepo = createMockRepository();
+    formRepo = createMockRepository();
+    txPet = createMockRepository();
+    txForm = createMockRepository();
+    const manager = { getRepository: jest.fn((entity) => (entity.name === 'Pet' ? txPet : txForm)) };
+    (petRepo as any).manager = { transaction: jest.fn(async (work) => work(manager)) };
+    formRepo.find.mockResolvedValue([]);
     storage = { upload: jest.fn(async (path: string) => `https://cdn/${path}`), remove: jest.fn(async () => undefined) };
-    service = new PetService(petRepo as any, photoRepo as any, storage as any);
+    service = new PetService(petRepo as any, photoRepo as any, storage as any, formRepo as any);
   });
 
   it('create registra auditoria e devolve fotos vazias', async () => {
@@ -123,6 +133,89 @@ describe('PetService', () => {
     await expect(service.addPhotos('p1', [file()], 'org-A')).rejects.toThrow(NotFoundException);
     expect(petRepo.update).not.toHaveBeenCalled();
     expect(photoRepo.delete).not.toHaveBeenCalled();
+  });
+
+  describe('card do pet adotado', () => {
+    it('findAll inclui adopter (ficha concluída) só nos pets ADOTADO, em uma consulta', async () => {
+      petRepo.findAndCount.mockResolvedValue([[{ id: 'p1', status: PetStatus.ADOTADO, fotos: [] }, { id: 'p2', status: PetStatus.DISPONIVEL, fotos: [] }], 2]);
+      formRepo.find.mockResolvedValue([{ id: 'f1', petId: 'p1', fullName: 'Maria' }]);
+
+      const result = await service.findAll(pagination, { organizationId: 'org-1' });
+
+      expect(result.data[0]).toEqual(expect.objectContaining({ adopter: { formId: 'f1', name: 'Maria' } }));
+      expect(result.data[1]).not.toHaveProperty('adopter');
+      expect(formRepo.find).toHaveBeenCalledTimes(1);
+      expect(formRepo.find.mock.calls[0][0].where).toEqual(expect.objectContaining({ status: 'CONCLUIDA', isActive: true }));
+      expect(formRepo.find.mock.calls[0][0].where.petId).toBeInstanceOf(FindOperator);
+    });
+
+    it('sem pet adotado não consulta fichas e a lista pública nunca traz adopter', async () => {
+      petRepo.findAndCount.mockResolvedValue([[{ id: 'p2', status: PetStatus.DISPONIVEL, fotos: [] }], 1]);
+      await service.findAll(pagination, { organizationId: 'org-1' });
+      petRepo.findAndCount.mockResolvedValue([[{ id: 'p1', name: 'Rex', status: PetStatus.ADOTADO, fotos: [] }], 1]);
+      const pub = await service.findAllPublic(pagination, { organizationId: 'org-1' });
+
+      expect(formRepo.find).not.toHaveBeenCalled();
+      expect(pub.data[0]).not.toHaveProperty('adopter');
+    });
+
+    it('findOne de pet ADOTADO devolve adopter', async () => {
+      petRepo.findOne.mockResolvedValue({ id: 'p1', status: PetStatus.ADOTADO, fotos: [] });
+      formRepo.find.mockResolvedValue([{ id: 'f1', petId: 'p1', fullName: 'Maria' }]);
+
+      expect((await service.findOne('p1', 'org-1')).adopter).toEqual({ formId: 'f1', name: 'Maria' });
+    });
+  });
+
+  describe('update com adoptionFormId', () => {
+    const pet = (status = PetStatus.DISPONIVEL) => ({ id: 'p1', name: 'Rex', status, fotos: [] });
+
+    it('grava os dois lados: status do pet e petId da ficha, na organização do token', async () => {
+      petRepo.findOne.mockResolvedValue(pet());
+      formRepo.findOne.mockResolvedValue({ id: 'f1', petId: null });
+
+      await service.update('p1', { status: PetStatus.EM_PROCESSO, adoptionFormId: 'f1' } as any, 'org-1', 'u1');
+
+      expect(formRepo.findOne).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'f1', organizationId: 'org-1', isActive: true } }));
+      expect(txPet.update).toHaveBeenCalledWith({ id: 'p1', organizationId: 'org-1' }, { status: PetStatus.EM_PROCESSO, updatedBy: 'u1' });
+      expect(txForm.update).toHaveBeenCalledWith('f1', { petId: 'p1', updatedBy: 'u1' });
+    });
+
+    it('ficha de outra organização: 404 sem gravar', async () => {
+      petRepo.findOne.mockResolvedValue(pet());
+      formRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.update('p1', { status: PetStatus.ADOTADO, adoptionFormId: 'f9' } as any, 'org-1')).rejects.toThrow('Ficha de adoção não encontrada.');
+      expect(txPet.update).not.toHaveBeenCalled();
+    });
+
+    it('status diferente de EM_PROCESSO/ADOTADO recusa o vínculo', async () => {
+      petRepo.findOne.mockResolvedValue(pet());
+
+      await expect(service.update('p1', { status: PetStatus.DISPONIVEL, adoptionFormId: 'f1' } as any, 'org-1')).rejects.toThrow(BadRequestException);
+      expect(txForm.update).not.toHaveBeenCalled();
+    });
+
+    it('pet ADOTADO por outra ficha concluída: 400 PET_ALREADY_ADOPTED', async () => {
+      petRepo.findOne.mockResolvedValue(pet(PetStatus.ADOTADO));
+      formRepo.findOne.mockResolvedValue({ id: 'f2', petId: null });
+      formRepo.find.mockResolvedValue([{ id: 'f1', petId: 'p1', fullName: 'Maria' }]);
+
+      const error = await service.update('p1', { status: PetStatus.ADOTADO, adoptionFormId: 'f2' } as any, 'org-1').catch((e) => e);
+
+      expect(error.getResponse()).toEqual({ statusCode: 400, code: 'PET_ALREADY_ADOPTED', message: expect.stringContaining('já foi adotado') });
+      expect(txPet.update).not.toHaveBeenCalled();
+    });
+
+    it('pet anterior da ficha volta a DISPONIVEL quando nenhuma outra ficha o segura', async () => {
+      petRepo.findOne.mockResolvedValue(pet());
+      formRepo.findOne.mockResolvedValue({ id: 'f1', petId: 'p-old' });
+      txForm.count.mockResolvedValue(0);
+
+      await service.update('p1', { status: PetStatus.EM_PROCESSO, adoptionFormId: 'f1' } as any, 'org-1', 'u1');
+
+      expect(txPet.update).toHaveBeenCalledWith({ id: 'p-old', organizationId: 'org-1', status: PetStatus.EM_PROCESSO }, { status: PetStatus.DISPONIVEL, updatedBy: 'u1' });
+    });
   });
 
   it('update ignora o campo fotos enviado pelo front', async () => {

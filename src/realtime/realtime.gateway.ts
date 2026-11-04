@@ -5,6 +5,7 @@ import type { Server, Socket } from 'socket.io';
 import { DataSource } from 'typeorm';
 import { RealtimeService, RealtimeUser } from './realtime.service';
 import { isPanelSessionValid } from '../auth/session-state';
+import { corsOrigin } from '../common/cors';
 
 /** Tempo para o cliente renovar o token depois de `auth:expired` antes de ser desconectado. */
 export const TOKEN_REFRESH_GRACE_MS = 15_000;
@@ -23,9 +24,9 @@ interface SocketData {
 /**
  * Gateway Socket.IO (mesma porta do HTTP, caminho `/socket.io`).
  * Handshake: `io(url, { auth: { token: '<jwt>' } })` (ou header Authorization: Bearer). Sem token, inválido ou expirado = `connect_error`.
- * CORS igual ao HTTP (`app.enableCors()` aceita qualquer origem).
+ * CORS igual ao HTTP: só as origens de CORS_ORIGINS (`common/cors.ts`); sem a variável, qualquer origem.
  */
-@WebSocketGateway({ cors: { origin: '*' } })
+@WebSocketGateway({ cors: { origin: corsOrigin } })
 export class RealtimeGateway implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(RealtimeGateway.name);
 

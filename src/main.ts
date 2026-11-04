@@ -7,6 +7,7 @@ import { isLocalStorage, LOCAL_UPLOADS_DIR } from './storage/storage.service';
 import { localUploadsMiddleware } from './storage/local-uploads';
 import { jwtSecret } from './auth/jwt-secret';
 import { accessTokenTtl } from './auth/panel-token';
+import { corsOrigin } from './common/cors';
 
 async function bootstrap() {
   // Sem JWT_SECRET forte ou com ACCESS_TOKEN_TTL inválido a API não sobe (a mensagem nunca traz o valor)
@@ -19,7 +20,8 @@ async function bootstrap() {
   }
   // rawBody: o webhook do Autentique valida a assinatura HMAC sobre o corpo original
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { rawBody: true });
-  app.enableCors();
+  // Só os domínios de CORS_ORIGINS (cada ambiente tem a sua lista); sem a variável, aceita qualquer origem
+  app.enableCors({ origin: corsOrigin });
   // Produção: exatamente 1 proxy (Railway). Com 1 salto o Express usa a última entrada do X-Forwarded-For
   // (a que o próprio proxy acrescenta), então entradas forjadas pelo cliente à esquerda não viram req.ip,
   // que é a chave dos throttlers. Não aumentar sem mudar a topologia; sem proxy (dev local) o cabeçalho é confiável.

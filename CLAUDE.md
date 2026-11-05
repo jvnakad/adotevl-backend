@@ -4,12 +4,13 @@ API REST do sistema de gestão de adoção de pets da AdoteVL. Front-end em `../
 
 ## Stack
 - NestJS 11 + TypeScript (config não estrita: `strict: false`, `strictNullChecks: false`)
-- TypeORM 0.3 + Postgres (produção no Supabase; `synchronize: true`, **sem migrations** — entidade nova cria/altera tabela ao subir)
+- TypeORM 0.3 + Postgres (produção no Supabase; **sem migrations** — entidade nova cria/altera tabela ao subir. O `synchronize` roda dentro de `bootDataSource` (`src/database/boot-hardening.ts`), junto do endurecimento do banco; o módulo fica com `synchronize: false`)
 - Auth: JWT (`passport-jwt`) + bcryptjs
 - Validação: `class-validator` / `class-transformer` (`ValidationPipe` global com `whitelist: true`, **sem** `transform`)
 - Swagger em `/docs` (`@nestjs/swagger`)
 - Storage de arquivos: Supabase Storage (`src/storage`), ou disco local com `STORAGE_DRIVER=local`
 - E-mail: Resend (`src/mail`)
+- Assinatura digital: Autentique API v2 GraphQL (`src/autentique`, `fetch` nativo)
 - Deploy: Railway (`npm run build` → `node dist/main`)
 
 ## Scripts
@@ -26,6 +27,7 @@ API REST do sistema de gestão de adoção de pets da AdoteVL. Front-end em `../
 ## Ambiente local
 - `.env.local` (copiado de `.env.local.example`) tem precedência sobre `.env` (`ConfigModule.forRoot({ envFilePath: ['.env.local', '.env'] })`).
 - `DATABASE_URL` com `?sslmode=disable` desliga SSL (Supabase exige SSL; Postgres local não).
+- Autentique: `AUTENTIQUE_TOKEN`, `AUTENTIQUE_SANDBOX=true` (documentos de teste, sem créditos, somem em alguns dias; `false` em produção) `AUTENTIQUE_FOLDER_ID` (id da pasta do painel onde os termos ficam salvos — "Termos de adoção" = `7769248f814defa83476a26255cedb252219bfdf`; vazio = raiz; ids das pastas via query `folders`) e `AUTENTIQUE_WEBHOOK_SECRET` (secret do webhook cadastrado no painel; sem ele o webhook responde 401). Sem URL pública em dev, use o botão "Atualizar status" (`POST :id/contract/signature/sync`).
 - Login de dev: `admin@adotevl.local` / `admin123`. O seed imprime os IDs para o `.env` do front.
 
 ## Estrutura
@@ -40,9 +42,11 @@ src/<feature>/
   dto/update-<feature>.dto.ts
 ```
 - `src/common/` — `PaginationDto` e `paginate(repo, pagination, where?, relations?, order?)` → `{ data, total, page, limit, totalPages }`.
-- `src/auth/` — `JwtAuthGuard`, `RolesGuard`, `@Roles(...)`, `OptionalJwtAuthGuard` (rota pública que aceita token opcional).
+- `src/auth/` — `JwtAuthGuard`, `OptionalJwtAuthGuard` (rota pública que aceita token opcional), sessão do painel (`RefreshTokenService`, `session-state.ts`, `panel-token.ts`; ver "Sessão").
 - `src/storage/` — `StorageService.upload(path, buffer, mimetype)` → URL pública; `remove(paths)`. Módulo `@Global`.
 - `src/mail/` — `MailService` (Resend).
+- `src/autentique/` — `AutentiqueService` (`createDocument`, `getDocument`, `deleteDocument`, `downloadFile`). Módulo `@Global`; token lido sob demanda (sem `AUTENTIQUE_TOKEN` → 503).
+- `src/webhooks/` — rotas públicas chamadas por serviços externos (`POST /webhooks/autentique`), sem JWT, validadas por HMAC.
 
 **Toda entidade nova precisa ser registrada em `src/app.module.ts` (array `entities` + módulo em `imports`) e em `test/test-app.module.ts`.**
 
@@ -64,10 +68,10 @@ src/<feature>/
 
 ### Controllers
 - `@ApiTags('<Nome em PT>')`, `@Controller('<rota-kebab-plural>')`.
-- Rota protegida: `@ApiBearerAuth()` + `@UseGuards(JwtAuthGuard, RolesGuard)` + `@Roles('ADMIN', ...)`.
-- `@ApiOperation({ summary: '...', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })` — sempre listar os perfis; rotas públicas dizem "Rota pública".
+- Rota protegida: `@ApiBearerAuth()` + `@UseGuards(JwtAuthGuard, AccessGuard)` + `@RequireAccess(Screen.X, AccessLevel.VIEW|EDIT)` (ou `@AdminOnly()` para ações só da equipe Admin). `RolesGuard` e `@Roles` não existem mais.
+- `@ApiOperation({ summary: '...', description: 'Acesso: Pets (Editar)' })` — sempre dizer a tela e o nível ("Somente equipe Admin" / "Qualquer usuário logado" / "Rota pública").
 - Usuário logado: `req.user` = `{ id, email, profileId, profileName, organizationId }`. Passar `req.user.id` para `createdBy/updatedBy` e filtrar por `req.user.organizationId`.
-- Perfis: `ADMIN`, `FINANCIAL`, `VOLUNTEER` (seed automático em `ProfileService.onModuleInit`).
+- Perfis `ADMIN`/`FINANCIAL`/`VOLUNTEER` são **legado**: ficam no usuário e no JWT só como informação, e nenhuma decisão de autorização os lê. `profileId` não faz parte de `CreateUserDto` nem de `UpdateUserDto` (o `ValidationPipe` descarta). O acesso vem da equipe (ver "Acesso por equipe").
 - Ids de rota: `ParseUUIDPipe`.
 
 ### Services
@@ -81,7 +85,7 @@ src/<feature>/
 - Repositório falso: `createMockRepository()` de `src/testing/mock-repository.ts` (`create` devolve o próprio objeto, `save` resolve o objeto, `findAndCount` resolve `[[], 0]`). `src/testing` e `*.spec.ts` ficam fora do build.
 - Libs externas com `jest.mock` (`bcryptjs`, `resend`, `@supabase/supabase-js`, `fs/promises`); variáveis usadas na factory com prefixo `mock`.
 - DTOs com regra relevante: `plainToInstance` + `validate` (ver `adoption-form/dto/create-adoption-form.dto.spec.ts`).
-- E2E de fluxo completo por feature em `test/<feature>-lifecycle.e2e-spec.ts`, usando `TestAppModule` (mock de `MailService` e `StorageService`).
+- E2E de fluxo completo por feature em `test/<feature>-lifecycle.e2e-spec.ts`, usando `TestAppModule` (mock de `MailService`, `StorageService` e `AutentiqueService` — `MockAutentiqueService.adopterSigns/adopterRejects` simulam o adotante).
 - Cada suite cria/limpa a própria organização (CNPJ fixo único por suite) e um admin, e faz login via `/auth/login`.
 - Textos de teste (`describe`/`it`/comentários) em PT-BR.
 
@@ -94,8 +98,59 @@ src/<feature>/
 - Commits Conventional Commits em inglês (`feat: add pet photos upload...`, `fix: ...`, `refactor: ...`).
 - CI (`.github/workflows/test.yml`): `npm ci` + `npm test` + `npm run test:e2e` com Postgres 15.
 
+## Acesso por equipe (`src/access`, `src/team`)
+- Usuário ↔ equipe via `volunteers.teamId` (1 voluntário ativo por usuário). Sem equipe ativa = 403 em toda rota protegida.
+- Telas em `access.ts` (`Screen`, `SCREENS` com rótulo, tela mãe e `viewOnly`): Pets, Prontuário (mãe Pets), Adotantes, Termo de adoção e Histórico de adoção (mãe Adotantes; histórico só Visualizar), Campanhas, Parceiros, Voluntários, Equipes, Financeiro, Contas bancárias (mãe Financeiro). Níveis `NONE`/`VIEW`/`EDIT`. `GET /access/screens` devolve o catálogo.
+- `team_permissions` (equipe, tela, nível; sem linha = Sem acesso). `TeamService.setPermissions` substitui a matriz, recusa Editar em tela `viewOnly` e sub-tela sem Visualizar na mãe; marca `teams.access_configured_at`.
+- Equipe **Admin** (`teams.is_admin`, uma por organização, `TeamService.ensureAdminTeam`): Editar em tudo (inclusive telas futuras), não pode ser renomeada nem ter a matriz alterada, sempre com ao menos 1 membro ativo (`TeamMembershipService`).
+- **Equipes padrão** (`teams.system_key`, `TeamService.ensureDefaultTeams`): Admin, Financeiro, Voluntário Fixo e Voluntário Volante existem sempre em toda organização (criadas no boot e no cadastro do primeiro usuário). Nome travado; Financeiro/Fixo/Volante nascem sem acesso e têm a matriz editável. Equipe já existente com o mesmo nome é adotada como padrão (mantém membros e acesso).
+- `AccessGuard` lê equipe e permissões do banco a cada requisição (`AccessService.forUser`) — mudança vale na hora — e põe em `req.access`. `/auth/me` devolve `access: { teamId, teamName, isAdmin, permissions }`.
+- Só a equipe Admin: matriz de permissões, aprovar/reprovar usuário (`PATCH /users/:id/approve` exige `teamId`), trocar equipe (`PATCH /users/:id/team`), remover ficha, cancelar assinatura, voltar ficha do termo para Aprovado, desativar pet, organizações, endereços e perfis.
+- Primeiro usuário de uma organização entra na equipe Admin no cadastro. Cadastro público não escolhe perfil (grava VOLUNTEER legado).
+- Migração no boot (`AccessMigrationService`, idempotente): garante a equipe Admin; **só na migração inicial da organização** (marca `access_migrated_at` nula e nenhuma equipe), aprovados sem equipe vão para a equipe do perfil (Admin / Financeiro / Voluntário Fixo, com o acesso antigo) e a equipe Admin vazia recebe os usuários de perfil ADMIN; equipes anteriores às permissões (`access_configured_at` null) recebem o acesso antigo dos perfis dos membros; por último cria, sem acesso, as equipes padrão que ainda faltarem.
+- E2E: `joinTeam(app, user, 'ADMIN' | permissões)` e `cleanupAccess(app, orgId)` em `test/test-app.module.ts`.
+
+## Sessão e "Esqueci minha senha" (`src/auth`)
+- `JWT_SECRET` é obrigatório e vem de `jwtSecret()` (`jwt-secret.ts`): ausente, `changeme`, `sua_chave_secreta` ou com menos de 15 caracteres derruba o boot ("JWT_SECRET ausente ou fraco."). Sem fallback em lugar nenhum; em `NODE_ENV=test` só exige que exista (unitários: `test/unit-env.js`). Segredos derivados: `${JWT_SECRET}:schedule`, `:password-reset`, `:uploads`.
+- **Sessão do painel = par access/refresh** (`RefreshTokenService`, único que assina o access do painel; contrato em `docs/api/refresh-token.md`): access JWT de **15 min** (`ACCESS_TOKEN_TTL`, só `<n>m`/`<n>s`, máx. 60 min, inválido derruba o boot; o padrão do `JwtModule` é esse TTL e só o link de aprovação passa `APPROVAL_LINK_TTL` = 8 h, sem `fid` e sem refresh) e refresh opaco de 43 caracteres base64url, **7 dias deslizante, rotacionado a cada uso**. Guardado só como HMAC-SHA256 (`${JWT_SECRET}:refresh`) em `refresh_tokens`; a busca é sempre pelo hash. Uma **família** (`family_id`, claim `fid` do access) = um navegador, com teto de 30 dias e no máximo 10 por usuário (a 11ª revoga a mais antiga). Reuso de refresh consumido (mesmo vencido) revoga a família; o consumo é um `UPDATE ... RETURNING` atômico e o `rotate` consome antes de inserir (índice único da ponta viva). Toda recusa da renovação é o mesmo `401 "Sessão expirada. Faça login novamente."`, com o motivo só no log. `fid` no access: o guard e o socket recusam família revogada na mesma consulta (`session-state.ts`, dono único da regra de sessão); a room `family:<fid>` é automática e `disconnectFamily` derruba os sockets por `socket.data.fid`.
+- Rotas: `POST /auth/login` (10/min por IP), `POST /auth/refresh` e `POST /auth/logout` (30/min por IP, públicas, só `body.refreshToken` em `application/json`, outro `Content-Type` = 415; logout idempotente = 204). `PATCH /users/me/password` devolve `{ message, access_token, refresh_token }` (família nova, emitida depois de gravar `password_changed_at`). Limpeza (`REFRESH_CLEANUP_SQL`, depois do commit, best effort): só apaga família inteira sem ponta viva e morta há mais de 7 dias, ou iniciada há mais de 44.
+- Eventos de log (JSON, nunca refresh/hash/access/User-Agent): `auth.refresh_issued|rotated|rejected|reuse|family_evicted`, `auth.logout`, `access_migration.marked_without_assignment|assigned`, `db_hardening.*`, `deploy.floating_sessions_stamped`.
+- **Endurecimento do banco no boot, sem passo manual no Supabase** (`src/database/boot-hardening.ts`, `docs/db/refresh-token.md` §6, RN-18/RN-38 a RN-40): o `TypeOrmModule.forRootAsync` (em `src/app.module.ts` **e** `test/test-app.module.ts`) usa `dataSourceFactory: bootDataSource` com `synchronize: false` e `toRetry: retryUnlessHardeningFailed`. Ordem: A default privileges (`anon`/`authenticated` deixam de herdar grant em tabela, sequence e função nova) → `synchronize` → B `REVOKE` + `ENABLE ROW LEVEL SECURITY` em toda tabela/sequence de `public` que a API possui (só onde o catálogo mostra necessidade; tabela travada é pulada com `lock_timeout` de 3 s) → C conferência com `has_table_privilege` (`refresh_tokens` acessível ou ausente = `BootHardeningError`, a API não sobe e não tenta de novo; outra tabela só loga `db_hardening.table_exposed`) → D carimbo único dos volantes (`password_changed_at`), marca em `app_maintenance` (`src/common/app-maintenance.entity.ts`, chave `esqueci-senha.rn33.floating-volunteers-stamp`). Papéis inexistentes (Docker local, e2e) são pulados com `db_hardening.role_missing`. Logs: `db_hardening.applied` (com a lista `changed`), `db_hardening.refresh_tokens_exposed`, `deploy.floating_sessions_stamped`. Entidade nova continua precisando ser registrada nos dois módulos; ela nasce fechada e recebe RLS no mesmo boot. E2E: `test/boot-hardening.e2e-spec.ts` cria `anon`/`authenticated` e os remove no fim.
+- Migração de acesso por perfil só na migração inicial de cada organização: marca `organizations.access_migrated_at` (organização com qualquer equipe, ativa ou inativa, só recebe a marca, sem atribuir ninguém). O deploy não tem passo manual: `docs/deploy/2026-10-27-refresh-token.md` é só conferência de log.
+- `JwtAuthGuard` (assíncrono, lê o banco a cada requisição numa query enxuta) recusa com 401: token com claim `scope`, sem `iat`, `fid` malformado ou de família revogada, usuário inativo, volante (equipe `FLOATING_VOLUNTEER`) e `iat < floor(users.password_changed_at / 1000)`. `users.password_changed_at` é gravado nas 3 trocas de senha (esqueci-senha, `PATCH /users/:id/reset-password`, `PATCH /users/me/password`); a troca pelo perfil devolve o par novo, emitido depois da gravação.
+- `password`, `confirmation_code`, `password_changed_at` e `password_reset_locked_until` são `select: false` no `User`: quem precisa do hash usa `addSelect` (`UserService.findByEmail`, `changePassword`); os e2e leem com `select: { password: true }`. Toda rota de `/users` filtra por `req.user.organizationId` (`findInOrganization`; outra organização = 404).
+- Rotas públicas `POST /auth/forgot-password`, `/forgot-password/verify`, `/reset-password` (`PasswordResetService`, throttle por IP 5/10/5 por minuto em `PasswordResetThrottlerGuard`). `forgot-password` responde igual para qualquer e-mail e grava o código e manda o e-mail depois da resposta (`setImmediate`). Limites por conta contados em `password_reset_codes` com o relógio do banco; tentativa contada antes do compare e consumo do código por `UPDATE` condicional. Elegível = ativo, confirmado, aprovado e com equipe ativa que não seja `FLOATING_VOLUNTEER` (`AccessService.isFloatingVolunteer`).
+- Login e reset do Admin barram volante (login: só depois do `bcrypt.compare` certo, mesma mensagem de senha errada).
+- E2E: `MockMailService.lastPasswordResetCode` / `passwordResetCodeSentTo` / `passwordChangedSentTo`. O throttle usa o IP do `X-Forwarded-For` quando a suíte liga `trust proxy`.
+- Troca do próprio e-mail (`EmailChangeService`, `src/user`): `POST /users/me/email-change` `{ newEmail, currentPassword }`, `POST .../resend`, `POST .../confirm` `{ code }`, `DELETE ...` (só `JwtAuthGuard`, sempre `req.user.id`, throttle por IP 5/5/10/10). Código de 6 dígitos (hash) enviado ao e-mail NOVO; pedido em `email_change_requests` (1 pendente por conta, 30 min) e eventos de limite em `email_change_events`. Mesmos números do esqueci senha, contadores separados; 409 "em uso" conta nos limites. Confirmar troca o e-mail em transação, grava `password_changed_at` (derruba todas as sessões, inclusive a da agenda da LP: `ScheduleAccessService.session` agora é assíncrono e checa o marco), fecha códigos/tokens de recuperação e códigos da agenda. Troca de senha e troca de e-mail pelo Admin chamam `closePendingEmailChange`. Erros: `{ statusCode, code, message }` (contrato em `docs/api/troca-email.md`). E2E: `MockMailService.lastEmailChangeCode` / `emailChangeCodeSentTo`.
+
+## Cadastro de voluntário (`src/user`, `src/volunteer-application`)
+- **Fixo** — `POST /users` (público): dados + senha + `consent: true` + `application` (questionário, `VolunteerApplicationDto`; obrigatório exceto para o 1º usuário da organização). Grava `volunteer_applications` (1:1 com o usuário), fica aguardando confirmação do e-mail e aprovação (o modal do front já sugere a equipe Voluntário Fixo). Responde só `{ id, email }`.
+- **Volante** — `POST /users/floating` (público, modal da LP e `/signup?tipo=volante`): nome, e-mail, CPF, celular, nascimento, `consent`. Sem senha: a API grava uma aleatória (bcrypt de 24 bytes) só para o login aceitar; já nasce confirmado, aprovado e na equipe Voluntário Volante (`TeamService.systemTeam`) e recebe `sendFloatingWelcomeEmail`. Vira fixo trocando a equipe + "Esqueci a senha".
+- Idade (`volunteer-age.ts`, dia de hoje em Brasília): mínimo 16; 16–17 exigem `guardianName`, `guardianPhone` e `guardianConsent: true` (colunas `guardian_*` no usuário); maior de idade grava responsável `null`. `consent_at` = aceite LGPD.
+- Opções do questionário em `volunteer-application.options.ts` (espelha `src/constants/volunteerSignupOptions.ts` do front). "Outros" exige texto (`referralOther`/`interestOther`); `NENHUM`, `PREFERE_NAO_VER` e `PREFERE_NAO_PARTICIPAR` são exclusivas.
+- Anti-spam nas duas rotas: `ThrottlerGuard` (`SIGNUP_RATE_LIMIT` por minuto por IP, padrão 5; `trust proxy` no `main.ts`) e honeypot `website` (preenchido → responde sucesso sem gravar).
+- `GET /users/:id/application` (Voluntários Visualizar, escopo da organização). `GET /users` devolve `hasApplication`.
+
+## Tutoriais do front (`users.tutorial_progress`)
+- Coluna jsonb `tutorialProgress` no usuário: `{ tours: { <CHAVE>: <versão vista> }, disabled }`; `null` = nunca viu nenhum tour. Volta no `/auth/me`.
+- `PATCH /users/me/tutorial` `{ tour, version }` marca um tour visto (chave `[A-Z0-9_]`, versão ≥ 1) e/ou `{ disabled }` liga/desliga os tours automáticos; `DELETE /users/me/tutorial` zera tudo ("Rever todos os tutoriais"). Qualquer usuário logado, só o próprio.
+- Chaves e versões dos tours vivem no front (`src/constants/tours`); a API não valida a lista.
+
+## Agenda de voluntariado (`src/volunteer-schedule`)
+- `volunteer_shifts` (usuário, dia `date` como 'YYYY-MM-DD' via `dateColumnTransformer`, `start_time`/`end_time` 'HH:MM', `notes`, `cancel_token` do link do e-mail, `cancelled_at`/`cancel_reason` = soft cancel) e `schedule_locks` (dia trancado com `message`, único por organização).
+- Regras (`schedule-time.ts`, fuso de Brasília): seg a sex 08:00–16:00 e sáb/dom 13:00–16:00 (`scheduleHoursFor`), em passos de 30 min; de amanhã até 60 dias; sem limite de vagas; a mesma pessoa pode marcar mais de uma vez no dia sem cruzar horários; voluntário altera/desmarca o próprio até 24h antes; quem gerencia (Agenda: Editar ou equipe Admin) ignora as 24h e marca/remove por qualquer voluntário ativo.
+- Tela `SCHEDULE` ("Agenda") na matriz. `GET /schedule?month=` devolve `{ shifts, locks }`: nome só para a equipe Admin; o próprio vem como "Você" (`mine`), os demais "Voluntário" (sem `id`/`notes`). `POST/PATCH/DELETE /schedule/shifts`, `POST/DELETE /schedule/locks` (trancar desmarca quem estava no dia e manda `sendShiftCancelledByLockEmail`), `GET /schedule/volunteers` (Editar).
+- LP (`/public/schedule`): `GET` público sem nomes; `POST code` (`{ status }`: `SENT`; `NOT_VOLUNTEER` → a LP abre o cadastro de volante e, cadastrado, pede o código sozinha; `PENDING` = em análise/inativo. Só voluntário aprovado e ativo recebe; 6 dígitos com hash, 5 min, 5 tentativas, pedido novo invalida os anteriores; reenvio só depois de 60 s do último código ainda aberto, com a mesma resposta `SENT` e sem e-mail novo) → `POST verify` → `{ token, firstName }` (JWT de 2h com segredo `${JWT_SECRET}:schedule` e `scope: 'schedule'`: não vale como login do sistema) → `POST/DELETE shifts` com `Authorization: Bearer`. **Cada marcação consome o código** (`schedule_access_codes.booked_at`, `codeId` no token): outro horário exige novo código (401); a sessão segue valendo para ver/desmarcar. `POST cancel { token }` = link "Desmarcar" do e-mail (`${LANDING_URL}/?desmarcar=<token>#agenda`). Throttler nas rotas de escrita.
+- E2E: `MockMailService.lastScheduleCode` guarda o último código enviado.
+
+## E-mails (`src/mail`)
+- Todo e-mail usa `emailLayout` (`email-layout.ts`): tabelas + estilo inline, cores da LP, logo em `${LANDING_URL}/email/logo.png` (arquivo em `LP/public/email/logo.png`), rodapé com os canais da ONG (`ORG_CHANNELS`, espelha `LP/src/data/site.ts`). Nome vindo do cadastro passa por `escapeHtml`/`firstName`.
+- Env: `LANDING_URL` (links e logo), `EMAIL_ASSET_URL` (opcional: origem só do logo — em dev a LP publicada, porque o Gmail não carrega localhost), `APP_URL` (links do sistema), `MAIL_FROM`, `RESEND_API_KEY`.
+- Desenvolvimento: `MAIL_DRIVER=smtp` + `SMTP_HOST`/`SMTP_PORT` envia por SMTP (nodemailer) para o Mailpit do adotevl-local (caixa em http://localhost:8025). Sem `MAIL_DRIVER` = Resend. Falha de envio vai para o log (`Logger`) e não derruba a ação.
+
 ## Módulos
-organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), mail, storage.
+organization, organization-address, profile, user, auth, pet (+fotos), medical-record, team, volunteer, campaign, financial (entries/expenses/balance), partner, bank-account, adoption-form (+fotos), adoption-history, adoption-contract, autentique, webhooks, mail, storage.
 
 ### adoption-form
 Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFormPage.tsx`, payload em `src/mappers/adoptionForm.ts`) e gestão em `/adotantes`.
@@ -103,4 +158,43 @@ Ficha do formulário público `/adocao` do front (`src/pages/Adoption/AdoptionFo
 - `GET` (paginado, `status`, `search`), `GET :id`, `PUT :id`, `PATCH :id/status`, `POST/DELETE :id/photos` — ADMIN, VOLUNTEER; `DELETE :id` — ADMIN. Sempre escopo da organização do usuário.
 - Valores das múltiplas escolhas espelham `src/constants/adoptionFormOptions.ts` do front — mudou lá, mudar em `dto/create-adoption-form.dto.ts`.
 - Respostas condicionais: validadas e limpas em `AdoptionFormService.normalizeAnswers` (tabela `CONDITIONAL_ANSWERS`).
-- Status: `PENDENTE`, `EM_ANALISE`, `APROVADO`, `REPROVADO`.
+- Status (ordem do kanban): `PENDENTE`, `APROVADO`, `AGUARDANDO_ASSINATURA`, `CONCLUIDA`, `REPROVADO` (`ADOPTION_FORM_STATUS_ORDER`/`_LABELS` em `adoption-form.entity.ts`). `EM_ANALISE` e `CONTRATO_GERADO` ("Termo gerado") são legado: ficam no enum só por causa do histórico; `AdoptionFormService.onModuleInit` move as fichas para `PENDENTE` e `APROVADO`.
+- Nomenclatura na interface e nas mensagens: "Termo de adoção" (o código continua `contract`/`CONTRATO_*`).
+- Regras do `PATCH :id/status` (`AdoptionFormService.validateTransition`, em transação com o histórico):
+  - mesmo status → só atualiza `reviewNotes` (evento `FICHA_EDITADA` se mudou);
+  - `PENDENTE/APROVADO/REPROVADO` livres entre si; saindo de `APROVADO` para `PENDENTE/REPROVADO` o pet vinculado volta a `DISPONIVEL`;
+  - `AGUARDANDO_ASSINATURA` e `CONCLUIDA` nunca manuais: envio ao Autentique e assinatura do adotante (que conclui a adoção);
+  - de `AGUARDANDO_ASSINATURA/CONCLUIDA` só volta para `APROVADO` e só ADMIN (403) → pet `EM_PROCESSO`, `adoptionDate` null; saindo de `AGUARDANDO_ASSINATURA` o documento é excluído no Autentique (best effort) e a assinatura fica `CANCELADO`.
+- `desiredPet`/`desiredPetId` (nullable, `SET NULL`): pet escolhido pelo adotante no select do formulário público (`GET /pets` público: só `DISPONIVEL`, ordem por nome, com `species`/`animal`). No `POST`, o pet precisa ser da organização, ativo e `DISPONIVEL` (senão 400 "não está mais disponível") e `desiredAnimal` vira o nome dele; sem pet, `desiredAnimal` é a descrição livre. Não entra no `UpdateAdoptionFormDto`. Ao aprovar a ficha (`PATCH :id/status` → `APROVADO`), o pet desejado (se não `ADOTADO`) vira `petId` e, estando `DISPONIVEL`, passa a `EM_PROCESSO` (UPDATE condicional; já `EM_PROCESSO` por outra ficha segue assim, sem bloquear).
+- `pet`/`petId` (nullable, `SET NULL`): pet oficial da ficha. Vínculo: `petId?` no `PATCH :id/status` (ignorado com termo enviado/assinado; também vincula no mesmo status) ou `adoptionFormId?` no `PUT /pets/:id` (pet `EM_PROCESSO`/`ADOTADO`; grava pet.status + form.petId). Pet `ADOTADO` por outra ficha: 400 `PET_ALREADY_ADOPTED`. `GET :id` devolve `pet`/`desiredPet: { id, name, species, status, fotos[{url}] } | null`, `otherInterestedForms: [{ id, adopterName }]` (outras fichas ativas, ≠ `REPROVADO`/`CONCLUIDA`, com o mesmo pet vinculado ou desejado) e `desiredPetAdopted` (banners do front; não há mais `Notification` de interesse). Pet `ADOTADO` na lista/detalhe traz `adopter: { formId, name }`.
+- `GET /adoption-forms/board?search=&status=` → `{ columns: [{ status, total, items }] }` (todas as colunas, até 50 itens resumidos, `updatedAt DESC`; com `status`, as demais colunas vêm vazias sem consultar o banco). Declarada antes de `:id`.
+- `GET /adoption-forms/:id/history` → eventos da ficha (`createdAt DESC`).
+- Toda ação da ficha grava histórico: criar (`FICHA_CRIADA`, usuário "Formulário público"), editar (`FICHA_EDITADA` com `metadata.fields` [{field,label,before,after}] — rótulos em `adoption-form-labels.ts`), fotos, remover.
+- `birthDate` é gravado com `localDate()` (meia-noite local): o TypeORM grava coluna `date` pelo dia local; `new Date('YYYY-MM-DD')` voltaria um dia em UTC-3. O driver pg devolve `date` como Date à meia-noite local — use `dateOnly()` de `adoption-contract/contract-data.ts`.
+
+### pet
+- `GET /pets?search=` busca por nome ou raça (`animal`), ILike com OR, na rota autenticada e na pública.
+- Catálogo de espécies e raças em `src/pet/pet-catalog.ts`, exposto em `GET /pets/options` (público, antes de `:id`). O front não tem mais lista própria.
+- Nascimento: coluna `birth_date` (`date`, dia 1) exposta como `birthDate: 'YYYY-MM'` (transformer na entidade). Toda resposta de pet traz `ageLabel` calculado na hora em `pet-age.ts` (fuso de Brasília): "2 anos e 3 meses", "8 meses", "menos de 1 mês". `birthDate` é obrigatório no create **e** no update (formato AAAA-MM, sem mês futuro). Termo de adoção preenche "Idade do animal" com `petBirthWithAge` ("07/2024 (2 anos e 3 meses)").
+- `age` (anos) é legado: fica na entidade com `select: false` só porque `synchronize` apagaria a coluna antes da conversão; `PetService.onModuleInit` converte `age` → `birth_date` (mês do `created_at` − idade) e zera `age`.
+- `CreatePetDto`/`UpdatePetDto` validam `species` no catálogo e `animal` como raça da espécie enviada no mesmo payload (update que troca a raça manda a espécie junto).
+
+### adoption-history
+- Entidade `adoption_history_events` (só insert): `adoptionFormId` (CASCADE), `organizationId`, `adopterName` (snapshot), `type` (`AdoptionHistoryType`), `fromStatus/toStatus`, `description` PT-BR pronta, `metadata` jsonb, `userId`, `userName` (snapshot). Índices (`organizationId`, `createdAt`) e (`adoptionFormId`).
+- `AdoptionHistoryService.record(params, manager?)` / `recordMany` — passe o `EntityManager` para gravar na mesma transação; `userName` é resolvido do `User` (sem usuário = "Formulário público").
+- `GET /adoption-history?page&limit&type&adoptionFormId&search&from&to` — ADMIN, VOLUNTEER. `search` = nome do adotante; `from/to` = YYYY-MM-DD inclusivos, dia local (UTC-3).
+
+### adoption-contract
+Termo de adoção da ficha (1 por ficha, `adoption_contracts`). Rotas em `AdoptionContractController` (`@Controller('adoption-forms')`), ADMIN e VOLUNTEER; ficha precisa estar `APROVADO`, `AGUARDANDO_ASSINATURA` ou `CONCLUIDA` (editável em `APROVADO` e `AGUARDANDO_ASSINATURA`; `CONCLUIDA` só leitura).
+- `GET :id/contract` cria o rascunho na primeira chamada (dados da ficha + pet vinculado, `contract-data.ts`).
+- `PUT :id/contract` `{ data?, clauses? }`: `data` é sanitizado para as chaves conhecidas (`CONTRACT_DATA_FIELDS`); `clauses` precisa ter todas as chaves, sem remover a travada (`animal`). Um evento por mudança (`PET_VINCULADO`, `CONTRATO_DADOS_ALTERADOS`, `CLAUSULA_EDITADA/REMOVIDA/RESTAURADA`).
+- `POST :id/contract/clauses/:key/reset`, `POST :id/contract/generate` — gerar = gerar e enviar (ficha `APROVADO` ou `AGUARDANDO_ASSINATURA`; exige pet vinculado à ficha (não `ADOTADO`; 400 `PET_IN_OTHER_CONTRACT` se outra ficha ativa não reprovada tem termo `PENDENTE`/`ASSINADO` com o mesmo pet, checado antes do PDF e de novo na transação com o pet travado `FOR UPDATE`) + nome/CPF/e-mail do adotante): PDF em `contracts/<formId>/v<n>.pdf` no bucket **privado**, `version++`; `createDocument` (sandbox conforme env) com 2 signatários — a conta dona do token (`AutentiqueService.getAccount`, a representante legal) na linha "Representante legal" e o adotante na linha "ADOTANTE" — e `signDocument` assina na hora pela associação; grava versão + `autentiqueDocumentId`, `signatureStatus=PENDENTE`, `signatureEmail/Link/Version/SentAt`; ficha → `AGUARDANDO_ASSINATURA`; eventos `CONTRATO_GERADO` + `CONTRATO_ENVIADO_ASSINATURA`. Com envio pendente, a versão anterior é cancelada (evento `ASSINATURA_CANCELADA` com `replacedBy`; o documento antigo só é excluído no Autentique depois de gravar o novo, best effort). Qualquer falha (Autentique, assinatura da associação, banco) remove o PDF e exclui o documento novo; e-mail do adotante igual ao da conta é recusado. `pdfUrl` e `versions[].url` são URLs assinadas.
+- Assinatura digital (Autentique; a associação assina no envio, o adotante pelo link do e-mail):
+  - `POST :id/contract/signature/sync` e `POST /webhooks/autentique` (eventos `signature.accepted`, `signature.rejected`, `document.finished`; header `X-Autentique-Signature` = HMAC-SHA256 hex do corpo cru, `rawBody: true` no `main.ts`) chamam `syncSignature`: consulta `getDocument` (fonte da verdade, nunca o payload), acha a assinatura pelo e-mail (a lista também traz o dono da conta). Assinado → PDF assinado em `contracts/<formId>/assinado-v<n>.pdf`, `ASSINADO`, adoção concluída na mesma transação (ficha → `CONCLUIDA`, pet `ADOTADO` + `adoptionDate`), eventos `CONTRATO_ASSINADO` + `ADOCAO_CONCLUIDA`; recusado → `RECUSADO`, ficha volta `APROVADO`, evento `ASSINATURA_RECUSADA`. Eventos com `userName` "Autentique". Idempotente (só age com `PENDENTE`); se a ficha já saiu de `AGUARDANDO_ASSINATURA`, só o contrato muda.
+  - `DELETE :id/contract/signature` (ADMIN, ficha `AGUARDANDO_ASSINATURA`): `deleteDocument`, `CANCELADO`, ficha volta `APROVADO`, evento `ASSINATURA_CANCELADA`. Documento assinado por terceiros não sai do Autentique (o `deleteDocument` responde true sem excluir); documento na lixeira (`deleted_at`) conta como inexistente.
+  - Resposta do contrato: `signature: { status, email, link, version, sentAt, signedAt, signedPdfUrl } | null`.
+- `contract-template.ts`: 14 cláusulas do modelo .docx (`content` = texto após "CLÁUSULA X:", linhas com `\n`, blocos com `\n\n`, itens `(a) ...`, "Parágrafo ..."), referências como `{{clausula:<key>}}`, dados fixos da entidade em `CONTRACT_ORGANIZATION`.
+- `contract-numbering.ts`: `toOrdinalPt`, `numberClauses` (ignora removidas, numera por `order`, resolve tokens para "Cláusula Terceira"; referência a removida vira "[cláusula removida]" + aviso). O front replica em `src/mappers/adoptionContract.ts`.
+- Data do termo: sem `data.signature.date`, `generate` usa a data do dia em Brasília (`todayInBrazil`) só no PDF (não grava no rascunho). O PDF não traz a observação "(local e data da assinatura)".
+- Assinaturas nos campos ADOTANTE e Representante legal: `buildContractPdf` devolve `{ buffer, adopterSignature, organizationSignature }`; a linha do adotante tem `id: 'adopter-signature-line'` e o `pageBreakBefore` do pdfmake (que nunca quebra página) lê página/altura dela. `toAutentiquePosition` converte em % do carimbo do Autentique (canto superior esquerdo, ~98 x 28 pt, centralizado na coluna, logo acima da linha). O mesmo vale para a linha "Representante legal" (`organization-signature-line`, coluna esquerda). Gravados em `adopterSignaturePosition`/`organizationSignaturePosition` na geração e enviados como `positions` (`element: SIGNATURE`) no `createDocument`; termos gerados antes disso vão sem posição.
+- `contract-pdf.builder.ts`: pdfmake 0.3 (instância única do `require('pdfmake')`, fontes padrão Helvetica, sem acesso a disco/URL); logo em `assets/logo.base64.ts` (tsc não copia assets); foto do pet baixada com `fetch` (só PNG/JPEG; falha = sem foto).

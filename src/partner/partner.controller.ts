@@ -1,51 +1,52 @@
-import { Controller, Post, Get, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Param, Body, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/roles.decorator';
+import { AccessGuard } from '../access/access.guard';
+import { AdminOnly, RequireAccess } from '../access/access.decorator';
+import { AccessLevel, Screen } from '../access/access';
 import { PartnerService } from './partner.service';
 import { CreatePartnerDto } from './dto/create-partner.dto';
 import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Parceiros')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, AccessGuard)
 @Controller('partners')
 export class PartnerController {
   constructor(private readonly partnerService: PartnerService) {}
 
   @Post()
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Cadastrar parceiro', description: 'Perfis permitidos: ADMIN' })
-  create(@Body() dto: CreatePartnerDto) {
-    return this.partnerService.create(dto);
+  @RequireAccess(Screen.PARTNERS, AccessLevel.EDIT)
+  @ApiOperation({ summary: 'Cadastrar parceiro', description: 'Acesso: Parceiros (Editar)' })
+  create(@Body() dto: CreatePartnerDto, @Request() req) {
+    return this.partnerService.create(dto, req.user.organizationId);
   }
 
   @Get()
-  @Roles('ADMIN', 'FINANCIAL')
-  @ApiOperation({ summary: 'Listar parceiros', description: 'Perfis permitidos: ADMIN, FINANCIAL' })
-  findAll(@Query() pagination: PaginationDto) {
-    return this.partnerService.findAll(pagination);
+  @RequireAccess(Screen.PARTNERS, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Listar parceiros', description: 'Acesso: Parceiros (Visualizar)' })
+  findAll(@Query() pagination: PaginationDto, @Request() req) {
+    return this.partnerService.findAll(pagination, req.user.organizationId);
   }
 
   @Get(':id')
-  @Roles('ADMIN', 'FINANCIAL')
-  @ApiOperation({ summary: 'Buscar parceiro por ID', description: 'Perfis permitidos: ADMIN, FINANCIAL' })
-  findOne(@Param('id') id: string) {
-    return this.partnerService.findOne(id);
+  @RequireAccess(Screen.PARTNERS, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Buscar parceiro por ID', description: 'Acesso: Parceiros (Visualizar)' })
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.partnerService.findOne(id, req.user.organizationId);
   }
 
   @Put(':id')
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Atualizar parceiro', description: 'Perfis permitidos: ADMIN' })
-  update(@Param('id') id: string, @Body() dto: Partial<CreatePartnerDto>) {
-    return this.partnerService.update(id, dto);
+  @RequireAccess(Screen.PARTNERS, AccessLevel.EDIT)
+  @ApiOperation({ summary: 'Atualizar parceiro', description: 'Acesso: Parceiros (Editar)' })
+  update(@Param('id') id: string, @Body() dto: Partial<CreatePartnerDto>, @Request() req) {
+    return this.partnerService.update(id, dto, req.user.organizationId);
   }
 
   @Delete(':id')
-  @Roles('ADMIN')
-  @ApiOperation({ summary: 'Desativar parceiro', description: 'Perfis permitidos: ADMIN' })
-  remove(@Param('id') id: string) {
-    return this.partnerService.remove(id);
+  @RequireAccess(Screen.PARTNERS, AccessLevel.EDIT)
+  @ApiOperation({ summary: 'Desativar parceiro', description: 'Acesso: Parceiros (Editar)' })
+  remove(@Param('id') id: string, @Request() req) {
+    return this.partnerService.remove(id, req.user.organizationId);
   }
 }

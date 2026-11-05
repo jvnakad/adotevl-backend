@@ -23,6 +23,8 @@ export class CreateOrganizationAddressDto {
   @IsString()
   country?: string;
 
+  /** Ignorado: a organização vem do token de quem cria. Mantido opcional por compatibilidade com o painel. */
+  @IsOptional()
   @IsUUID()
-  organizationId: string;
+  organizationId?: string;
 }

@@ -3,8 +3,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Volunteer } from './volunteer.entity';
 import { CreateVolunteerDto } from './dto/create-volunteer.dto';
+import { UpdateVolunteerDto } from './dto/update-volunteer.dto';
+import { normalizeCpf, normalizePersonName } from '../common/validation/person';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
+
+/** O ValidationPipe global não grava a normalização no body: nome e CPF vão limpos para o banco. */
+const normalizedPerson = (dto: UpdateVolunteerDto) => ({
+  ...(dto.name !== undefined && { name: normalizePersonName(dto.name) as string }),
+  ...(dto.cpf !== undefined && { cpf: normalizeCpf(dto.cpf) as string }),
+});
 
 @Injectable()
 export class VolunteerService {
@@ -18,7 +26,7 @@ export class VolunteerService {
     if (existing) {
       throw new ConflictException('Este usuário já está vinculado a um voluntário.');
     }
-    const volunteer = this.volunteerRepository.create({ ...dto, createdBy, updatedBy: createdBy });
+    const volunteer = this.volunteerRepository.create({ ...dto, ...normalizedPerson(dto), createdBy, updatedBy: createdBy });
     return this.volunteerRepository.save(volunteer);
   }
 
@@ -34,8 +42,8 @@ export class VolunteerService {
     return volunteer;
   }
 
-  async update(id: string, dto: Partial<CreateVolunteerDto>, updatedBy: string = null) {
-    await this.volunteerRepository.update(id, { ...dto, updatedBy });
+  async update(id: string, dto: UpdateVolunteerDto, updatedBy: string = null) {
+    await this.volunteerRepository.update(id, { ...dto, ...normalizedPerson(dto), updatedBy });
     return this.findOne(id);
   }
 }

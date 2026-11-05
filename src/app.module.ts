@@ -35,17 +35,61 @@ import { StorageModule } from './storage/storage.module';
 import { AdoptionFormModule } from './adoption-form/adoption-form.module';
 import { AdoptionForm } from './adoption-form/adoption-form.entity';
 import { AdoptionFormPhoto } from './adoption-form/adoption-form-photo.entity';
+import { AdoptionHistoryModule } from './adoption-history/adoption-history.module';
+import { AdoptionHistoryEvent } from './adoption-history/adoption-history.entity';
+import { AdoptionContractModule } from './adoption-contract/adoption-contract.module';
+import { VolunteerShift } from './volunteer-schedule/volunteer-shift.entity';
+import { ScheduleLock } from './volunteer-schedule/schedule-lock.entity';
+import { ScheduleAccessCode } from './volunteer-schedule/schedule-access-code.entity';
+import { PasswordResetCode } from './auth/password-reset-code.entity';
+import { RefreshToken } from './auth/refresh-token.entity';
+import { AppMaintenance } from './common/app-maintenance.entity';
+import { bootDataSource, retryUnlessHardeningFailed } from './database/boot-hardening';
+import { EmailChangeRequest } from './user/email-change-request.entity';
+import { EmailChangeEvent } from './user/email-change-event.entity';
+import { VolunteerScheduleModule } from './volunteer-schedule/volunteer-schedule.module';
+import { VolunteerApplication } from './volunteer-application/volunteer-application.entity';
+import { AdoptionContract } from './adoption-contract/adoption-contract.entity';
+import { AutentiqueModule } from './autentique/autentique.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { TeamPermission } from './team/team-permission.entity';
+import { AccessModule } from './access/access.module';
+import { ProductType } from './stock/product-type.entity';
+import { Product } from './stock/product.entity';
+import { StockHistoryEvent } from './stock/stock-history.entity';
+import { NullByteModule } from './common/null-byte.middleware';
+import { StockModule } from './stock/stock.module';
+import { ScheduleInstitution } from './volunteer-schedule/schedule-institution.entity';
+import { MarketingModule } from './marketing/marketing.module';
+import { RealtimeModule } from './realtime/realtime.module';
+import { NotificationModule } from './notification/notification.module';
+import { Notification } from './notification/notification.entity';
+import { MarketingList } from './marketing/entities/marketing-list.entity';
+import { MarketingLabel } from './marketing/entities/marketing-label.entity';
+import { MarketingCard } from './marketing/entities/marketing-card.entity';
+import { MarketingCardMember } from './marketing/entities/marketing-card-member.entity';
+import { MarketingCardLabel } from './marketing/entities/marketing-card-label.entity';
+import { MarketingCardTask } from './marketing/entities/marketing-card-task.entity';
+import { MarketingCardAttachment } from './marketing/entities/marketing-card-attachment.entity';
+import { MarketingCardComment } from './marketing/entities/marketing-card-comment.entity';
+import { MarketingHistoryEvent } from './marketing/entities/marketing-history-event.entity';
 
 @Module({
   imports: [
     // .env.local (ambiente local) tem precedência sobre o .env
     ConfigModule.forRoot({ isGlobal: true, envFilePath: ['.env.local', '.env'] }),
-    TypeOrmModule.forRoot({
+    TypeOrmModule.forRootAsync({
+      useFactory: () => ({
       type: 'postgres',
       url: process.env.DATABASE_URL,
-      entities: [Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto],
-      synchronize: true,
+      entities: [AppMaintenance, Organization, Profile, User, Pet, PetPhoto, MedicalRecord, Team, TeamPermission, Volunteer, Campaign, FinancialEntry, FinancialExpense, Partner, BankAccount, OrganizationAddress, AdoptionForm, AdoptionFormPhoto, AdoptionHistoryEvent, AdoptionContract, VolunteerApplication, VolunteerShift, ScheduleLock, ScheduleAccessCode, PasswordResetCode, RefreshToken, EmailChangeRequest, EmailChangeEvent, ScheduleInstitution, ProductType, Product, StockHistoryEvent, MarketingList, MarketingLabel, MarketingCard, MarketingCardMember, MarketingCardLabel, MarketingCardTask, MarketingCardAttachment, MarketingCardComment, MarketingHistoryEvent, Notification],
+      // O sync roda dentro do bootDataSource (passos A a D do endurecimento do banco, RN-38 a RN-40)
+      synchronize: false,
       ssl: process.env.DATABASE_URL?.includes('sslmode=disable') ? false : { rejectUnauthorized: false },
+      // Exposição de refresh_tokens não tenta de novo
+      toRetry: retryUnlessHardeningFailed,
+      }),
+      dataSourceFactory: async (options) => bootDataSource(options),
     }),
     OrganizationModule,
     ProfileModule,
@@ -54,6 +98,7 @@ import { AdoptionFormPhoto } from './adoption-form/adoption-form-photo.entity';
     PetModule,
     MedicalRecordModule,
     TeamModule,
+    AccessModule,
     VolunteerModule,
     CampaignModule,
     FinancialModule,
@@ -63,6 +108,16 @@ import { AdoptionFormPhoto } from './adoption-form/adoption-form-photo.entity';
     MailModule,
     StorageModule,
     AdoptionFormModule,
+    AdoptionHistoryModule,
+    AdoptionContractModule,
+    VolunteerScheduleModule,
+    StockModule,
+    RealtimeModule,
+    NotificationModule,
+    MarketingModule,
+    NullByteModule,
+    AutentiqueModule,
+    WebhooksModule,
   ],
   controllers: [AppController],
   providers: [AppService],

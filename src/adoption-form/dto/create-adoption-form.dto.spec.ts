@@ -77,6 +77,25 @@ const check = async <T extends object>(cls: new () => T, payload: object) => {
   return { instance, errors, fields: errors.map((e) => e.property) };
 };
 
+describe('CreateAdoptionFormDto — pet escolhido', () => {
+  it('desiredPetId é opcional e "" conta como não informado', async () => {
+    const dto = plainToInstance(CreateAdoptionFormDto, multipart({ desiredPetId: '' }));
+    expect((await validate(dto)).map((error) => error.property)).not.toContain('desiredPetId');
+    expect(dto.desiredPetId).toBeUndefined();
+  });
+
+  it('recusa desiredPetId que não é UUID', async () => {
+    const errors = await validate(plainToInstance(CreateAdoptionFormDto, multipart({ desiredPetId: 'mel' })));
+    expect(errors.find((error) => error.property === 'desiredPetId').constraints).toEqual({ isUuid: 'Animal escolhido inválido.' });
+  });
+
+  it('equipe não troca o pet escolhido pela edição da ficha (campo fora do DTO de edição)', async () => {
+    const dto = plainToInstance(UpdateAdoptionFormDto, { desiredPetId: '1b4e28ba-2fa1-41d2-883f-0016d3cca427' });
+    const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
+    expect(errors.map((error) => error.property)).toEqual(['desiredPetId']);
+  });
+});
+
 describe('CreateAdoptionFormDto', () => {
   it('aceita a ficha do front e converte tipos', async () => {
     const { instance, errors } = await check(CreateAdoptionFormDto, multipart());
@@ -90,8 +109,17 @@ describe('CreateAdoptionFormDto', () => {
     expect(instance.sawAdOnOther).toBeUndefined();
   });
 
+  it('aceita CPF com máscara e e-mail em maiúsculas, gravando limpos', async () => {
+    const { instance, errors } = await check(CreateAdoptionFormDto, multipart({ cpf: '529.982.247-25', email: ' Maria@Teste.COM ' }));
+
+    expect(errors).toEqual([]);
+    expect(instance.cpf).toBe('52998224725');
+    expect(instance.email).toBe('maria@teste.com');
+  });
+
   it.each([
-    ['cpf', '123.456.789-09'],
+    ['cpf', '123.456.789-00'],
+    ['fullName', 'Maria'],
     ['phone', '119'],
     ['zipCode', '0131010'],
     ['state', 'São Paulo'],

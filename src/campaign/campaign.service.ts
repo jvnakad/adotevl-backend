@@ -13,8 +13,9 @@ export class CampaignService {
     private readonly campaignRepository: Repository<Campaign>,
   ) {}
 
-  async create(dto: CreateCampaignDto, createdBy: string = null) {
-    const campaign = this.campaignRepository.create({ ...dto, createdBy, updatedBy: createdBy });
+  async create(dto: CreateCampaignDto, organizationId: string, createdBy: string = null) {
+    // A organização é sempre a do usuário autenticado (o DTO não a aceita)
+    const campaign = this.campaignRepository.create({ ...dto, organizationId, createdBy, updatedBy: createdBy });
     return this.campaignRepository.save(campaign);
   }
 
@@ -23,14 +24,16 @@ export class CampaignService {
     return paginate(this.campaignRepository, pagination, where);
   }
 
-  async findOne(id: string) {
-    const campaign = await this.campaignRepository.findOne({ where: { id } });
+  /** Campanha da organização informada; de outra organização responde como inexistente (404). */
+  async findOne(id: string, organizationId: string) {
+    const campaign = await this.campaignRepository.findOne({ where: { id, organizationId } });
     if (!campaign) throw new NotFoundException('Campanha não encontrada.');
     return campaign;
   }
 
-  async update(id: string, dto: Partial<CreateCampaignDto>, updatedBy: string = null) {
-    await this.campaignRepository.update(id, { ...dto, updatedBy });
-    return this.findOne(id);
+  async update(id: string, dto: Partial<CreateCampaignDto>, organizationId: string, updatedBy: string = null) {
+    await this.findOne(id, organizationId);
+    await this.campaignRepository.update({ id, organizationId }, { ...dto, updatedBy });
+    return this.findOne(id, organizationId);
   }
 }

@@ -1,8 +1,9 @@
 import { Controller, Post, Get, Patch, Param, Body, Query, Request, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { RolesGuard } from '../auth/roles.guard';
-import { Roles } from '../auth/roles.decorator';
+import { AccessGuard } from '../access/access.guard';
+import { AdminOnly, RequireAccess } from '../access/access.decorator';
+import { AccessLevel, Screen } from '../access/access';
 import { MedicalRecordService } from './medical-record.service';
 import { CreateMedicalRecordDto } from './dto/create-medical-record.dto';
 import { UpdateMedicalRecordDto } from './dto/update-medical-record.dto';
@@ -10,32 +11,35 @@ import { PaginationDto } from '../common/pagination.dto';
 
 @ApiTags('Histórico Médico')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('ADMIN', 'VOLUNTEER')
+@UseGuards(JwtAuthGuard, AccessGuard)
 @Controller('medical-records')
 export class MedicalRecordController {
   constructor(private readonly medicalRecordService: MedicalRecordService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Registrar consulta médica', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @RequireAccess(Screen.MEDICAL_RECORDS, AccessLevel.EDIT)
+  @ApiOperation({ summary: 'Registrar consulta médica', description: 'Acesso: Prontuário (Editar)' })
   create(@Body() dto: CreateMedicalRecordDto, @Request() req) {
     return this.medicalRecordService.create(dto, req.user.id);
   }
 
   @Get('pet/:petId')
-  @ApiOperation({ summary: 'Listar histórico médico por pet', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @RequireAccess(Screen.MEDICAL_RECORDS, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Listar histórico médico por pet', description: 'Acesso: Prontuário (Visualizar)' })
   findByPet(@Param('petId') petId: string, @Query() pagination: PaginationDto) {
     return this.medicalRecordService.findByPet(petId, pagination);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Buscar registro médico por ID', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @RequireAccess(Screen.MEDICAL_RECORDS, AccessLevel.VIEW)
+  @ApiOperation({ summary: 'Buscar registro médico por ID', description: 'Acesso: Prontuário (Visualizar)' })
   findOne(@Param('id') id: string) {
     return this.medicalRecordService.findOne(id);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Editar registro médico', description: 'Perfis permitidos: ADMIN, VOLUNTEER' })
+  @RequireAccess(Screen.MEDICAL_RECORDS, AccessLevel.EDIT)
+  @ApiOperation({ summary: 'Editar registro médico', description: 'Acesso: Prontuário (Editar)' })
   update(@Param('id') id: string, @Body() dto: UpdateMedicalRecordDto, @Request() req) {
     return this.medicalRecordService.update(id, dto, req.user.id);
   }

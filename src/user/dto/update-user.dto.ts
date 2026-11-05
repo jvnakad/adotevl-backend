@@ -1,17 +1,19 @@
-import { IsString, IsOptional, IsDateString, Matches, Length } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsBoolean, Matches } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsCalendarDate } from '../../common/validation/calendar-date';
+import { IsCpf, IsFullName, IsPersonEmail } from '../../common/validation/person';
 
 export class UpdateUserDto {
   @ApiPropertyOptional({ description: 'Nome completo' })
-  @IsOptional()
-  @IsString()
+  @IsFullName({ optional: true })
   fullName?: string;
 
+  @ApiPropertyOptional({ description: 'E-mail de login (só o admin altera o de outro usuário)' })
+  @IsPersonEmail({ optional: true })
+  email?: string;
+
   @ApiPropertyOptional({ description: 'CPF (somente números, 11 dígitos)' })
-  @IsOptional()
-  @IsString()
-  @Length(11, 11, { message: 'O CPF deve conter exatamente 11 dígitos numéricos.' })
-  @Matches(/^\d{11}$/, { message: 'O CPF deve conter somente números.' })
+  @IsCpf({ optional: true })
   cpf?: string;
 
   @ApiPropertyOptional({ description: 'Celular (somente números, com DDD)' })
@@ -23,14 +25,11 @@ export class UpdateUserDto {
   @ApiPropertyOptional({ description: 'Data de nascimento (formato: YYYY-MM-DD)' })
   @IsOptional()
   @IsDateString({}, { message: 'Informe uma data válida no formato YYYY-MM-DD.' })
+  @IsCalendarDate()
   birthDate?: string;
-
-  @ApiPropertyOptional({ description: 'ID do perfil' })
-  @IsOptional()
-  @IsString()
-  profileId?: string;
 
   @ApiPropertyOptional({ description: 'Ativo/inativo' })
   @IsOptional()
+  @IsBoolean({ message: 'O campo ativo deve ser verdadeiro ou falso.' })
   isActive?: boolean;
 }

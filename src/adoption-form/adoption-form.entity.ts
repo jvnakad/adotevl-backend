@@ -1,4 +1,5 @@
 import {
+  Index,
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -9,14 +10,39 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Organization } from '../organization/organization.entity';
+import { Pet } from '../pet/pet.entity';
 import { AdoptionFormPhoto } from './adoption-form-photo.entity';
 
 export enum AdoptionFormStatus {
   PENDENTE = 'PENDENTE',
+  // Legado: não é mais usado (fichas migradas para PENDENTE); continua no enum por causa do histórico
   EM_ANALISE = 'EM_ANALISE',
   APROVADO = 'APROVADO',
   REPROVADO = 'REPROVADO',
+  // Legado: o termo é gerado com a ficha em APROVADO (fichas migradas para APROVADO); continua por causa do histórico
+  CONTRATO_GERADO = 'CONTRATO_GERADO',
+  AGUARDANDO_ASSINATURA = 'AGUARDANDO_ASSINATURA',
+  CONCLUIDA = 'CONCLUIDA',
 }
+
+// Ordem das colunas do kanban (GET /adoption-forms/board) e rótulos usados nas descrições do histórico
+export const ADOPTION_FORM_STATUS_ORDER: AdoptionFormStatus[] = [
+  AdoptionFormStatus.PENDENTE,
+  AdoptionFormStatus.APROVADO,
+  AdoptionFormStatus.AGUARDANDO_ASSINATURA,
+  AdoptionFormStatus.CONCLUIDA,
+  AdoptionFormStatus.REPROVADO,
+];
+
+export const ADOPTION_FORM_STATUS_LABELS: Record<AdoptionFormStatus, string> = {
+  PENDENTE: 'Pendente',
+  EM_ANALISE: 'Em análise',
+  APROVADO: 'Aprovado',
+  REPROVADO: 'Reprovado',
+  CONTRATO_GERADO: 'Termo gerado',
+  AGUARDANDO_ASSINATURA: 'Aguardando assinatura',
+  CONCLUIDA: 'Concluída',
+};
 
 // Ficha preenchida no formulário público de adoção (/adocao do front)
 @Entity('adoption_forms')
@@ -229,6 +255,24 @@ export class AdoptionForm {
 
   @Column({ name: 'reviewed_at', type: 'timestamptz', nullable: true })
   reviewedAt: Date;
+
+  // Pet escolhido pelo adotante no formulário público; ao aprovar a ficha vira o pet vinculado (petId) e é reservado
+  @ManyToOne(() => Pet, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'desired_pet_id' })
+  desiredPet: Pet;
+
+  @Index()
+  @Column({ name: 'desired_pet_id', nullable: true })
+  desiredPetId: string;
+
+  // Pet oficial da ficha (aprovação, movimentação do card ou edição do pet); SET NULL para a exclusão de um pet não apagar a ficha
+  @ManyToOne(() => Pet, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'pet_id' })
+  pet: Pet;
+
+  @Index()
+  @Column({ name: 'pet_id', nullable: true })
+  petId: string;
 
   @ManyToOne(() => Organization, { nullable: false })
   @JoinColumn({ name: 'organization_id' })

@@ -2,7 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const request = require('supertest');
-import { TestAppModule } from './test-app.module';
+import { TestAppModule, joinTeam, cleanupAccess, VOLUNTEER_APPLICATION } from './test-app.module';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Profile } from '../src/profile/profile.entity';
 import { Organization } from '../src/organization/organization.entity';
@@ -27,6 +27,8 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     app = moduleFixture.createNestApplication();
     app.useGlobalPipes(new ValidationPipe());
     await app.init();
+    // Servidor escutando de verdade: sem isso o supertest abre uma porta por requisicao e, com muitas em paralelo, o CI derruba conexoes (ECONNRESET)
+    await app.listen(0);
 
     profileRepo = moduleFixture.get(getRepositoryToken(Profile));
     orgRepo = moduleFixture.get(getRepositoryToken(Organization));
@@ -35,6 +37,7 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     // Limpeza prévia
     const existingOrg = await orgRepo.findOne({ where: { cnpj: '22222222222222' } });
     if (existingOrg) {
+      await cleanupAccess(app, existingOrg.id);
       await userRepo.delete({ organizationId: existingOrg.id });
       await orgRepo.delete({ id: existingOrg.id });
     }
@@ -62,6 +65,7 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
       isActive: true,
     });
     adminId = admin.id;
+    await joinTeam(app, admin, 'ADMIN');
 
     const loginRes = await request(app.getHttpServer())
       .post('/auth/login')
@@ -70,6 +74,7 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
   }, 30000);
 
   afterAll(async () => {
+    await cleanupAccess(app, orgId);
     await userRepo.delete({ organizationId: orgId });
     await orgRepo.delete({ id: orgId });
     await app.close();
@@ -83,16 +88,29 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
       .post('/users')
       .send({
         fullName: 'Voluntário Novo',
-        cpf: '99988877700',
+        cpf: '99988877714',
         email: 'voluntario.novo@teste.com',
         phone: '11900000002',
+        birthDate: '1990-04-20',
         password: 'senha123',
         profileId: volunteerProfile.id,
+        consent: true,
+        application: VOLUNTEER_APPLICATION,
         organizationId: orgId,
       });
     expect(createRes.status).toBe(201);
+    // Resposta pública não expõe hash da senha nem código de confirmação (o código chega por e-mail)
+    expect(createRes.body).toEqual({ id: expect.any(String), email: 'voluntario.novo@teste.com' });
     const userId = createRes.body.id;
-    const confirmationCode = createRes.body.confirmationCode;
+    // confirmationCode é select:false: só aparece pedindo
+    const { confirmationCode } = await userRepo.findOne({ where: { id: userId }, select: { id: true, confirmationCode: true } });
+
+    // Admin lê o questionário respondido no cadastro
+    const applicationRes = await request(app.getHttpServer())
+      .get(`/users/${userId}/application`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    expect(applicationRes.status).toBe(200);
+    expect(applicationRes.body).toEqual(expect.objectContaining({ city: 'Curitiba', tools: ['CANVA', 'INSTAGRAM'] }));
 
     // 2. Confirma o e-mail via código
     const confirmRes = await request(app.getHttpServer())
@@ -105,10 +123,32 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
       .send({ email: 'voluntario.novo@teste.com', password: 'senha123' });
     expect(loginBeforeApproval.status).toBe(401);
 
-    // 4. Admin aprova o usuário
+    // 4. Admin cria a equipe e define o acesso: só visualizar Pets
+    const teamRes = await request(app.getHttpServer())
+      .post('/teams')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ name: 'Resgate' });
+    expect(teamRes.status).toBe(201);
+    const teamId = teamRes.body.id;
+    const permsRes = await request(app.getHttpServer())
+      .put(`/teams/${teamId}/permissions`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ permissions: { PETS: 'VIEW' } });
+    expect(permsRes.status).toBe(200);
+    expect(permsRes.body.permissions).toEqual(expect.objectContaining({ PETS: 'VIEW', FINANCIAL: 'NONE' }));
+
+    // 4.1 Aprovar exige a equipe
+    const approveWithoutTeam = await request(app.getHttpServer())
+      .patch(`/users/${userId}/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({});
+    expect(approveWithoutTeam.status).toBe(400);
+
+    // 4.2 Admin aprova o usuário na equipe
     const approveRes = await request(app.getHttpServer())
       .patch(`/users/${userId}/approve`)
-      .set('Authorization', `Bearer ${adminToken}`);
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ teamId });
     expect(approveRes.status).toBe(200);
 
     // 5. Usuário faz login com sucesso
@@ -117,6 +157,27 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
       .send({ email: 'voluntario.novo@teste.com', password: 'senha123' });
     expect(loginRes.status).toBe(201);
     const userToken = loginRes.body.access_token;
+
+    // 5.1 Acesso vem da equipe: vê pets, não cadastra, não entra no financeiro nem aprova ninguém
+    const meRes = await request(app.getHttpServer()).get('/auth/me').set('Authorization', `Bearer ${userToken}`);
+    expect(meRes.body.access).toEqual(expect.objectContaining({ teamId, teamName: 'Resgate', isAdmin: false }));
+    expect(meRes.body.access.permissions).toEqual({ PETS: 'VIEW' });
+    expect((await request(app.getHttpServer()).get('/pets').set('Authorization', `Bearer ${userToken}`)).status).toBe(200);
+    const createPet = await request(app.getHttpServer())
+      .post('/pets')
+      .set('Authorization', `Bearer ${userToken}`)
+      .send({ name: 'Bob', species: 'Cachorro', sex: 'Macho', birthDate: '2020-01', organizationId: orgId });
+    expect(createPet.status).toBe(403);
+    expect(createPet.body.message).toBe('Sua equipe só pode visualizar Pets.');
+    expect((await request(app.getHttpServer()).get('/financial/balance').set('Authorization', `Bearer ${userToken}`)).status).toBe(403);
+    expect((await request(app.getHttpServer()).patch(`/users/${adminId}/approve`).set('Authorization', `Bearer ${userToken}`).send({ teamId })).status).toBe(403);
+
+    // 5.2 Último membro não sai da equipe Admin
+    const lastAdmin = await request(app.getHttpServer())
+      .patch(`/users/${adminId}/team`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ teamId });
+    expect(lastAdmin.status).toBe(400);
 
     // 6. Usuário edita o próprio perfil
     const editRes = await request(app.getHttpServer())
@@ -134,4 +195,112 @@ describe('Fluxo de ciclo de vida do usuário (e2e)', () => {
     expect(getRes.body.isApproved).toBe(true);
     expect(getRes.body.fullName).toBe('Voluntário Atualizado');
   }, 30000);
+
+  it('cadastro e edição validam nome, e-mail e CPF e gravam normalizados', async () => {
+    const server = app.getHttpServer();
+    const base = {
+      fullName: 'Pessoa Valida',
+      cpf: '39053344705',
+      email: 'pessoa.valida@teste.com',
+      phone: '11900000003',
+      birthDate: '1990-04-20',
+      password: 'senha123',
+      consent: true,
+      application: VOLUNTEER_APPLICATION,
+      organizationId: orgId,
+    };
+
+    const invalid = await request(server).post('/users').send({ ...base, fullName: 'Maria', email: 'maria@x', cpf: '12345678900' });
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.message).toEqual(
+      expect.arrayContaining(['Informe nome e sobrenome.', 'E-mail inválido. Confira se está no formato nome@exemplo.com.', 'CPF inválido. Confira os números.']),
+    );
+
+    const empty = await request(server).post('/users').send({ ...base, fullName: '', email: '', cpf: '' });
+    expect(empty.body.message).toEqual(expect.arrayContaining(['Informe seu nome completo.', 'Informe seu e-mail.', 'Informe seu CPF.']));
+
+    const short = await request(server).post('/users').send({ ...base, fullName: 'Maria 2 Silva', cpf: '123' });
+    expect(short.body.message).toEqual(expect.arrayContaining(['Use apenas letras no nome.', 'O CPF precisa ter 11 números.']));
+
+    const ok = await request(server)
+      .post('/users')
+      .send({ ...base, fullName: '  Pessoa   Valida ', cpf: '390.533.447-05', email: ' Pessoa.Valida@Teste.COM ' });
+    expect(ok.status).toBe(201);
+    const saved = await userRepo.findOne({ where: { id: ok.body.id } });
+    expect(saved).toEqual(expect.objectContaining({ fullName: 'Pessoa Valida', cpf: '39053344705', email: 'pessoa.valida@teste.com' }));
+
+    // Edição (admin): mesmas regras, CPF mascarado é gravado só com dígitos
+    const auth = { Authorization: `Bearer ${adminToken}` };
+    const badEdit = await request(server).patch(`/users/${saved.id}`).set(auth).send({ fullName: 'Pessoa', cpf: '11111111111' });
+    expect(badEdit.status).toBe(400);
+    expect(badEdit.body.message).toEqual(expect.arrayContaining(['Informe nome e sobrenome.', 'CPF inválido. Confira os números.']));
+
+    const goodEdit = await request(server).patch(`/users/${saved.id}`).set(auth).send({ fullName: ' Pessoa  Editada ', cpf: '529.982.247-25' });
+    expect(goodEdit.status).toBe(200);
+    expect(goodEdit.body).toEqual(expect.objectContaining({ fullName: 'Pessoa Editada', cpf: '52998224725' }));
+  }, 30000);
+
+  it('admin altera o e-mail de outro voluntário: grava, derruba o token antigo e o login passa a ser pelo novo', async () => {
+    const server = app.getHttpServer();
+    const auth = { Authorization: `Bearer ${adminToken}` };
+    const volunteerProfile = await profileRepo.findOne({ where: { name: 'VOLUNTEER' } });
+    const base = { organizationId: orgId, profileId: volunteerProfile.id, isConfirmed: true, isApproved: true, isActive: true, password: await bcrypt.hash('senha123', 10) };
+    const target = await userRepo.save({ ...base, fullName: 'Troca Email', cpf: '52998224725', email: 'troca.antigo@teste.com', phone: '11900000010' });
+    const other = await userRepo.save({ ...base, fullName: 'Outro Usuario', cpf: '39053344705', email: 'ocupado@teste.com', phone: '11900000011' });
+    await joinTeam(app, target, 'ADMIN');
+
+    const oldLogin = await request(server).post('/auth/login').send({ email: 'troca.antigo@teste.com', password: 'senha123' });
+    expect(oldLogin.status).toBe(201);
+    const oldToken = oldLogin.body.access_token;
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${oldToken}`)).status).toBe(200);
+
+    // E-mail de outro usuário (sem diferenciar maiúsculas) e o próprio e-mail do admin por esta rota
+    const taken = await request(server).patch(`/users/${target.id}`).set(auth).send({ email: 'OCUPADO@teste.com' });
+    expect(taken.status).toBe(409);
+    expect(taken.body.message).toBe('Este e-mail já está em uso.');
+    const own = await request(server).patch(`/users/${adminId}`).set(auth).send({ email: 'admin.novo@teste.com' });
+    expect(own.status).toBe(400);
+    expect(own.body.message).toBe('Altere seu e-mail em Editar perfil.');
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${oldToken}`)).status).toBe(200);
+
+    // O guard só recusa iat menor que o segundo da troca: espera virar o segundo
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    const changed = await request(server).patch(`/users/${target.id}`).set(auth).send({ email: ' Troca.Novo@Teste.com ', fullName: 'Troca Email' });
+    expect(changed.status).toBe(200);
+    expect(changed.body.email).toBe('troca.novo@teste.com');
+    expect((await userRepo.findOne({ where: { id: target.id } })).email).toBe('troca.novo@teste.com');
+
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${oldToken}`)).status).toBe(401);
+    expect((await request(server).post('/auth/login').send({ email: 'troca.antigo@teste.com', password: 'senha123' })).status).toBe(401);
+    const newLogin = await request(server).post('/auth/login').send({ email: 'troca.novo@teste.com', password: 'senha123' });
+    expect(newLogin.status).toBe(201);
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${newLogin.body.access_token}`)).status).toBe(200);
+
+    // Mesmo e-mail de novo: no-op, a sessão nova continua valendo
+    const same = await request(server).patch(`/users/${target.id}`).set(auth).send({ email: 'troca.novo@teste.com' });
+    expect(same.status).toBe(200);
+    expect((await request(server).get('/auth/me').set('Authorization', `Bearer ${newLogin.body.access_token}`)).status).toBe(200);
+    expect(other.email).toBe('ocupado@teste.com');
+  }, 30000);
+
+  it('tutoriais: marca tour visto, desliga e zera pelo /users/me/tutorial', async () => {
+    const auth = { Authorization: `Bearer ${adminToken}` };
+
+    const seen = await request(app.getHttpServer()).patch('/users/me/tutorial').set(auth).send({ tour: 'PETS', version: 1 });
+    expect(seen.status).toBe(200);
+    expect(seen.body).toEqual({ tours: { PETS: 1 }, disabled: false });
+
+    const disabled = await request(app.getHttpServer()).patch('/users/me/tutorial').set(auth).send({ disabled: true });
+    expect(disabled.body).toEqual({ tours: { PETS: 1 }, disabled: true });
+
+    const me = await request(app.getHttpServer()).get('/auth/me').set(auth);
+    expect(me.body.tutorialProgress).toEqual({ tours: { PETS: 1 }, disabled: true });
+
+    const invalid = await request(app.getHttpServer()).patch('/users/me/tutorial').set(auth).send({ tour: 'PETS' });
+    expect(invalid.status).toBe(400);
+
+    const reset = await request(app.getHttpServer()).delete('/users/me/tutorial').set(auth);
+    expect(reset.status).toBe(200);
+    expect(reset.body).toEqual({ tours: {}, disabled: false });
+  });
 });

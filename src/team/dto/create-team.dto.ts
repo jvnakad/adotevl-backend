@@ -1,9 +1,7 @@
-import { IsString, IsUUID } from 'class-validator';
+import { IsNotEmpty, IsString } from 'class-validator';
 
 export class CreateTeamDto {
   @IsString()
+  @IsNotEmpty({ message: 'Informe o nome da equipe.' })
   name: string;
-
-  @IsUUID()
-  organizationId: string;
 }

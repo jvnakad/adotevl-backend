@@ -1,0 +1,153 @@
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  ManyToOne,
+  OneToOne,
+  JoinColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+} from 'typeorm';
+import { Organization } from '../organization/organization.entity';
+import { AdoptionForm } from '../adoption-form/adoption-form.entity';
+import { Pet } from '../pet/pet.entity';
+import { StoredClause } from './contract-numbering';
+import type { SignaturePosition } from './contract-pdf.builder';
+
+export interface ContractAdopterData {
+  name: string;
+  age: string;
+  birthDate: string;
+  rg: string;
+  cpf: string;
+  email: string;
+  phone: string;
+  profession: string;
+  address: string;
+}
+
+export interface ContractAnimalData {
+  name: string;
+  species: string;
+  sex: string;
+  breed: string;
+  coat: string;
+  distinctiveMarks: string;
+  age: string;
+  castrated: boolean | null;
+  vaccinated: boolean | null;
+  temperament: string;
+  usesMedication: boolean | null;
+  medicationDetails: string;
+}
+
+export interface ContractSignatureData {
+  city: string;
+  date: string | null;
+}
+
+export interface ContractData {
+  adopter: ContractAdopterData;
+  animal: ContractAnimalData;
+  signature: ContractSignatureData;
+}
+
+// Situação do envio para assinatura digital no Autentique (null = nunca enviado)
+export enum ContractSignatureStatus {
+  PENDENTE = 'PENDENTE',
+  ASSINADO = 'ASSINADO',
+  RECUSADO = 'RECUSADO',
+  CANCELADO = 'CANCELADO',
+}
+
+// Contrato (termo de adoção) da ficha: rascunho editável + PDFs gerados (versões no bucket privado)
+@Entity('adoption_contracts')
+export class AdoptionContract {
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
+
+  @OneToOne(() => AdoptionForm, { nullable: false, onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'adoption_form_id' })
+  adoptionForm: AdoptionForm;
+
+  @Column({ name: 'adoption_form_id', unique: true })
+  adoptionFormId: string;
+
+  @ManyToOne(() => Pet, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'pet_id' })
+  pet: Pet;
+
+  @Column({ name: 'pet_id', nullable: true })
+  petId: string;
+
+  @Column({ type: 'jsonb' })
+  data: ContractData;
+
+  @Column({ type: 'jsonb' })
+  clauses: StoredClause[];
+
+  // 0 = nunca gerado; cada geração incrementa e grava contracts/<formId>/v<n>.pdf
+  @Column({ type: 'int', default: 0 })
+  version: number;
+
+  @Column({ name: 'pdf_storage_path', nullable: true })
+  pdfStoragePath: string;
+
+  @Column({ name: 'generated_at', type: 'timestamptz', nullable: true })
+  generatedAt: Date;
+
+  // Onde a linha "ADOTANTE" caiu no PDF atual: o Autentique carimba a assinatura ali
+  @Column({ name: 'adopter_signature_position', type: 'jsonb', nullable: true })
+  adopterSignaturePosition: SignaturePosition | null;
+
+  // Linha "Representante legal": a associação assina ali automaticamente no envio
+  @Column({ name: 'organization_signature_position', type: 'jsonb', nullable: true })
+  organizationSignaturePosition: SignaturePosition | null;
+
+  // Assinatura digital (Autentique): documento enviado = PDF da versão signatureVersion
+  @Column({ name: 'autentique_document_id', nullable: true, unique: true })
+  autentiqueDocumentId: string;
+
+  @Column({ name: 'signature_status', type: 'enum', enum: ContractSignatureStatus, nullable: true })
+  signatureStatus: ContractSignatureStatus;
+
+  @Column({ name: 'signature_link', nullable: true })
+  signatureLink: string;
+
+  @Column({ name: 'signature_email', nullable: true })
+  signatureEmail: string;
+
+  @Column({ name: 'signature_version', type: 'int', nullable: true })
+  signatureVersion: number;
+
+  @Column({ name: 'signature_sent_at', type: 'timestamptz', nullable: true })
+  signatureSentAt: Date;
+
+  @Column({ name: 'signed_at', type: 'timestamptz', nullable: true })
+  signedAt: Date;
+
+  @Column({ name: 'signed_pdf_storage_path', nullable: true })
+  signedPdfStoragePath: string;
+
+  @ManyToOne(() => Organization, { nullable: false })
+  @JoinColumn({ name: 'organization_id' })
+  organization: Organization;
+
+  @Column({ name: 'organization_id' })
+  organizationId: string;
+
+  @Column({ name: 'is_active', default: true })
+  isActive: boolean;
+
+  @Column({ name: 'created_by', nullable: true })
+  createdBy: string;
+
+  @Column({ name: 'updated_by', nullable: true })
+  updatedBy: string;
+
+  @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' })
+  updatedAt: Date;
+}

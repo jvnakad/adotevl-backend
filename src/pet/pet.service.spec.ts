@@ -39,6 +39,35 @@ describe('PetService', () => {
     expect(result).toEqual(expect.objectContaining({ name: 'Bob', organizationId: 'org-1', createdBy: 'user-1', updatedBy: 'user-1', fotos: [], ageLabel: '2 anos' }));
   });
 
+  describe('tempo real', () => {
+    it('criar, editar e remover avisam Pets e Adotantes com o autor', async () => {
+      const screenRealtime = { publish: jest.fn(async (_change: any) => undefined) };
+      service = new PetService(petRepo as any, photoRepo as any, storage as any, formRepo as any, screenRealtime as any);
+      petRepo.save.mockResolvedValue({ id: 'p1', birthDate: '2024-10' });
+      petRepo.findOne.mockResolvedValue({ id: 'p1', status: 'DISPONIVEL', fotos: [] });
+
+      await service.create({ name: 'Bob', species: 'Cachorro', sex: 'Macho', birthDate: '2024-10' }, 'org-1', 'user-1');
+      await service.update('p1', { name: 'Rex' } as any, 'org-1', 'user-1');
+      await service.remove('p1', 'org-1', 'user-1');
+
+      expect(screenRealtime.publish.mock.calls.map(([change]) => [change.kind, change.id])).toEqual([
+        ['created', 'p1'],
+        ['updated', 'p1'],
+        ['deleted', 'p1'],
+      ]);
+      expect(screenRealtime.publish).toHaveBeenCalledWith({ screens: ['PETS', 'ADOPTERS'], organizationId: 'org-1', resource: 'pet', kind: 'created', id: 'p1', actorId: 'user-1' });
+    });
+
+    it('validação que falha não avisa ninguém', async () => {
+      const screenRealtime = { publish: jest.fn(async (_change: any) => undefined) };
+      service = new PetService(petRepo as any, photoRepo as any, storage as any, formRepo as any, screenRealtime as any);
+      petRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.remove('p1', 'org-1', 'user-1')).rejects.toThrow('Pet não encontrado.');
+      expect(screenRealtime.publish).not.toHaveBeenCalled();
+    });
+  });
+
   describe('findAll', () => {
     it('lista os cadastrados mais recentes primeiro', async () => {
       await service.findAll(pagination, { organizationId: 'org-1' });

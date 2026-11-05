@@ -4,6 +4,7 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -32,6 +33,8 @@ import { guardianFields } from './volunteer-age';
 import { normalizeCpf, normalizeEmail, normalizePersonName } from '../common/validation/person';
 import { VolunteerApplication } from '../volunteer-application/volunteer-application.entity';
 import { closePendingEmailChange, closeRecoveryCodes } from './email-change-pending';
+import { ScreenRealtimeService, ScreenChangeKind } from '../realtime/screen-realtime.service';
+import { Screen } from '../access/access';
 
 /** O ValidationPipe global não grava a normalização no body: nome, e-mail e CPF vão limpos para o banco. */
 function normalizedPerson(dto: { fullName: string; cpf: string; email: string; guardianName?: string }) {
@@ -65,7 +68,13 @@ export class UserService {
     private readonly access: AccessService,
     private readonly realtime: RealtimeService,
     private readonly refreshTokens: RefreshTokenService,
+    @Optional() private readonly screenRealtime?: ScreenRealtimeService,
   ) {}
+
+  // Tempo real: usuário/voluntário mudou = tela Voluntários. Nunca falha a ação.
+  private changed(organizationId: string, kind: ScreenChangeKind, id: string, actorId?: string | null) {
+    return this.screenRealtime?.publish({ screens: Screen.VOLUNTEERS, organizationId, resource: 'user', kind, id, actorId });
+  }
 
   async create(dto: CreateUserDto, createdBy: string = null) {
     const person = normalizedPerson(dto);
@@ -109,6 +118,7 @@ export class UserService {
       await this.membership.assign(saved, adminTeam.id, createdBy);
     }
     await this.mailService.sendConfirmationEmail(saved.email, saved.fullName, saved.confirmationCode);
+    await this.changed(dto.organizationId, 'created', saved.id, createdBy);
     return saved;
   }
 
@@ -140,6 +150,7 @@ export class UserService {
     const team = await this.teams.systemTeam(dto.organizationId, TeamSystemKey.FLOATING_VOLUNTEER);
     await this.membership.assign(saved, team.id, null);
     await this.mailService.sendFloatingWelcomeEmail(saved.email, saved.fullName);
+    await this.changed(dto.organizationId, 'created', saved.id);
     return { id: saved.id, fullName: saved.fullName, email: saved.email };
   }
 
@@ -178,6 +189,7 @@ export class UserService {
     // O save devolve as colunas select:false preenchidas (null): nenhuma delas volta na resposta (RN-35)
     // Rota pública: devolve só o necessário (sem CPF, telefone, nascimento nem dados da organização)
     const saved = await this.userRepository.save(user);
+    await this.changed(user.organizationId, 'updated', user.id);
     return { message: 'Conta confirmada com sucesso.', isApproved: saved.isApproved };
   }
 
@@ -296,6 +308,7 @@ export class UserService {
     }
     // Desativado pela edição: o websocket aberto cai junto com a sessão
     if (data.isActive === false) await this.realtime.disconnectUser(id);
+    await this.changed(current.organizationId, 'updated', id, updatedBy);
     return this.userRepository.findOne({ where: { id } });
   }
 
@@ -305,8 +318,9 @@ export class UserService {
   }
 
   async activate(id: string, updatedBy: string = null, organizationId: string = null) {
-    await this.findInOrganization(id, organizationId);
+    const user = await this.findInOrganization(id, organizationId);
     await this.userRepository.update(id, { isActive: true, updatedBy });
+    await this.changed(user.organizationId, 'updated', id, updatedBy);
     return this.userRepository.findOne({ where: { id } });
   }
 
@@ -322,14 +336,16 @@ export class UserService {
       { expiresIn: APPROVAL_LINK_TTL },
     );
     await this.mailService.sendApprovalEmail(updated.email, updated.fullName, token);
+    await this.changed(user.organizationId, 'updated', id, updatedBy);
     return updated;
   }
 
   async reject(id: string, updatedBy: string = null, organizationId: string = null) {
-    await this.findInOrganization(id, organizationId);
+    const user = await this.findInOrganization(id, organizationId);
     await this.membership.ensureNotLastAdmin(id);
     await this.userRepository.update(id, { isActive: false, updatedBy });
     await this.realtime.disconnectUser(id);
+    await this.changed(user.organizationId, 'updated', id, updatedBy);
     return this.userRepository.findOne({ where: { id } });
   }
 
@@ -338,6 +354,7 @@ export class UserService {
     await this.membership.assign(user, teamId, updatedBy);
     // Pode ter virado volante: o websocket aberto cai e a reconexão passa pelas checagens de novo
     await this.realtime.disconnectUser(id);
+    await this.changed(user.organizationId, 'updated', id, updatedBy);
     return user;
   }
 

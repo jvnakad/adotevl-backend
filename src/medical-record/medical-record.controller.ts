@@ -20,7 +20,7 @@ export class MedicalRecordController {
   @RequireAccess(Screen.MEDICAL_RECORDS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Registrar consulta médica', description: 'Acesso: Prontuário (Editar)' })
   create(@Body() dto: CreateMedicalRecordDto, @Request() req) {
-    return this.medicalRecordService.create(dto, req.user.id);
+    return this.medicalRecordService.create(dto, req.user.id, req.user.organizationId);
   }
 
   @Get('pet/:petId')
@@ -41,6 +41,6 @@ export class MedicalRecordController {
   @RequireAccess(Screen.MEDICAL_RECORDS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Editar registro médico', description: 'Acesso: Prontuário (Editar)' })
   update(@Param('id') id: string, @Body() dto: UpdateMedicalRecordDto, @Request() req) {
-    return this.medicalRecordService.update(id, dto, req.user.id);
+    return this.medicalRecordService.update(id, dto, req.user.id, req.user.organizationId);
   }
 }

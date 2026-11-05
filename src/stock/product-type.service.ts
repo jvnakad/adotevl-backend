@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Not, Repository } from 'typeorm';
 import { ProductType } from './product-type.entity';
@@ -9,6 +9,8 @@ import { CreateProductTypeDto, UpdateProductTypeDto } from './dto/create-product
 import { PaginationDto } from '../common/pagination.dto';
 import { normalizeName } from '../common/normalize-name';
 import { toDuplicateNameError } from './stock-errors';
+import { ScreenRealtimeService, ScreenChangeKind } from '../realtime/screen-realtime.service';
+import { Screen } from '../access/access';
 
 const DUPLICATE_MESSAGE = 'Já existe um tipo de produto com esse nome.';
 const NOT_FOUND_MESSAGE = 'Tipo de produto não encontrado.';
@@ -20,7 +22,13 @@ export class ProductTypeService {
     private readonly typeRepository: Repository<ProductType>,
     private readonly dataSource: DataSource,
     private readonly history: StockHistoryService,
+    @Optional() private readonly screenRealtime?: ScreenRealtimeService,
   ) {}
+
+  // Tempo real: avisa as telas abertas do Estoque (o front busca de novo pela API). Nunca falha a ação.
+  private changed(organizationId: string, kind: ScreenChangeKind, id: string, actorId?: string | null) {
+    return this.screenRealtime?.publish({ screens: [Screen.STOCK_PRODUCT_TYPES, Screen.STOCK, Screen.STOCK_HISTORY], organizationId, resource: 'stock-product-type', kind, id, actorId });
+  }
 
   async findAll(pagination: PaginationDto, organizationId: string) {
     const { page = 1, limit = 10 } = pagination;
@@ -62,6 +70,7 @@ export class ProductTypeService {
         });
         return type;
       });
+      await this.changed(organizationId, 'created', saved.id, userId);
       return this.toResponse(saved);
     } catch (error) {
       throw toDuplicateNameError(error) ?? error;
@@ -99,6 +108,7 @@ export class ProductTypeService {
         });
         return updated;
       });
+      await this.changed(organizationId, 'updated', id, userId);
       return this.toResponse(saved);
     } catch (error) {
       throw toDuplicateNameError(error) ?? error;
@@ -126,6 +136,7 @@ export class ProductTypeService {
         userName: await this.history.resolveUserName(manager, userId),
       });
     });
+    await this.changed(organizationId, 'deleted', id, userId);
   }
 
   /**

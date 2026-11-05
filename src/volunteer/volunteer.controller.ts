@@ -20,7 +20,7 @@ export class VolunteerController {
   @RequireAccess(Screen.VOLUNTEERS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Cadastrar voluntário', description: 'Acesso: Voluntários (Editar)' })
   create(@Body() dto: CreateVolunteerDto, @Request() req) {
-    return this.volunteerService.create(dto, req.user.id);
+    return this.volunteerService.create(dto, req.user.id, req.user.organizationId);
   }
 
   @Get()
@@ -41,6 +41,6 @@ export class VolunteerController {
   @RequireAccess(Screen.VOLUNTEERS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Atualizar voluntário', description: 'Acesso: Voluntários (Editar)' })
   update(@Param('id') id: string, @Body() dto: UpdateVolunteerDto, @Request() req) {
-    return this.volunteerService.update(id, dto, req.user.id);
+    return this.volunteerService.update(id, dto, req.user.id, req.user.organizationId);
   }
 }

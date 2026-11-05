@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, Logger, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { FindOptionsOrder, ILike, In, Not, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -13,6 +13,8 @@ import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
 import { StorageService } from '../storage/storage.service';
 import { petAgeLabel } from './pet-age';
+import { ScreenRealtimeService, ScreenChangeKind } from '../realtime/screen-realtime.service';
+import { Screen } from '../access/access';
 
 export const MAX_PET_PHOTOS = 10;
 export const MAX_PHOTO_SIZE = 5 * 1024 * 1024;
@@ -47,7 +49,13 @@ export class PetService implements OnModuleInit {
     private readonly storageService: StorageService,
     @InjectRepository(AdoptionForm)
     private readonly formRepository: Repository<AdoptionForm>,
+    @Optional() private readonly screenRealtime?: ScreenRealtimeService,
   ) {}
+
+  // Tempo real: avisa as telas abertas que algo mudou (o front busca de novo pela API). Nunca falha a ação.
+  private changed(organizationId: string, kind: ScreenChangeKind, id?: string, actorId?: string | null) {
+    return this.screenRealtime?.publish({ screens: [Screen.PETS, Screen.ADOPTERS], organizationId, resource: 'pet', kind, id, actorId });
+  }
 
   async onModuleInit() {
     const [, affected] = await this.petRepository.query(LEGACY_AGE_TO_BIRTH_DATE);
@@ -58,6 +66,7 @@ export class PetService implements OnModuleInit {
     // A organização é sempre a do usuário autenticado (o DTO não a aceita)
     const pet = this.petRepository.create({ ...dto, organizationId, createdBy, updatedBy: createdBy });
     const saved = await this.petRepository.save(pet);
+    await this.changed(organizationId, 'created', saved.id, createdBy);
     return this.withAge({ ...saved, fotos: [] });
   }
 
@@ -117,6 +126,7 @@ export class PetService implements OnModuleInit {
     const { fotos, adoptionFormId, ...data } = dto as Partial<CreatePetDto> & { fotos?: unknown; adoptionFormId?: string };
     if (!adoptionFormId) {
       await this.petRepository.update({ id, organizationId }, { ...data, updatedBy });
+      await this.changed(organizationId, 'updated', id, updatedBy);
       return this.findOne(id, organizationId);
     }
 
@@ -142,6 +152,7 @@ export class PetService implements OnModuleInit {
         if (!held) await manager.getRepository(Pet).update({ id: form.petId, organizationId, status: PetStatus.EM_PROCESSO }, { status: PetStatus.DISPONIVEL, updatedBy });
       }
     });
+    await this.changed(organizationId, 'updated', id, updatedBy);
     return this.findOne(id, organizationId);
   }
 
@@ -162,6 +173,7 @@ export class PetService implements OnModuleInit {
   async remove(id: string, organizationId: string, updatedBy: string = null) {
     await this.assertOwned(id, organizationId);
     await this.petRepository.update({ id, organizationId }, { isActive: false, updatedBy });
+    await this.changed(organizationId, 'deleted', id, updatedBy);
     return { message: 'Pet desativado com sucesso.' };
   }
 
@@ -198,15 +210,17 @@ export class PetService implements OnModuleInit {
       throw error;
     }
 
+    await this.changed(organizationId, 'updated', petId, createdBy);
     return this.findOne(petId, organizationId);
   }
 
-  async removePhoto(petId: string, photoId: string, organizationId: string) {
+  async removePhoto(petId: string, photoId: string, organizationId: string, actorId: string = null) {
     await this.assertOwned(petId, organizationId);
     const photo = await this.photoRepository.findOne({ where: { id: photoId, petId } });
     if (!photo) throw new NotFoundException('Foto não encontrada.');
     await this.storageService.remove([photo.storagePath]);
     await this.photoRepository.delete(photo.id);
+    await this.changed(organizationId, 'updated', petId, actorId);
     return { message: 'Foto removida com sucesso.' };
   }
 

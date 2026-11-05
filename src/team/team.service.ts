@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Team, TeamSystemKey } from './team.entity';
@@ -7,6 +7,7 @@ import { CreateTeamDto } from './dto/create-team.dto';
 import { PaginationDto } from '../common/pagination.dto';
 import { paginate } from '../common/paginate.helper';
 import { AccessLevel, ADMIN_PERMISSIONS, hasLevel, Screen, SCREEN_BY_KEY, SCREENS, ScreenPermissions } from '../access/access';
+import { ScreenRealtimeService, ScreenChangeKind } from '../realtime/screen-realtime.service';
 
 export const ADMIN_TEAM_NAME = 'Admin';
 
@@ -27,14 +28,22 @@ export class TeamService {
     private readonly teamRepository: Repository<Team>,
     @InjectRepository(TeamPermission)
     private readonly permissionRepository: Repository<TeamPermission>,
+    @Optional() private readonly screenRealtime?: ScreenRealtimeService,
   ) {}
+
+  // Tempo real: equipe mudou = Equipes e Voluntários (a lista mostra a equipe de cada um). Nunca falha a ação.
+  private changed(organizationId: string, kind: ScreenChangeKind, id: string, actorId?: string | null) {
+    return this.screenRealtime?.publish({ screens: [Screen.TEAMS, Screen.VOLUNTEERS], organizationId, resource: 'team', kind, id, actorId });
+  }
 
   async create(dto: CreateTeamDto, organizationId: string, createdBy: string = null) {
     const existing = await this.teamRepository.findOne({ where: { name: dto.name, organizationId } });
     if (existing) throw new ConflictException('Já existe uma equipe com este nome nesta organização.');
     // Equipe nova já nasce no sistema de permissões: começa sem acesso a nenhuma tela
     const team = this.teamRepository.create({ ...dto, organizationId, accessConfiguredAt: new Date(), createdBy, updatedBy: createdBy });
-    return this.teamRepository.save(team);
+    const saved = await this.teamRepository.save(team);
+    await this.changed(organizationId, 'created', saved.id, createdBy);
+    return saved;
   }
 
   async findAll(pagination: PaginationDto, organizationId?: string) {
@@ -60,6 +69,7 @@ export class TeamService {
       throw new BadRequestException('Equipe padrão do sistema não pode ser renomeada.');
     }
     await this.teamRepository.update(id, { ...dto, updatedBy });
+    await this.changed(team.organizationId, 'updated', id, updatedBy);
     return this.findOne(id, organizationId);
   }
 
@@ -90,6 +100,7 @@ export class TeamService {
     }));
     if (rows.length) await this.permissionRepository.save(rows);
     await this.teamRepository.update(id, { accessConfiguredAt: new Date(), updatedBy });
+    await this.changed(team.organizationId, 'updated', id, updatedBy);
     return this.findOne(id, organizationId);
   }
 

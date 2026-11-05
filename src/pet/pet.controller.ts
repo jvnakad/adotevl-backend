@@ -110,6 +110,6 @@ export class PetController {
   @UseGuards(JwtAuthGuard, AccessGuard)
   @ApiOperation({ summary: 'Remover foto do pet', description: 'Acesso: Pets (Editar)' })
   removePhoto(@Param('id', ParseUUIDPipe) id: string, @Param('photoId', ParseUUIDPipe) photoId: string, @Request() req) {
-    return this.petService.removePhoto(id, photoId, req.user.organizationId);
+    return this.petService.removePhoto(id, photoId, req.user.organizationId, req.user.id);
   }
 }

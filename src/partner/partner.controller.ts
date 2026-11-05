@@ -19,7 +19,7 @@ export class PartnerController {
   @RequireAccess(Screen.PARTNERS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Cadastrar parceiro', description: 'Acesso: Parceiros (Editar)' })
   create(@Body() dto: CreatePartnerDto, @Request() req) {
-    return this.partnerService.create(dto, req.user.organizationId);
+    return this.partnerService.create(dto, req.user.organizationId, req.user.id);
   }
 
   @Get()
@@ -40,13 +40,13 @@ export class PartnerController {
   @RequireAccess(Screen.PARTNERS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Atualizar parceiro', description: 'Acesso: Parceiros (Editar)' })
   update(@Param('id') id: string, @Body() dto: Partial<CreatePartnerDto>, @Request() req) {
-    return this.partnerService.update(id, dto, req.user.organizationId);
+    return this.partnerService.update(id, dto, req.user.organizationId, req.user.id);
   }
 
   @Delete(':id')
   @RequireAccess(Screen.PARTNERS, AccessLevel.EDIT)
   @ApiOperation({ summary: 'Desativar parceiro', description: 'Acesso: Parceiros (Editar)' })
   remove(@Param('id') id: string, @Request() req) {
-    return this.partnerService.remove(id, req.user.organizationId);
+    return this.partnerService.remove(id, req.user.organizationId, req.user.id);
   }
 }

@@ -1,4 +1,4 @@
-import { BadGatewayException, BadRequestException, ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, ConflictException, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { PetAlreadyAdoptedException, PetInOtherContractException } from '../adoption-form/pet-already-adopted.exception';
@@ -14,6 +14,8 @@ import { numberClauses, StoredClause, toOrdinalPt, toTitleCase } from './contrac
 import { buildInitialData, diffContractData, prefillAnimalFromPet, sanitizeContractData } from './contract-data';
 import { buildContractPdf, loadImageAsDataUrl } from './contract-pdf.builder';
 import { ContractClauseDto, UpdateAdoptionContractDto } from './dto/update-adoption-contract.dto';
+import { ScreenRealtimeService, ScreenChangeKind } from '../realtime/screen-realtime.service';
+import { Screen } from '../access/access';
 
 // Fichas que podem abrir o contrato; a partir do envio para assinatura fica só leitura
 const CONTRACT_VIEW_STATUSES = [AdoptionFormStatus.APROVADO, AdoptionFormStatus.AGUARDANDO_ASSINATURA, AdoptionFormStatus.CONCLUIDA];
@@ -54,7 +56,14 @@ export class AdoptionContractService {
     private readonly storageService: StorageService,
     private readonly historyService: AdoptionHistoryService,
     private readonly autentiqueService: AutentiqueService,
+    @Optional() private readonly screenRealtime?: ScreenRealtimeService,
   ) {}
+
+  // Tempo real: termo mudou = Termo, Adotantes (status/banners) e Histórico; envio, assinatura e cancelamento mexem no pet. Nunca falha a ação.
+  private changed(organizationId: string, formId: string, actorId?: string | null, petChanged = false) {
+    const screens = [Screen.ADOPTION_CONTRACT, Screen.ADOPTERS, Screen.ADOPTION_HISTORY, ...(petChanged ? [Screen.PETS] : [])];
+    return this.screenRealtime?.publish({ screens, organizationId, resource: 'adoption-contract', kind: 'updated', id: formId, actorId });
+  }
 
   // Cria o rascunho a partir do modelo na primeira abertura
   async findByForm(formId: string, organizationId: string, userId: string = null) {
@@ -95,6 +104,7 @@ export class AdoptionContractService {
     }
 
     await this.save(form, userId, events, (manager) => manager.getRepository(AdoptionContract).update(contract.id, { data, clauses, updatedBy: userId }));
+    await this.changed(organizationId, formId, userId);
     return this.findByForm(formId, organizationId, userId);
   }
 
@@ -113,6 +123,7 @@ export class AdoptionContractService {
     await this.save(form, userId, events, (manager) =>
       manager.getRepository(AdoptionContract).update(contract.id, { clauses, updatedBy: userId }),
     );
+    await this.changed(organizationId, formId, userId);
     return this.findByForm(formId, organizationId, userId);
   }
 
@@ -241,6 +252,7 @@ export class AdoptionContractService {
       if (documentId) await this.autentiqueService.deleteDocument(documentId).catch(() => undefined);
       throw error;
     }
+    await this.changed(organizationId, formId, userId, true);
     return this.findByForm(formId, organizationId, userId);
   }
 
@@ -272,6 +284,7 @@ export class AdoptionContractService {
     if ((await this.syncSignature(contract, form)) === 'not_found') {
       throw new NotFoundException('Documento não encontrado no Autentique (excluído ou expirado). Cancele o envio e envie o termo de adoção novamente.');
     }
+    await this.changed(organizationId, formId, userId, true);
     return this.findByForm(formId, organizationId, userId);
   }
 
@@ -282,6 +295,7 @@ export class AdoptionContractService {
     const form = await this.formRepository.findOne({ where: { id: contract.adoptionFormId, isActive: true } });
     if (!form) return false;
     await this.syncSignature(contract, form);
+    await this.changed(form.organizationId, form.id, null, true);
     return true;
   }
 
@@ -396,6 +410,7 @@ export class AdoptionContractService {
         await manager.getRepository(AdoptionForm).update(form.id, { status: AdoptionFormStatus.APROVADO, updatedBy: userId });
       },
     );
+    await this.changed(organizationId, formId, userId, true);
     return this.findByForm(formId, organizationId, userId);
   }
 

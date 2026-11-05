@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, ForbiddenException, OnModuleInit, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike, FindOptionsWhere, Not, In } from 'typeorm';
 import { randomUUID } from 'crypto';
@@ -20,6 +20,8 @@ import { AdoptionHistoryType } from '../adoption-history/adoption-history.entity
 import { AdoptionContract, ContractSignatureStatus } from '../adoption-contract/adoption-contract.entity';
 import { AutentiqueService } from '../autentique/autentique.service';
 import { PetAlreadyAdoptedException } from './pet-already-adopted.exception';
+import { ScreenRealtimeService, ScreenChangeKind } from '../realtime/screen-realtime.service';
+import { Screen } from '../access/access';
 
 export const MAX_ADOPTION_FORM_PHOTOS = 6;
 export const MAX_ADOPTION_PHOTO_SIZE = 5 * 1024 * 1024;
@@ -86,7 +88,14 @@ export class AdoptionFormService implements OnModuleInit {
     @InjectRepository(AdoptionContract)
     private readonly contractRepository: Repository<AdoptionContract>,
     private readonly autentiqueService: AutentiqueService,
+    @Optional() private readonly screenRealtime?: ScreenRealtimeService,
   ) {}
+
+  // Tempo real: ficha mudou = Adotantes e Histórico; com efeito no pet (status, remoção), Pets também. Nunca falha a ação.
+  private changed(organizationId: string, kind: ScreenChangeKind, id: string, actorId?: string | null, petChanged = false) {
+    const screens = [Screen.ADOPTERS, Screen.ADOPTION_HISTORY, ...(petChanged ? [Screen.PETS] : [])];
+    return this.screenRealtime?.publish({ screens, organizationId, resource: 'adoption-form', kind, id, actorId });
+  }
 
   // Status que saíram do fluxo: "Em análise" volta para Pendente e "Termo gerado" para Aprovado
   async onModuleInit() {
@@ -133,6 +142,7 @@ export class AdoptionFormService implements OnModuleInit {
       toStatus: saved.status,
       description: 'Ficha enviada pelo formulário público',
     });
+    await this.changed(saved.organizationId, 'created', saved.id);
 
     return {
       id: saved.id,
@@ -252,6 +262,7 @@ export class AdoptionFormService implements OnModuleInit {
         userId: updatedBy,
       });
     }
+    await this.changed(organizationId, 'updated', id, updatedBy);
     return this.findOne(id, organizationId);
   }
 
@@ -263,7 +274,9 @@ export class AdoptionFormService implements OnModuleInit {
     const requestedPetId = !CONTRACT_STATUSES.includes(from) && dto.petId && dto.petId !== form.petId ? dto.petId : null;
     if (from === to) {
       if (requestedPetId) await this.relinkPet(form, requestedPetId, reviewedBy);
-      return this.updateReviewNotes(form, dto.reviewNotes, reviewedBy);
+      const result = await this.updateReviewNotes(form, dto.reviewNotes, reviewedBy);
+      await this.changed(organizationId, 'updated', id, reviewedBy, !!requestedPetId);
+      return result;
     }
     this.validateTransition(from, to, isAdmin);
     const boundPet = await this.resolvePetToBind(form, to, requestedPetId);
@@ -314,6 +327,7 @@ export class AdoptionFormService implements OnModuleInit {
         manager,
       );
     });
+    await this.changed(organizationId, 'updated', id, reviewedBy, true);
     return this.findOne(id, organizationId);
   }
 
@@ -372,6 +386,7 @@ export class AdoptionFormService implements OnModuleInit {
       description: 'Ficha removida',
       userId: updatedBy,
     });
+    await this.changed(organizationId, 'deleted', id, updatedBy, !!form.petId);
     return { message: 'Ficha de adoção removida com sucesso.' };
   }
 
@@ -395,6 +410,7 @@ export class AdoptionFormService implements OnModuleInit {
       metadata: { count: files.length },
       userId: createdBy,
     });
+    await this.changed(organizationId, 'updated', id, createdBy);
     return this.findOne(id, organizationId);
   }
 
@@ -411,6 +427,7 @@ export class AdoptionFormService implements OnModuleInit {
       metadata: { photoId },
       userId: removedBy,
     });
+    await this.changed(organizationId, 'updated', id, removedBy);
     return { message: 'Foto removida com sucesso.' };
   }
 
